@@ -11,7 +11,7 @@
     "test": "prisma generate && vitest run",
     "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "pnpm build && node dist/database/seed.js"
+    "db:seed": "pnpm build && node dist/database/seed/seed.js"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "1.7.7",

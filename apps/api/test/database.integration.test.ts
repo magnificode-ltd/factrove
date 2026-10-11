@@ -14,7 +14,7 @@ import {
   localOrganizationFixture,
   localUserFixture,
   seedLocalIdentities,
-} from "../src/database/seed-local-identities.js";
+} from "../src/database/seed/seed-local-identities.js";
 
 const execFileAsync = promisify(execFile);
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));

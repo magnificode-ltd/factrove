@@ -14,6 +14,8 @@ The backend owns database and storage access. Its database module is global with
 
 User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities.
 
+File location is a convention. Never store the location of a file in the database. Do not add a column, field, or persisted value for an object key, storage path, or file location. The artifact storage key is `{artifactId}.html`, derived from the artifact id.
+
 ## Documentation map
 
 Documentation follows these roles: README.md provides long-term codebase documentation; PRDs capture MVP scope, implementation tasks, and progress. AGENTS.md provides general orientation about the codebase, using descriptive guidance. Task-specific constraints and exclusions belong in the relevant PRD, keeping this file focused on helping agents understand the project.
@@ -27,3 +29,5 @@ Documentation follows these roles: README.md provides long-term codebase documen
 ## Tooling
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-workspace.yaml`. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.
+
+When adding an environment variable, add that key to the committed `.env.example` with a placeholder value. Do not commit real secrets.

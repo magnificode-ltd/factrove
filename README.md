@@ -49,10 +49,11 @@ apps/api/
 │   │   ├── prisma.service.ts         # Prisma client and connection lifecycle
 │   │   ├── repositories/
 │   │   │   └── artifacts.repository.ts
-│   │   ├── types/
-│   │   │   └── artifact-record.ts    # Internal persistence records/inputs
-│   │   ├── seed.ts                   # Explicit seed entry point
-│   │   └── seed-local-identities.ts
+│   │   ├── seed/
+│   │   │   ├── seed.ts               # Explicit seed entry point
+│   │   │   └── seed-local-identities.ts
+│   │   └── types/
+│   │       └── artifact-record.ts    # Internal persistence records/inputs
 │   ├── storage/
 │   │   ├── index.ts
 │   │   ├── storage.module.ts
