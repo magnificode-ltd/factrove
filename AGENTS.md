@@ -1,7 +1,27 @@
-# Agent instructions
+# Codebase orientation
 
-Read [README.md](README.md) before planning or changing this repository. It is the source of truth for Factrove's accepted architecture, intended directory structure, MVP scope, data model, and migration workflow.
+Factrove is a TypeScript pnpm monorepo for a self-hostable artifact library.
 
-Follow those decisions when implementing changes. In particular, use committed migrations, and preserve the documented boundaries between apps and shared packages. The README's repository tree is a plan until the corresponding code is implemented.
+## Applications and packages
 
-Update the README when an agreed architectural decision or implementation status changes.
+- `apps/web`: Next.js App Router frontend.
+- `apps/api`: NestJS HTTP API; controllers, services, PostgreSQL/Prisma persistence, and object storage live here.
+- `apps/cli`: standalone NestJS CLI that calls the API.
+- `packages/contracts`: shared runtime schemas and TypeScript API types.
+- `packages/api-client`: framework-neutral HTTP client consumed by web and CLI.
+
+The backend owns database and storage access. Its database module is global within NestJS. Shared packages are linked through pnpm workspaces and expose compiled exports.
+
+## Documentation map
+
+Documentation follows these roles: README.md provides long-term codebase documentation; PRDs capture MVP scope, implementation tasks, and progress. AGENTS.md provides general orientation about the codebase, using descriptive guidance. Task-specific constraints and exclusions belong in the relevant PRD, keeping this file focused on helping agents understand the project.
+
+- [README.md](README.md) explains the repository, architecture, and development commands.
+- [docs/MVP_END_STATE.md](docs/MVP_END_STATE.md) is the agreed MVP north star, including the data model and observable completion criteria.
+- [prd/README.md](prd/README.md) tracks implementation tasks, dependencies, and ownership.
+- [prd/mvp_contract.md](prd/mvp_contract.md) defines the shared HTTP and package contracts.
+- [prd/mvp/done/](prd/mvp/done/) contains completed task briefs and handoff notes.
+
+## Tooling
+
+Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-workspace.yaml`. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.

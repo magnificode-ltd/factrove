@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+nodeVersion: 24.16.0
+engineStrict: true
+allowBuilds:
+  '@nestjs/core': true
+  esbuild: true
+  sharp: true
+overrides:
+  '@prisma/client': 6.19.0
+  prisma: 6.19.0
