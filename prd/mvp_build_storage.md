@@ -12,6 +12,7 @@ apps/api/src/storage/** and storage tests. Task 07 owns compose and bucket initi
 
 ## Deliverables
 
+- Follow the [README backend directory structure](../README.md#backend-directory-structure): module/interface/exports under `src/storage/`, S3 implementation under `src/storage/providers/`.
 - Export StorageModule, BLOB_STORE, and the BlobStore interface from the shared contract.
 - Implement put/get/delete with the AWS S3 SDK. Allow a configurable endpoint and path-style addressing for local development.
 - Use one configured dedicated bucket. Do not create buckets or change bucket policies during ordinary API requests.

@@ -19,6 +19,59 @@ This repository contains the product: frontend, backend, CLI, and shared package
 | `prd` | Implementation briefs, contracts, task ownership, and progress |
 | `prd/mvp/done` | Completed MVP task briefs and verification records |
 
+### Backend directory structure
+
+This is the canonical backend layout for implementation PRDs. The directory boundaries and the locations of the database module, repositories, Prisma schema, and migrations are intentional. Feature filenames illustrate the convention; add files in the corresponding responsibility directory as features grow. This describes the target structure, not a claim that every file is already implemented.
+
+```text
+apps/api/
+├── auth-schema.config.ts             # Better Auth schema-generation configuration
+├── prisma/
+│   ├── schema.prisma                 # Better Auth identities and Artifact
+│   └── migrations/
+│       ├── migration_lock.toml
+│       └── <timestamp>_<description>/
+│           └── migration.sql         # Committed DDL and DML
+├── src/
+│   ├── main.ts
+│   ├── app.module.ts                 # Application composition
+│   ├── controllers/
+│   │   ├── api.module.ts
+│   │   ├── artifacts.controller.ts
+│   │   └── context.controller.ts
+│   ├── services/
+│   │   ├── services.module.ts
+│   │   ├── artifacts.service.ts
+│   │   └── local-actor.service.ts
+│   ├── database/
+│   │   ├── index.ts                  # Public backend database exports
+│   │   ├── database.module.ts        # Global Nest module
+│   │   ├── prisma.service.ts         # Prisma client and connection lifecycle
+│   │   ├── repositories/
+│   │   │   └── artifacts.repository.ts
+│   │   ├── seed/
+│   │   │   ├── seed.ts               # Explicit seed entry point
+│   │   │   └── seed-local-identities.ts
+│   │   └── types/
+│   │       └── artifact-record.ts    # Internal persistence records/inputs
+│   ├── storage/
+│   │   ├── index.ts
+│   │   ├── storage.module.ts
+│   │   ├── blob-store.ts             # Interface and injection token
+│   │   └── providers/
+│   │       └── s3.provider.ts
+│   └── rendering/
+│       └── html-policy.ts            # HTML validation/delivery policy
+└── test/
+    └── database.integration.test.ts
+```
+
+Backend code is grouped by responsibility, with concrete persistence classes under `src/database/repositories/`. Prisma schema and SQL migrations live in `apps/api/prisma/`; the Nest database module and service live directly in `src/database/`. Repositories use `PrismaService`; application services coordinate repositories and storage; controllers expose those services over HTTP. Database records stay backend-local, while wire schemas live in `packages/contracts`.
+
+`AppModule` imports `DatabaseModule` once. Its `@Global()` declaration and exported `PrismaService` and repositories make those providers injectable throughout the backend. `ApiModule` registers controllers and imports `ServicesModule`; `ServicesModule` registers application services and imports `StorageModule` for file operations. The schema-generation and seed commands are standalone entry points with their own client lifecycle.
+
+Storage implementations belong in `storage/providers/` behind the backend-local `BlobStore` interface. Additional cloud providers can follow that convention. Database repositories use PostgreSQL directly through Prisma, without a pluggable database-provider layer. `rendering/` holds browser-content validation and delivery policy; the browser renders the artifact itself.
+
 ## Architecture
 
 Factrove is a TypeScript pnpm workspace with three applications and two shared packages. Internal dependencies use `workspace:*`; a single lockfile records dependency resolution.

@@ -70,9 +70,7 @@ PostgreSQL stores metadata and identities; object storage holds file bytes. Arti
 | `creator_user_id` | Text, required FK → User | User who created the artifact |
 | `organization_id` | Text, nullable FK → Organization | Organization captured at upload |
 | `access_type` | `private` or `org_shared`; default `private` | Library classification |
-| `filename` | Text, required | Original/display basename, without the client's filesystem path |
 | `mime_type` | Text, required | `text/html` for every MVP artifact |
-| `object_key` | Text, required and unique | Actual storage key; initially `{artifactId}.html` |
 | `size_bytes` | Nonnegative integer | Actual accepted file size |
 | `created_at` | Timestamp with time zone | Database row creation time |
 | `updated_at` | Timestamp with time zone | Last row modification, maintained by persistence code |
@@ -82,7 +80,7 @@ An artifact has one creator and optionally one associated organization. Both IDs
 
 Local uploads capture the configured organization even for private artifacts. A personal upload with no configured organization has a null organization ID. `org_shared` requires an organization ID, enforced by a database check.
 
-The object key is persisted even though its initial naming rule is simple. A later naming change can therefore preserve existing object references. Filename is the initial display label; a separate title is unnecessary for this MVP.
+The storage key is `{artifactId}.html` and is not stored. The original filename is not stored.
 
 ### User
 
@@ -119,9 +117,8 @@ There is no user-to-org foreign key or global uniqueness on member.userId encodi
 
 ### Timestamp and lifecycle meaning
 
-- Creating metadata sets `created_at` and `updated_at`; `uploaded_at` starts null.
-- Successful object upload and metadata finalization set `uploaded_at` and `updated_at`.
-- Lists and viewers expose only finalized artifacts.
+- The artifact row is inserted only after the object is stored. That insert sets `created_at`, `updated_at`, and `uploaded_at` together.
+- Lists and viewers return stored artifacts. A failed upload has no row.
 - Future metadata-only edits would change `updated_at` without changing `uploaded_at`.
 - Future replacement could retain the artifact ID and `created_at` while updating content metadata and `uploaded_at`. Replacement behavior and concurrency are outside this MVP.
 
@@ -139,9 +136,9 @@ The original upload may end in `.htm`; the stored key always uses `.html`. Group
 
 The backend-local storage module has one S3 implementation, with a configurable endpoint for local S3-compatible development storage. This small provider interface prepares for Azure/GCP later. Database persistence remains PostgreSQL-only, without a database-provider abstraction.
 
-Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`, creates pending metadata, writes the object, then finalizes metadata and returns the artifact. Storage I/O occurs outside database transactions.
+Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`. It writes the object, then inserts the artifact row, and returns the artifact only after both succeed.
 
-A failed upload does not appear as a completed artifact. The API attempts cleanup; crash recovery may leave pending metadata or orphaned bytes in this initial build. This limitation is documented rather than introducing additional models or background infrastructure.
+The upload is atomic. If the object write fails, the database insert does not happen. A failed upload leaves no artifact in the database.
 
 The upload endpoint is the ingestion path. Files placed into the bucket independently are not automatically imported.
 
