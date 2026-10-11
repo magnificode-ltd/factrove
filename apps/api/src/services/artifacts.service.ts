@@ -1,0 +1,205 @@
+import { randomUUID } from "node:crypto";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import {
+  accessTypeSchema,
+  artifactDtoSchema,
+  type AccessType,
+  type ArtifactDto,
+  type ArtifactView,
+} from "@factrove/contracts";
+import { ArtifactsRepository, type ArtifactRecord } from "../database/index.js";
+import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
+import { BLOB_STORE, BlobNotFoundError, type BlobStore } from "../storage/index.js";
+import { API_CONFIG, type ApiConfig } from "./api-config.js";
+import { ApiErrorException } from "./api-error.js";
+import { LocalActorService } from "./local-actor.service.js";
+
+const IDENTITY_FIELDS = [
+  "creatorUserId",
+  "creator_user_id",
+  "organizationId",
+  "organization_id",
+  "userId",
+  "user_id",
+] as const;
+
+@Injectable()
+export class ArtifactsService {
+  private readonly logger = new Logger(ArtifactsService.name);
+
+  constructor(
+    @Inject(ArtifactsRepository) private readonly artifacts: ArtifactsRepository,
+    @Inject(BLOB_STORE) private readonly blobs: BlobStore,
+    @Inject(LocalActorService) private readonly actor: LocalActorService,
+    @Inject(API_CONFIG) private readonly config: ApiConfig,
+  ) {}
+
+  async upload(file: unknown, body: unknown): Promise<ArtifactDto> {
+    const fields = formFields(body);
+    assertNoIdentityFields(fields);
+    const accessType = readAccessType(fields);
+    const upload = readUpload(file);
+    if (!upload) {
+      throw new ApiErrorException(400, "INVALID_REQUEST", "Send exactly one file.");
+    }
+
+    const actor = this.actor.current();
+    if (accessType === "org_shared" && actor.organization === null) {
+      throw new ApiErrorException(
+        400,
+        "ORGANIZATION_REQUIRED",
+        "Organization sharing requires a configured local organization.",
+      );
+    }
+
+    const violation = rejectHtmlUpload(upload.filename, upload.bytes);
+    if (violation) {
+      throw new ApiErrorException(violation.status, violation.code, violation.message);
+    }
+
+    const id = randomUUID();
+    const objectKey = artifactObjectKey(id);
+    await this.blobs.put({
+      objectKey,
+      body: upload.bytes,
+      contentType: "text/html",
+    });
+
+    try {
+      const record = await this.artifacts.create({
+        id,
+        creatorUserId: actor.user.id,
+        organizationId: actor.organization?.id ?? null,
+        accessType,
+        mimeType: "text/html",
+        sizeBytes: upload.bytes.byteLength,
+        uploadedAt: new Date(),
+      });
+      return this.toDto(record);
+    } catch (error) {
+      await this.deleteOrphan(id, objectKey);
+      throw error;
+    }
+  }
+
+  async list(view: ArtifactView): Promise<ArtifactDto[]> {
+    const actor = this.actor.current();
+    const records = await this.artifacts.list({
+      view,
+      userId: actor.user.id,
+      organizationId: actor.organization?.id ?? null,
+    });
+    return records.map((record) => this.toDto(record));
+  }
+
+  async getById(id: string): Promise<ArtifactDto> {
+    const record = await this.requireRecord(id);
+    return this.toDto(record);
+  }
+
+  async openContent(id: string): Promise<{ sizeBytes: number; body: AsyncIterable<Uint8Array> }> {
+    const record = await this.requireRecord(id);
+    try {
+      const stored = await this.blobs.get(artifactObjectKey(record.id));
+      return { sizeBytes: record.sizeBytes, body: stored.body };
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) {
+        throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+      }
+      throw error;
+    }
+  }
+
+  private async requireRecord(id: string): Promise<ArtifactRecord> {
+    const record = await this.artifacts.findById(id);
+    if (!record) {
+      throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+    }
+    return record;
+  }
+
+  private toDto(record: ArtifactRecord): ArtifactDto {
+    if (record.uploadedAt === null || record.mimeType !== "text/html") {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    if (record.accessType !== "private" && record.accessType !== "org_shared") {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+
+    return artifactDtoSchema.parse({
+      id: record.id,
+      creatorUserId: record.creatorUserId,
+      organizationId: record.organizationId,
+      accessType: record.accessType,
+      // Original upload names are not stored. The DTO filename is the derived object name.
+      filename: artifactObjectKey(record.id),
+      mimeType: "text/html",
+      sizeBytes: record.sizeBytes,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+      uploadedAt: record.uploadedAt.toISOString(),
+      viewerUrl: `${this.config.webOrigin}/artifacts/${record.id}`,
+      contentUrl: `${this.config.apiPublicOrigin}/api/v1/artifacts/${record.id}/content`,
+    });
+  }
+
+  private async deleteOrphan(id: string, objectKey: string): Promise<void> {
+    try {
+      const existing = await this.artifacts.findById(id);
+      if (existing) {
+        return;
+      }
+    } catch (error) {
+      this.logger.error("Could not confirm whether a failed upload inserted an artifact row");
+      this.logger.error(error instanceof Error ? error.message : "Unknown error");
+      return;
+    }
+
+    try {
+      await this.blobs.delete(objectKey);
+    } catch (error) {
+      this.logger.error("Could not remove an object after a failed upload");
+      this.logger.error(error instanceof Error ? error.message : "Unknown error");
+    }
+  }
+}
+
+function formFields(body: unknown): Record<string, unknown> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return {};
+  }
+  return body as Record<string, unknown>;
+}
+
+function assertNoIdentityFields(body: Record<string, unknown>): void {
+  for (const field of IDENTITY_FIELDS) {
+    if (Object.hasOwn(body, field)) {
+      throw new ApiErrorException(400, "INVALID_REQUEST", "Creator and organization are assigned by the server.");
+    }
+  }
+}
+
+function readAccessType(body: Record<string, unknown>): AccessType {
+  if (!Object.hasOwn(body, "accessType")) {
+    return "private";
+  }
+  const parsed = accessTypeSchema.safeParse(body.accessType);
+  if (!parsed.success) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", "accessType must be private or org_shared.");
+  }
+  return parsed.data;
+}
+
+function readUpload(file: unknown): { filename: string; bytes: Uint8Array } | undefined {
+  if (typeof file !== "object" || file === null) {
+    return undefined;
+  }
+  const record = file as { originalname?: unknown; buffer?: unknown };
+  if (typeof record.originalname !== "string" || !Buffer.isBuffer(record.buffer)) {
+    return undefined;
+  }
+  return {
+    filename: record.originalname,
+    bytes: Uint8Array.from(record.buffer),
+  };
+}
