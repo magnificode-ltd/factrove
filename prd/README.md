@@ -8,6 +8,8 @@ The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/M
 
 ## Tasks and ownership
 
+All implementation tasks follow the [canonical backend directory structure](../README.md#backend-directory-structure) where applicable. Directory placement is part of acceptance, alongside behavior and tests. Task ownership determines who implements each part; README defines where that code belongs.
+
 | ID | Brief | Status | Owns | Prerequisites |
 | --- | --- | --- | --- | --- |
 | 01 | [Workspace and shared client](mvp/done/mvp_build_workspace.md) | Done | Root workspace/config, initial app scaffolds, packages/contracts, packages/api-client, fixture HTML | Shared contract |

@@ -12,6 +12,7 @@ API bootstrap/app.module, src/controllers/**, src/services/**, src/rendering/**,
 
 ## Deliverables
 
+- Follow the [README backend directory structure](../README.md#backend-directory-structure) for controllers, services, module wiring, and HTML policy. Consume repositories through the database module's exports.
 - Implement the health/context/upload/list/detail/content endpoints exactly as specified.
 - Wire the global DatabaseModule once, StorageModule, ServicesModule, and ApiModule.
 - Resolve the configured seeded user/org in a small LocalActorService. This is configuration, not auth. Ignore/reject client attempts to select creator/org; no auth guards or placeholder credentials.

@@ -8,6 +8,8 @@ Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](.
 
 ## Owns
 
+Follow the [canonical README backend directory structure](../../../README.md#backend-directory-structure): repositories in `src/database/repositories/`, record/input types in `src/database/types/`, module/service/seed files directly in `src/database/`, and schema/migrations in `apps/api/prisma/`. Directory placement is part of acceptance. The completion notes below describe the delivered implementation; its current nested `src/database/prisma/` layout still needs alignment with this structure, including command paths and imports.
+
 apps/api/prisma/**, apps/api/src/database/**, a backend-local schema-generation configuration such as apps/api/auth-schema.config.ts, and database integration tests. Coordinate pinned Better Auth/generator dependencies and API manifest changes with task 04; task 07 owns final setup/lockfile integration.
 
 ## Deliverables

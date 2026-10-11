@@ -116,6 +116,8 @@ baseUrl is the API origin, without /api/v1. The client appends route paths, uses
 
 ## Database repository handoff
 
+File placement follows the [canonical README backend directory structure](../README.md#backend-directory-structure), including `src/database/repositories/` and the public `src/database/index.ts` exports.
+
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
 - `createPending({ id, creatorUserId, organizationId, accessType, filename, mimeType, objectKey, sizeBytes })`
