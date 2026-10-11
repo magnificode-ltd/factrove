@@ -14,7 +14,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 | --- | --- | --- | --- | --- |
 | 01 | [Workspace and shared client](mvp/done/mvp_build_workspace.md) | Done | Root workspace/config, initial app scaffolds, packages/contracts, packages/api-client, fixture HTML | Shared contract |
 | 02 | [Database](mvp/done/mvp_build_database.md) | Done | API Prisma schema/migrations/seed and src/database | 01 baseline |
-| 03 | [Storage](mvp_build_storage.md) | Not started | API src/storage and storage-focused tests | 01 baseline |
+| 03 | [Storage](mvp_build_storage.md) | In progress | API src/storage and storage-focused tests | 01 baseline |
 | 04 | [Backend](mvp_build_backend.md) | Not started | API bootstrap, controllers, services, rendering | 01; 02/03 interfaces, implementations for final verification |
 | 05 | [Frontend](mvp_build_frontend.md) | Not started | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
 | 06 | [CLI](mvp_build_cli.md) | Not started | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
