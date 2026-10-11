@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "prisma generate && tsc -p tsconfig.json",
-    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "build": "prisma generate --schema src/database/prisma/schema.prisma && tsc -p tsconfig.json",
+    "typecheck": "prisma generate --schema src/database/prisma/schema.prisma && tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "dev": "pnpm build && node dist/main.js",
-    "test": "prisma generate && vitest run",
-    "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
-    "db:migrate": "prisma migrate deploy",
-    "db:seed": "pnpm build && node dist/database/seed.js"
+    "test": "prisma generate --schema src/database/prisma/schema.prisma && vitest run",
+    "db:generate-schema": "prisma generate --schema src/database/prisma/schema.prisma && auth generate --config ./auth-schema.config.ts --output src/database/prisma/schema.prisma --yes",
+    "db:migrate": "prisma migrate deploy --schema src/database/prisma/schema.prisma",
+    "db:seed": "pnpm build && node dist/database/prisma/identities/seed.js"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "1.7.7",
