@@ -4,7 +4,7 @@
 
 Store and retrieve HTML bytes through one S3 implementation aimed at a configured AWS bucket.
 
-Read [the MVP end state](../docs/MVP_END_STATE.md), [../README.md](../README.md) and [mvp_contract.md](mvp_contract.md). Status: in progress. Depends on task 01's baseline.
+Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
 
 ## Owns
 
@@ -12,7 +12,7 @@ apps/api/src/storage/** and storage tests. The operator supplies an existing AWS
 
 ## Deliverables
 
-- Follow the [README backend directory structure](../README.md#backend-directory-structure): module/interface/exports under `src/storage/`, S3 implementation under `src/storage/providers/`.
+- Follow the [README backend directory structure](../../../README.md#backend-directory-structure): module/interface/exports under `src/storage/`, S3 implementation under `src/storage/providers/`.
 - Export StorageModule, BLOB_STORE, and the BlobStore interface from the shared contract.
 - Implement put/get/delete with the AWS S3 SDK for the configured bucket and region. Do not accept a custom endpoint or path-style addressing.
 - Use one configured dedicated bucket. Do not create buckets or change bucket policies during ordinary API requests.
@@ -39,10 +39,10 @@ No filesystem adapter, Azure/GCP stubs, multi-store registry, content rendering,
 
 ## Verification
 
-Real AWS on 11 Oct 2026, bucket `factrove-dev-uploads` in `eu-central-1`, profile `skylusd-factrove-dev-uploader` (role `s3-upload-role-factrove-dev`):
+Real AWS on 11 Oct 2026, bucket `factrove-dev-uploads` in `eu-central-1`, using a role with `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`:
 
 - Put and get preserved the HTML fixture bytes and `text/html; charset=utf-8`.
 - Put and get preserved non-text bytes.
 - Delete succeeded, including a repeated delete of a missing key.
-- Get of a missing key is `BLOB_NOT_FOUND`. The uploader role's inline policy `FactroveDevUploadsObjectAccess` allows `s3:ListBucket` on `arn:aws:s3:::factrove-dev-uploads`, which is what makes S3 return `NoSuchKey` instead of `AccessDenied`.
+- Get of a missing key is `BLOB_NOT_FOUND`. `s3:ListBucket` on the bucket is what makes S3 return `NoSuchKey` instead of `AccessDenied`.
 - Bad credentials were `BLOB_STORE_UNAVAILABLE`. Those error messages did not include the bucket or secret.

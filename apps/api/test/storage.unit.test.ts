@@ -1,3 +1,4 @@
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
 import {
   BLOB_STORE,
@@ -6,7 +7,7 @@ import {
   S3BlobStore,
   StorageModule,
 } from "../src/storage/index.js";
-import { readS3StorageConfig, toBlobStoreError } from "../src/storage/providers/s3.provider.js";
+import { createS3Client, readS3StorageConfig, toBlobStoreError } from "../src/storage/providers/s3.provider.js";
 
 const objectKey = "11111111-1111-4111-8111-111111111111.html";
 
@@ -46,6 +47,44 @@ describe("S3 storage configuration", () => {
       bucket: "factrove-dev-uploads",
       region: "eu-central-1",
     });
+  });
+
+  it("calls regional AWS even when AWS endpoint URL variables are set", async () => {
+    const previousEndpoint = process.env.AWS_ENDPOINT_URL;
+    const previousS3Endpoint = process.env.AWS_ENDPOINT_URL_S3;
+    process.env.AWS_ENDPOINT_URL = "http://127.0.0.1:9000";
+    process.env.AWS_ENDPOINT_URL_S3 = "http://127.0.0.1:9000";
+    const client = createS3Client({
+      bucket: "factrove-dev-uploads",
+      region: "eu-central-1",
+      credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+    });
+    let host = "";
+    client.middlewareStack.add(
+      () => async (args) => {
+        if (args.request && typeof args.request === "object" && "hostname" in args.request) {
+          const hostname = args.request.hostname;
+          if (typeof hostname === "string") {
+            host = hostname;
+          }
+        }
+        throw new Error("stop-before-send");
+      },
+      { step: "finalizeRequest", name: "captureHost", priority: "low" },
+    );
+
+    try {
+      await client.send(new GetObjectCommand({ Bucket: "factrove-dev-uploads", Key: "x.html" }));
+      expect.fail("request should stop before it is sent");
+    } catch (error) {
+      expect(error).toMatchObject({ message: "stop-before-send" });
+    } finally {
+      client.destroy();
+      restoreEnv("AWS_ENDPOINT_URL", previousEndpoint);
+      restoreEnv("AWS_ENDPOINT_URL_S3", previousS3Endpoint);
+    }
+
+    expect(host).toBe("factrove-dev-uploads.s3.eu-central-1.amazonaws.com");
   });
 
   it("accepts a static credential pair and otherwise keeps the AWS credential chain", () => {
@@ -135,6 +174,14 @@ describe("S3 error normalization", () => {
     expect(error.message).not.toContain("127.0.0.1");
   });
 });
+
+function restoreEnv(name: "AWS_ENDPOINT_URL" | "AWS_ENDPOINT_URL_S3", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
 
 function expectUnavailable(run: () => unknown, message: string, secret?: string): void {
   let thrown: unknown;

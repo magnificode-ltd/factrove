@@ -35,6 +35,8 @@ export function readS3StorageConfig(env: NodeJS.ProcessEnv = process.env): S3Sto
 export function createS3Client(config: S3StorageConfig): S3Client {
   return new S3Client({
     region: config.region,
+    forcePathStyle: false,
+    ignoreConfiguredEndpointUrls: true,
     requestHandler: {
       connectionTimeout: 10_000,
       requestTimeout: 60_000,

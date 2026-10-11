@@ -158,6 +158,8 @@ Database and storage access remain in the backend. CLI/web communicate through t
 
 A documented fresh-checkout setup works on the owner's Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in an existing AWS S3 bucket named by configuration.
 
+Before `pnpm dev`, the API process needs `S3_BUCKET`, `S3_REGION`, and AWS credentials for that existing bucket.
+
 The target setup sequence is:
 
 ```sh
@@ -185,7 +187,7 @@ The MVP is complete when demonstrated against real local PostgreSQL and the conf
 7. Inline HTML behavior works within the isolated viewer.
 8. Missing/unsupported/oversized files, unknown artifacts, and an unavailable backend have useful failure states.
 9. CLI JSON output is parseable and the process exits cleanly.
-10. Restarting applications and local services without removing volumes preserves metadata and content.
+10. Restarting applications and PostgreSQL without removing the database volume preserves metadata. Artifact bytes remain in the AWS bucket.
 
 Mocks help individual tasks develop independently; the final acceptance loop uses the integrated system.
 
