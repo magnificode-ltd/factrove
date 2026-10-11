@@ -12,16 +12,25 @@ export type ArtifactRecord = {
   uploadedAt: Date | null;
 };
 
-export type CreatePendingArtifactInput = {
+export type CreateArtifactInput = {
   id: string;
   creatorUserId: string;
   organizationId: string | null;
   accessType: AccessType;
   mimeType: string;
   sizeBytes: number;
+  uploadedAt?: Date | null;
 };
 
-export type ListReadyArtifactsInput = {
+export type UpdateArtifactInput = {
+  organizationId?: string | null;
+  accessType?: AccessType;
+  mimeType?: string;
+  sizeBytes?: number;
+  uploadedAt?: Date | null;
+};
+
+export type ListArtifactsInput = {
   view: ArtifactView;
   userId: string;
   organizationId: string | null;

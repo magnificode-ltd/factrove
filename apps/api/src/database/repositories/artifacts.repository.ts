@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type { Artifact } from "@prisma/client";
-import type { ArtifactRecord, CreatePendingArtifactInput, ListReadyArtifactsInput } from "../types/artifact-record.js";
+import type {
+  ArtifactRecord,
+  CreateArtifactInput,
+  ListArtifactsInput,
+  UpdateArtifactInput,
+} from "../types/artifact-record.js";
 import { PrismaService } from "../prisma.service.js";
 
 function toArtifactRecord(row: Artifact): ArtifactRecord {
@@ -21,7 +26,7 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
 export class ArtifactsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createPending(input: CreatePendingArtifactInput): Promise<ArtifactRecord> {
+  async create(input: CreateArtifactInput): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.create({
       data: {
         id: input.id,
@@ -30,27 +35,37 @@ export class ArtifactsRepository {
         accessType: input.accessType,
         mimeType: input.mimeType,
         sizeBytes: input.sizeBytes,
+        uploadedAt: input.uploadedAt ?? null,
       },
     });
     return toArtifactRecord(row);
   }
 
-  async markUploaded(id: string, uploadedAt: Date): Promise<ArtifactRecord> {
+  async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.update({
       where: { id },
-      data: { uploadedAt },
+      data: {
+        organizationId: input.organizationId,
+        accessType: input.accessType,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        uploadedAt: input.uploadedAt,
+      },
     });
     return toArtifactRecord(row);
   }
 
-  async findReadyById(id: string): Promise<ArtifactRecord | null> {
-    const row = await this.prisma.artifact.findFirst({
-      where: { id, uploadedAt: { not: null } },
-    });
+  async delete(id: string): Promise<ArtifactRecord> {
+    const row = await this.prisma.artifact.delete({ where: { id } });
+    return toArtifactRecord(row);
+  }
+
+  async findById(id: string): Promise<ArtifactRecord | null> {
+    const row = await this.prisma.artifact.findUnique({ where: { id } });
     return row ? toArtifactRecord(row) : null;
   }
 
-  async listReady(input: ListReadyArtifactsInput): Promise<ArtifactRecord[]> {
+  async list(input: ListArtifactsInput): Promise<ArtifactRecord[]> {
     if (input.view === "org" && input.organizationId === null) {
       return [];
     }
@@ -58,11 +73,10 @@ export class ArtifactsRepository {
     const rows = await this.prisma.artifact.findMany({
       where:
         input.view === "mine"
-          ? { creatorUserId: input.userId, uploadedAt: { not: null } }
+          ? { creatorUserId: input.userId }
           : {
               organizationId: input.organizationId,
               accessType: "org_shared",
-              uploadedAt: { not: null },
             },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });

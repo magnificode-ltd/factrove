@@ -23,7 +23,7 @@ apps/api/prisma/**, apps/api/src/database/**, a backend-local schema-generation 
 - Add an explicit, idempotent seed into the actual Better Auth user/organization tables, including their required fields, for the configured local identities. No credentials or sessions are needed. Do not put demo data into ordinary application startup.
 - Use Better Auth tooling to generate schema only; create/review/commit SQL with Prisma Migrate. Keep auth routes, session/key checks, and runtime membership enforcement deferred. The schema-generation configuration is not mounted as a live auth server in the MVP.
 - Export a global DatabaseModule with PrismaService and a concrete ArtifactsRepository implementing the agreed method signatures.
-- Use uploaded_at null for pending uploads; ready queries exclude them.
+- Repository operations are create, update, delete, findById, and list. uploaded_at is an ordinary nullable column, not a pending-upload workflow.
 - Keep organization_id captured on Artifact; never derive it from a creator's later affiliation.
 - Keep all schema and production data transformations in committed migrations. No db push or separate backfill scripts/folder.
 - Make UTC timestamps and deterministic ordering match the HTTP contract.
@@ -39,9 +39,8 @@ Against real PostgreSQL:
 - Confirm membership schema permits a user to belong to multiple organizations; the local fixture convention adds no global member.userId uniqueness.
 - Run the local seed twice; IDs remain stable and rows are not duplicated.
 - Create private and org_shared artifacts for two fixture users. Verify mine/org filters independently.
-- Pending records never appear in ready queries.
 - Database rejects missing creators and org_shared rows without an organization.
-- Marking an upload complete sets uploaded_at without changing created_at.
+- Update and delete change the row without changing created_at. Missing ids throw Prisma P2025.
 - Publish exports and any generated type details to task 04.
 
 Tests may create additional fixture identities in an isolated test database; do not change the default local actor or assume mock repositories prove SQL behavior.
@@ -60,4 +59,4 @@ Pinned Better Auth 1.7.7, `@better-auth/prisma-adapter` 1.7.7, and the `auth` CL
 
 The initial migration creates Better Auth tables `user`, `session`, `account`, `verification`, `organization`, `member`, and `invitation`, plus `artifact`. Artifact foreign keys reference those same `user` and `organization` ids with `ON DELETE RESTRICT`. `member.userId` is indexed and not unique. `org_shared` rows require `organization_id`. Ready artifact timestamps are `timestamptz`. `pnpm test` recreates the isolated `factrove_test` database from `DATABASE_URL` in gitignored `apps/api/.env`.
 
-Task 04 should import `DatabaseModule` once from `apps/api/src/database/index.ts`. The module is global and exports `PrismaService` and `ArtifactsRepository`. Repository methods return `ArtifactRecord` values with `Date` timestamps; `uploadedAt` is null until `markUploaded`. `findReadyById` returns null for missing or pending rows. `listReady({ view, userId, organizationId })` returns ready rows only, ordered by `createdAt` descending and then `id` descending. An org view with `organizationId: null` returns an empty list. `markUploaded` throws Prisma `P2025` when the id is missing. `localUserFixture`, `localOrganizationFixture`, and `seedLocalIdentities` are exported from the same barrel. Task 04 maps records to HTTP DTOs and still owns wiring this module into `AppModule`. Task 07 still owns `.env.example`, infrastructure scripts, and lockfile reconciliation.
+Task 04 should import `DatabaseModule` once from `apps/api/src/database/index.ts`. The module is global and exports `PrismaService` and `ArtifactsRepository`. Repository methods are `create`, `update`, `delete`, `findById`, and `list`. They return `ArtifactRecord` values with `Date` timestamps. `uploadedAt` is an ordinary nullable field set by create or update. `findById` returns null when the id is missing. `list({ view, userId, organizationId })` returns matching rows ordered by `createdAt` descending and then `id` descending. An org view with `organizationId: null` returns an empty list. `update` and `delete` throw Prisma `P2025` when the id is missing. `localUserFixture`, `localOrganizationFixture`, and `seedLocalIdentities` are exported from the same barrel. Task 04 maps records to HTTP DTOs and still owns wiring this module into `AppModule`. Task 07 still owns `.env.example`, infrastructure scripts, and lockfile reconciliation.

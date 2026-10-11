@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { CreatePendingArtifactInput } from "../src/database/types/artifact-record.js";
+import type { CreateArtifactInput } from "../src/database/types/artifact-record.js";
 import { ArtifactsRepository } from "../src/database/repositories/artifacts.repository.js";
 import { PrismaService } from "../src/database/prisma.service.js";
 import {
@@ -28,7 +28,7 @@ function withDatabase(databaseUrl: string, database: string): string {
   return url.href;
 }
 
-function artifactInput(overrides: Partial<CreatePendingArtifactInput> = {}): CreatePendingArtifactInput {
+function artifactInput(overrides: Partial<CreateArtifactInput> = {}): CreateArtifactInput {
   const id = overrides.id ?? randomUUID();
   return {
     id,
@@ -240,7 +240,7 @@ describe("PostgreSQL artifact persistence", () => {
     expect(await prisma.session.count()).toBe(0);
   });
 
-  it("filters ready mine and org artifacts independently and hides pending rows", async () => {
+  it("filters mine and org artifacts independently", async () => {
     await prisma.user.create({
       data: {
         id: "other-user",
@@ -249,49 +249,31 @@ describe("PostgreSQL artifact persistence", () => {
         emailVerified: false,
       },
     });
-    const uploadedAt = new Date("2026-10-11T12:00:00.000Z");
-    const minePrivate = await repository.markUploaded(
-      (await repository.createPending(artifactInput({ accessType: "private" }))).id,
-      uploadedAt,
+    const minePrivate = await repository.create(artifactInput({ accessType: "private" }));
+    const mineShared = await repository.create(artifactInput({ accessType: "org_shared" }));
+    const otherPrivate = await repository.create(
+      artifactInput({ creatorUserId: "other-user", accessType: "private" }),
     );
-    const mineShared = await repository.markUploaded(
-      (await repository.createPending(artifactInput({ accessType: "org_shared" }))).id,
-      uploadedAt,
+    const otherShared = await repository.create(
+      artifactInput({ creatorUserId: "other-user", accessType: "org_shared" }),
     );
-    const otherPrivate = await repository.markUploaded(
-      (
-        await repository.createPending(
-          artifactInput({ creatorUserId: "other-user", accessType: "private" }),
-        )
-      ).id,
-      uploadedAt,
-    );
-    const otherShared = await repository.markUploaded(
-      (
-        await repository.createPending(
-          artifactInput({ creatorUserId: "other-user", accessType: "org_shared" }),
-        )
-      ).id,
-      uploadedAt,
-    );
-    const pending = await repository.createPending(artifactInput({ accessType: "private" }));
 
-    const mine = await repository.listReady({
+    const mine = await repository.list({
       view: "mine",
       userId: localUserFixture.id,
       organizationId: localOrganizationFixture.id,
     });
-    const org = await repository.listReady({
+    const org = await repository.list({
       view: "org",
       userId: localUserFixture.id,
       organizationId: localOrganizationFixture.id,
     });
-    const otherMine = await repository.listReady({
+    const otherMine = await repository.list({
       view: "mine",
       userId: "other-user",
       organizationId: localOrganizationFixture.id,
     });
-    const noOrganization = await repository.listReady({
+    const noOrganization = await repository.list({
       view: "org",
       userId: localUserFixture.id,
       organizationId: null,
@@ -301,20 +283,18 @@ describe("PostgreSQL artifact persistence", () => {
     expect(org.map((row) => row.id).sort()).toEqual([mineShared.id, otherShared.id].sort());
     expect(otherMine.map((row) => row.id).sort()).toEqual([otherPrivate.id, otherShared.id].sort());
     expect(noOrganization).toEqual([]);
-    expect(mine.some((row) => row.id === pending.id)).toBe(false);
     expect(org.some((row) => row.id === otherPrivate.id)).toBe(false);
-    expect(await repository.findReadyById(pending.id)).toBeNull();
-    expect((await repository.findReadyById(mineShared.id))?.id).toBe(mineShared.id);
+    expect((await repository.findById(mineShared.id))?.id).toBe(mineShared.id);
+    expect(await repository.findById(randomUUID())).toBeNull();
   });
 
-  it("orders ready artifacts by created_at descending and then id descending", async () => {
-    const uploadedAt = new Date("2026-10-11T12:00:00.000Z");
+  it("orders artifacts by created_at descending and then id descending", async () => {
     const olderId = "00000000-0000-4000-8000-000000000002";
     const newerId = "00000000-0000-4000-8000-000000000001";
     const tieLow = "00000000-0000-4000-8000-000000000010";
     const tieHigh = "00000000-0000-4000-8000-000000000020";
     for (const id of [olderId, newerId, tieLow, tieHigh]) {
-      await repository.markUploaded((await repository.createPending(artifactInput({ id }))).id, uploadedAt);
+      await repository.create(artifactInput({ id }));
     }
     await prisma.artifact.update({
       where: { id: olderId },
@@ -328,7 +308,7 @@ describe("PostgreSQL artifact persistence", () => {
     await prisma.artifact.update({ where: { id: tieLow }, data: { createdAt: sameTime } });
     await prisma.artifact.update({ where: { id: tieHigh }, data: { createdAt: sameTime } });
 
-    const listed = await repository.listReady({
+    const listed = await repository.list({
       view: "mine",
       userId: localUserFixture.id,
       organizationId: localOrganizationFixture.id,
@@ -337,32 +317,36 @@ describe("PostgreSQL artifact persistence", () => {
     expect(listed[0]?.createdAt.toISOString()).toBe("2026-10-02T00:00:00.000Z");
   });
 
-  it("sets uploaded_at without changing created_at", async () => {
-    const pending = await repository.createPending(artifactInput());
+  it("updates and deletes an artifact without changing created_at", async () => {
+    const created = await repository.create(artifactInput());
     const uploadedAt = new Date("2026-10-11T15:04:05.000Z");
-    const ready = await repository.markUploaded(pending.id, uploadedAt);
+    const updated = await repository.update(created.id, { sizeBytes: 40, uploadedAt, accessType: "org_shared" });
 
-    expect(pending.uploadedAt).toBeNull();
-    expect(ready.createdAt.toISOString()).toBe(pending.createdAt.toISOString());
-    expect(ready.uploadedAt?.toISOString()).toBe("2026-10-11T15:04:05.000Z");
-    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: pending.id } });
-    expect(stored.createdAt.toISOString()).toBe(pending.createdAt.toISOString());
-    expect(stored.uploadedAt?.toISOString()).toBe("2026-10-11T15:04:05.000Z");
+    expect(updated.createdAt.toISOString()).toBe(created.createdAt.toISOString());
+    expect(updated.sizeBytes).toBe(40);
+    expect(updated.accessType).toBe("org_shared");
+    expect(updated.uploadedAt?.toISOString()).toBe("2026-10-11T15:04:05.000Z");
+    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: created.id } });
+    expect(stored.createdAt.toISOString()).toBe(created.createdAt.toISOString());
+
+    const deleted = await repository.delete(created.id);
+    expect(deleted.id).toBe(created.id);
+    expect(await repository.findById(created.id)).toBeNull();
+    await expect(repository.update(created.id, { sizeBytes: 1 })).rejects.toMatchObject({ code: "P2025" });
+    await expect(repository.delete(created.id)).rejects.toMatchObject({ code: "P2025" });
   });
 
   it("rejects missing creators, org_shared without an organization, and unknown access values", async () => {
-    const personal = await repository.createPending(
-      artifactInput({ organizationId: null, accessType: "private" }),
-    );
+    const personal = await repository.create(artifactInput({ organizationId: null, accessType: "private" }));
     expect(personal.organizationId).toBeNull();
 
-    await expect(repository.createPending(artifactInput({ creatorUserId: "missing-user" }))).rejects.toMatchObject({
+    await expect(repository.create(artifactInput({ creatorUserId: "missing-user" }))).rejects.toMatchObject({
       code: "P2003",
     });
-    await expect(
-      repository.createPending(artifactInput({ accessType: "org_shared", organizationId: null })),
-    ).rejects.toThrow(/artifact_org_shared_requires_organization_check|23514/);
-    await expect(repository.createPending(artifactInput({ sizeBytes: -1 }))).rejects.toThrow(
+    await expect(repository.create(artifactInput({ accessType: "org_shared", organizationId: null }))).rejects.toThrow(
+      /artifact_org_shared_requires_organization_check|23514/,
+    );
+    await expect(repository.create(artifactInput({ sizeBytes: -1 }))).rejects.toThrow(
       /artifact_size_bytes_nonnegative_check|23514/,
     );
 

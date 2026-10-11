@@ -120,10 +120,11 @@ File placement follows the [canonical README backend directory structure](../REA
 
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
-- `createPending({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes })`
-- `markUploaded(id, uploadedAt)`
-- `findReadyById(id)`
-- `listReady({ view, userId, organizationId })`
+- `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, uploadedAt? })`
+- `update(id, { organizationId?, accessType?, mimeType?, sizeBytes?, uploadedAt? })`
+- `delete(id)`
+- `findById(id)`
+- `list({ view, userId, organizationId })`
 
 Return backend-internal records; task 04 maps them to DTOs. PrismaService remains available for resolving the configured user/org. Concrete repositories are PostgreSQL implementations, not interchangeable adapters.
 
