@@ -1,0 +1,205 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import type { ArtifactDto, ContextEnvelope } from "@factrove/contracts";
+import { createWebClient } from "../src/api/client";
+import { accessLabel, formatBytes, formatUploadedAt } from "../src/format";
+import { libraryViewFromParam, loadLibrary } from "../src/library/load-library";
+import { LibraryScreen } from "../src/library/library-screen";
+import { loadArtifact } from "../src/viewer/load-artifact";
+import { ViewerScreen } from "../src/viewer/viewer-screen";
+
+const mineId = "123e4567-e89b-42d3-a456-426614174000";
+const sharedId = "123e4567-e89b-42d3-a456-426614174001";
+const otherId = "123e4567-e89b-42d3-a456-426614174002";
+
+const context: ContextEnvelope = {
+  user: { id: "local-user", name: "Local User" },
+  organization: { id: "local-org", name: "Local Organization" }
+};
+
+const noOrganization: ContextEnvelope = {
+  user: { id: "local-user", name: "Local User" },
+  organization: null
+};
+
+function artifact(id: string, accessType: ArtifactDto["accessType"], creatorUserId = "local-user"): ArtifactDto {
+  return {
+    id,
+    creatorUserId,
+    organizationId: "local-org",
+    accessType,
+    filename: `${id}.html`,
+    mimeType: "text/html",
+    sizeBytes: id === mineId ? 13 : 2048,
+    createdAt: "2026-10-11T10:00:00.000Z",
+    updatedAt: "2026-10-11T10:00:00.000Z",
+    uploadedAt: "2026-10-11T10:00:00.000Z",
+    viewerUrl: `http://localhost:3000/artifacts/${id}`,
+    contentUrl: `http://localhost:3001/api/v1/artifacts/${id}/content`
+  };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+function stubFetch(handler: (url: string) => Response | Promise<Response>) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    expect(init?.cache).toBe("no-store");
+    return handler(String(input));
+  }) as typeof fetch;
+}
+
+describe("library requests", () => {
+  it("requests the selected list and leaves the default tab on mine", async () => {
+    const urls: string[] = [];
+    const fetchImpl = stubFetch(async (url) => {
+      urls.push(url);
+      if (url.endsWith("/context")) return jsonResponse(context);
+      if (url.endsWith("view=org")) return jsonResponse({ items: [artifact(sharedId, "org_shared"), artifact(otherId, "org_shared", "other-user")] });
+      return jsonResponse({ items: [artifact(mineId, "private"), artifact(sharedId, "org_shared")] });
+    });
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+
+    const mine = await loadLibrary(client, libraryViewFromParam(undefined));
+    const ignored = await loadLibrary(client, libraryViewFromParam("private"));
+    const org = await loadLibrary(client, libraryViewFromParam("org"));
+
+    expect(urls).toContain("http://localhost:3001/api/v1/artifacts?view=mine");
+    expect(urls).toContain("http://localhost:3001/api/v1/artifacts?view=org");
+    expect(urls.some((url) => url.includes("view=private"))).toBe(false);
+    expect(mine.status).toBe("ready");
+    expect(ignored.status).toBe("ready");
+    expect(org.status).toBe("ready");
+    if (mine.status !== "ready" || org.status !== "ready") return;
+
+    const mineHtml = renderToStaticMarkup(<LibraryScreen state={mine} />);
+    const orgHtml = renderToStaticMarkup(<LibraryScreen state={org} />);
+    expect(mineHtml).toContain(`${mineId}.html`);
+    expect(mineHtml).toContain(`${sharedId}.html`);
+    expect(mineHtml).not.toContain(`${otherId}.html`);
+    expect(mineHtml).toContain("Private · list only");
+    expect(mineHtml).toContain("Organization shared · list only");
+    expect(orgHtml).toContain(`${otherId}.html`);
+    expect(orgHtml).not.toContain(`${mineId}.html`);
+    expect(mineHtml.indexOf(`${mineId}.html`)).toBeLessThan(mineHtml.indexOf(`${sharedId}.html`));
+  });
+
+  it("shows an empty organization list for a configured organization", () => {
+    const html = renderToStaticMarkup(<LibraryScreen state={{ status: "empty", view: "org", context }} />);
+    expect(html).toContain("No organization-shared artifacts for Local Organization.");
+    expect(html).not.toContain("<ul");
+  });
+
+  it("shows an empty mine list and a no-organization state without inventing artifacts", async () => {
+    const fetchImpl = stubFetch(async (url) => {
+      if (url.endsWith("/context")) return jsonResponse(noOrganization);
+      if (url.includes("view=org")) return jsonResponse({ items: [artifact(otherId, "org_shared", "other-user")] });
+      return jsonResponse({ items: [] });
+    });
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const mine = await loadLibrary(client, "mine");
+    const org = await loadLibrary(client, "org");
+    expect(mine).toMatchObject({ status: "empty", view: "mine" });
+    expect(org.status).toBe("no-organization");
+
+    const mineHtml = renderToStaticMarkup(<LibraryScreen state={mine} />);
+    const orgHtml = renderToStaticMarkup(<LibraryScreen state={org} />);
+    expect(mineHtml).toContain("No artifacts yet");
+    expect(mineHtml).toContain("Local User · No organization");
+    expect(mineHtml).not.toContain("<ul");
+    expect(orgHtml).toContain("has no configured organization");
+    expect(orgHtml).not.toContain(`${otherId}.html`);
+    expect(orgHtml).toContain('href="/?view=org"');
+    expect(orgHtml).toContain('aria-current="page"');
+  });
+
+  it("reports an unavailable API without rendering a list", async () => {
+    const fetchImpl = stubFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const client = createWebClient({ baseUrl: "http://127.0.0.1:3001", fetch: fetchImpl });
+    const state = await loadLibrary(client, "org");
+    expect(state).toMatchObject({
+      status: "unavailable",
+      view: "org",
+      message: "The Factrove API is unavailable. Start the backend and refresh."
+    });
+    const html = renderToStaticMarkup(<LibraryScreen state={state} />);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("The Factrove API is unavailable");
+    expect(html).toContain('href="/?view=org"');
+    expect(html).not.toContain("<ul");
+    expect(html).toContain("They are not access control.");
+  });
+
+  it("shows the API error message when a list request fails", async () => {
+    const fetchImpl = stubFetch(async (url) => {
+      if (url.endsWith("/context")) return jsonResponse(context);
+      return jsonResponse({ error: { code: "STORAGE_UNAVAILABLE", message: "Storage is unavailable" } }, 503);
+    });
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadLibrary(client, "mine");
+    expect(state).toMatchObject({ status: "unavailable", message: "Storage is unavailable" });
+    expect(renderToStaticMarkup(<LibraryScreen state={state} />)).toContain("Storage is unavailable");
+  });
+});
+
+describe("viewer", () => {
+  it("loads a deep-linked artifact into a sandboxed iframe and keeps HTML out of the page", async () => {
+    const item = artifact(mineId, "private");
+    const fetchImpl = stubFetch(async (url) => {
+      expect(url).toBe(`http://localhost:3001/api/v1/artifacts/${mineId}`);
+      return jsonResponse({ artifact: item });
+    });
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadArtifact(client, mineId);
+    const html = renderToStaticMarkup(<ViewerScreen state={state} />);
+
+    expect(html).toContain(`src="${item.contentUrl}"`);
+    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).toContain('referrerPolicy="no-referrer"');
+    expect(html).not.toContain("allow-same-origin");
+    expect(html).toContain(`${mineId}.html`);
+    expect(html).toContain("Back to library");
+    expect(html).toContain("13 B");
+    expect(html).toContain(formatUploadedAt(item.uploadedAt));
+    expect(html).not.toContain("Hello from Factrove");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("dangerouslySetInnerHTML");
+  });
+
+  it("shows a missing artifact without an iframe", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact not found" } }, 404)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadArtifact(client, mineId);
+    const html = renderToStaticMarkup(<ViewerScreen state={state} />);
+    expect(state).toMatchObject({ status: "missing", message: "Artifact not found" });
+    expect(html).toContain("Artifact not found");
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("does not embed a non-HTTP content URL", () => {
+    const item = artifact(mineId, "private");
+    item.contentUrl = "javascript:alert(1)";
+    const html = renderToStaticMarkup(<ViewerScreen state={{ status: "ready", artifact: item }} />);
+    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain("The artifact content could not be loaded");
+  });
+});
+
+describe("formatting", () => {
+  it("formats size, upload time, and access labels", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(13)).toBe("13 B");
+    expect(formatBytes(2048)).toBe("2.0 KB");
+    expect(formatBytes(10_485_760)).toBe("10.0 MB");
+    expect(formatUploadedAt("2026-10-11T10:00:00.000Z")).toBe("11 Oct 2026, 10:00 UTC");
+    expect(accessLabel("private")).toBe("Private");
+    expect(accessLabel("org_shared")).toBe("Organization shared");
+  });
+});
