@@ -33,9 +33,9 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 ## Scope exclusions
 
-No Better Auth setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, or non-HTML rendering.
+Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred.
 
-Do not introduce extra tables or storage providers to solve hypothetical later requirements. Keep a small backend-local S3 boundary; a local S3-compatible service exercises that same implementation.
+Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary; a local S3-compatible service exercises that same implementation.
 
 ## Final acceptance checklist
 

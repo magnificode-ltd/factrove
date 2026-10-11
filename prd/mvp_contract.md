@@ -10,17 +10,19 @@ This contract translates [the agreed MVP end state](../docs/MVP_END_STATE.md) in
 - One PostgreSQL database and one dedicated S3 bucket per installation.
 - NestJS API owns database and S3 credentials. Web/CLI only know HTTP origins.
 - Local identity is configured in the API: `LOCAL_USER_ID=local-user`, `LOCAL_ORGANIZATION_ID=local-org`. The latter may be unset for a user without an organization.
-- Explicit, idempotent local seed creates user `local-user` (Local User, `local@example.invalid`) and organization `local-org` (Local Organization, slug `local`).
+- Explicit, idempotent local seed creates user `local-user` (Local User, `local@example.invalid`) and organization `local-org` (Local Organization, slug `local`) in the Better Auth-generated identity tables.
 - The API verifies configured rows exist. Fail with a useful startup/configuration error when they do not; never silently impersonate another identity.
 - Requests do not accept creator IDs or organization IDs. The API derives them from local configuration.
-- There is no membership table, one-org uniqueness rule, auth plugin, identity header, login, API key, or browser session in this build.
+- Better Auth core + organization-plugin schema, including required supporting tables, is generated now. The live API uses no auth plugin routes, identity header, login, API key, browser session, or membership enforcement. There is no one-org uniqueness rule.
 - This local context is not proof of identity. Direct artifact/content endpoints are unauthenticated; private/org_shared are display classifications only.
 
 ## Model reference
 
-The complete, authoritative [three-model definition](../docs/MVP_END_STATE.md#three-models) lives in MVP_END_STATE.md: Artifact, User, and Organization, including field types, nullability, foreign keys, access classification, and timestamp semantics.
+The complete, authoritative [three-model definition](../docs/MVP_END_STATE.md#three-models) lives in MVP_END_STATE.md: custom Artifact plus Better Auth's User and Organization. Better Auth's pinned core + organization configuration determines the identity schema and required supporting tables; three domain concepts does not mean exactly three SQL tables.
 
-Use PascalCase Prisma models with consistent snake_case PostgreSQL table/column mapping. Index creator/time and organization/access/time for the specified list queries. The organization requirement for org_shared is a SQL check; it is not a one-organization-per-user restriction. Database migration history is separate from the three application models.
+Preserve Better Auth adapter-compatible identity names/mappings. Map Artifact's fields consistently to the documented database column names and reference the generated identities directly. Index creator/time and organization/access/time for the list queries. The organization requirement for org_shared is a SQL check; it is not a one-organization-per-user restriction. All generated identity schema and custom Artifact changes enter the same committed Prisma migration history.
+
+The backend-local Better Auth schema configuration uses `database: prismaAdapter(prisma, { provider: "postgresql" })` and `plugins: [organization()]`. Use Better Auth's official Prisma adapter and schema generator, followed by Prisma Migrate for committed SQL migrations. Runtime auth endpoints remain deferred.
 
 ## Listing semantics
 

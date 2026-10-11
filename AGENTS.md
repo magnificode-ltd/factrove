@@ -12,6 +12,8 @@ Factrove is a TypeScript pnpm monorepo for a self-hostable artifact library.
 
 The backend owns database and storage access. Its database module is global within NestJS. Shared packages are linked through pnpm workspaces and expose compiled exports.
 
+User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities.
+
 ## Documentation map
 
 Documentation follows these roles: README.md provides long-term codebase documentation; PRDs capture MVP scope, implementation tasks, and progress. AGENTS.md provides general orientation about the codebase, using descriptive guidance. Task-specific constraints and exclusions belong in the relevant PRD, keeping this file focused on helping agents understand the project.

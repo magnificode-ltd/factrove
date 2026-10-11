@@ -33,6 +33,10 @@ The web application and CLI communicate with the backend over HTTP. The shared c
 
 Backend code is organized by responsibility: controllers handle HTTP, services coordinate behavior, and repositories handle persistence. The database design uses PostgreSQL with Prisma and a backend-local global NestJS `DatabaseModule`. Concrete repositories encapsulate queries and transactions.
 
+Identity models come from Better Auth: its core schema provides User, and its organization plugin provides Organization and membership-related models. Artifact references those identities directly. Better Auth schema generation and committed Prisma migrations maintain these definitions; Factrove's custom domain model is Artifact. Schema ownership is separate from when authentication flows are enabled, which is specified in the PRDs.
+
+Better Auth connects to PostgreSQL through its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, with `organization()` configured for organization models. This configuration lives in the backend and uses its Prisma setup. Better Auth tooling generates the identity schema; Prisma Migrate manages the committed SQL migrations. See the [installation guide](https://better-auth.com/docs/installation) and [Prisma adapter guide](https://better-auth.com/docs/adapters/prisma).
+
 Object storage is another backend-local module. Its small provider interface separates file operations from the S3 implementation and accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
 
 Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation and delivery policy.

@@ -44,19 +44,23 @@ The CLI obtains its API origin from `--api-url`, then `FACTROVE_API_URL`, then t
 
 ## Local identity and access classification
 
-An explicit local seed creates one demo user and one demo organization. The backend resolves its current actor from `LOCAL_USER_ID` and optional `LOCAL_ORGANIZATION_ID`. This supplies consistent creator/org values for the UI and CLI without implementing authentication.
+An explicit local seed creates one demo user and one demo organization in Better Auth's actual identity tables. The backend resolves its current actor from `LOCAL_USER_ID` and optional `LOCAL_ORGANIZATION_ID`. This supplies consistent creator/org values for the UI and CLI without enabling authentication flows.
 
 The API assigns creator and organization from that configuration. The client supplies the file and access classification.
 
 `private` and `org_shared` control listing behavior in this unauthenticated build. They are not enforced privacy guarantees: direct detail/content requests do not authenticate a viewer. Local services bind to loopback by default.
 
-There is no membership-management flow in the MVP. The schema places **no single-organization constraint on users**. Future Better Auth integration may support multiple memberships; this local fixture arrangement does not decide that future behavior.
+There is no membership-management flow in the MVP. The Better Auth organization schema places **no single-organization constraint on users**; a user may have multiple membership records. The local fixture arrangement chooses a current user/org context without enforcing memberships at runtime.
 
 ## Three models
 
-The MVP has three application models: `Artifact`, `User`, and `Organization`. These definitions are authoritative for the target data model. PostgreSQL stores metadata and identities; object storage holds file bytes.
+The MVP has three domain concepts: `Artifact`, `User`, and `Organization`. **Artifact is the custom Factrove model. User comes from Better Auth core, and Organization comes from Better Auth's organization plugin.** They are not independently designed temporary identity models.
 
-Names below are database column names. Prisma uses consistently mapped model fields; JSON API fields use camelCase.
+Generate the identity schema from a pinned Better Auth core + organization configuration and include its required supporting models (such as sessions, accounts, verification, members, and invitations) in the initial committed Prisma migrations. Three domain concepts does not mean exactly three physical tables. Authentication endpoints and enforcement remain disabled for this MVP.
+
+The backend-local Better Auth configuration uses the official Prisma adapter with PostgreSQL: `database: prismaAdapter(prisma, { provider: "postgresql" })`, plus `plugins: [organization()]`. This adapter is part of the agreed identity integration; PostgreSQL-only persistence means no custom cross-database abstraction. Better Auth generates the schema, and Prisma Migrate creates and applies the committed migrations.
+
+PostgreSQL stores metadata and identities; object storage holds file bytes. Artifact's column names below are the application specification. Identity fields below summarize Better Auth's schema rather than replacing the generated definition. Preserve adapter-compatible identity names/mappings; JSON API fields use camelCase.
 
 ### Artifact
 
@@ -82,28 +86,36 @@ The object key is persisted even though its initial naming rule is simple. A lat
 
 ### User
 
+Use Better Auth's generated User model, including its complete set of required fields. The key fields are:
+
 | Field | Type / constraint | Meaning |
 | --- | --- | --- |
-| `id` | Text, primary key | Stable identity; text accommodates later Better Auth integration |
+| `id` | Text, primary key | Better Auth identity referenced directly by Artifact |
 | `name` | Text, required | Display name |
 | `email` | Text, required and unique | Identity metadata |
+| `emailVerified` | Boolean | Better Auth email-verification field |
+| `image` | Nullable text | Better Auth profile image field |
 | `created_at` | Timestamp with time zone | Row creation time |
 | `updated_at` | Timestamp with time zone | Last row modification |
 
-This is a seeded local identity, not a password/session implementation. The default fixture is `local-user`, named Local User, with `local@example.invalid`.
+The default fixture is `local-user`, named Local User, with `local@example.invalid`. Seed the generated required fields/defaults explicitly as needed, without creating login credentials or sessions. The current local actor reads this same identity row; no later migration from a parallel custom user table is expected. Timestamp field names/mappings follow the generated Better Auth configuration.
 
 ### Organization
+
+Use the organization plugin's generated Organization model. The key fields are:
 
 | Field | Type / constraint | Meaning |
 | --- | --- | --- |
 | `id` | Text, primary key | Stable organization identity |
 | `name` | Text, required | Display name |
 | `slug` | Text, required and unique | Organization slug |
+| `logo` | Nullable text | Better Auth organization logo field |
+| `metadata` | Optional plugin-defined metadata | Preserve the generated representation |
 | `created_at` | Timestamp with time zone | Row creation time |
 
 The default fixture is `local-org`, named Local Organization, with slug `local`.
 
-There is no user-to-org foreign key or uniqueness constraint encoding a single membership. Current local context comes from configuration. Better Auth's membership and other supporting tables arrive with the future auth implementation.
+There is no user-to-org foreign key or global uniqueness on member.userId encoding a single membership. Current local context comes from configuration. Better Auth's generated membership and other supporting tables exist from the start, while membership administration and enforcement arrive with runtime authentication.
 
 ### Timestamp and lifecycle meaning
 
@@ -113,7 +125,7 @@ There is no user-to-org foreign key or uniqueness constraint encoding a single m
 - Future metadata-only edits would change `updated_at` without changing `uploaded_at`.
 - Future replacement could retain the artifact ID and `created_at` while updating content metadata and `uploaded_at`. Replacement behavior and concurrency are outside this MVP.
 
-There are no separate content, revision, sharing, personal-token, upload-operation, or usage models in this build. Better Auth itself is deferred; the initial User/Organization records will be migrated into its schema when that work begins.
+There are no separate Factrove content, revision, sharing, personal-token, upload-operation, or usage models in this build. Better Auth owns identity schema now; its live authentication flows and API-key plugin are deferred. Schema generation is a development step, followed by reviewed and committed Prisma SQL migrations, not a separate migration system or a running auth server. See [Better Auth's Prisma schema workflow](https://better-auth.com/docs/adapters/prisma#schema-generation--migration).
 
 ## Storage and upload behavior
 
@@ -140,6 +152,7 @@ The upload endpoint is the ingestion path. Files placed into the bucket independ
 - **CLI:** standalone NestJS context using the same API as the web app.
 - **Shared packages:** runtime API contracts and a framework-neutral HTTP client.
 - **Database:** PostgreSQL via Prisma, using concrete repositories and one backend-local global NestJS DatabaseModule.
+- **Identity schema:** Better Auth core + organization plugin, generated backend-locally and referenced directly by Artifact; live authentication remains deferred.
 - **Migrations:** committed SQL for schema changes and DML transformations in the same history; explicit idempotent local seeding.
 
 Database and storage access remain in the backend. CLI/web communicate through the shared HTTP client. The product runs independently of the later closed-source cloud repository.
@@ -181,6 +194,6 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Better Auth and API keys, real personal/org authorization, membership management, specific-person sharing, additional CLI commands, UI uploading, replacement/history, grouping, search/pagination, Markdown and other formats, Azure/GCP implementations, and managed hosting are later work.
+Better Auth runtime login/session flows and API keys, real personal/org authorization, membership management, specific-person sharing, additional CLI commands, UI uploading, replacement/history, grouping, search/pagination, Markdown and other formats, Azure/GCP implementations, and managed hosting are later work.
 
 This MVP intentionally ends at the local HTML upload, list, and view experience.
