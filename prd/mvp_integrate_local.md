@@ -12,9 +12,9 @@ compose.yaml, .env.example, local infrastructure initialization, setup scripts/d
 
 ## Deliverables
 
-- Provide persistent PostgreSQL and one S3-compatible development service using containers. Select and pin images compatible with the target Mac architecture.
-- Bind host ports to loopback. Initialize a dedicated bucket idempotently and supply non-production development credentials.
-- Use the real S3 provider with endpoint overrides; no filesystem substitute.
+- Provide persistent PostgreSQL using a container. Select and pin an image compatible with the target Mac architecture.
+- Bind the PostgreSQL host port to loopback.
+- Do not run an S3 service, create a bucket, or set a custom S3 endpoint. Artifact bytes use the existing AWS bucket named by `S3_BUCKET`. Document the bucket, region, and API-only credentials the operator must supply.
 - Document Node/pnpm and container-runtime prerequisites, environment setup, first migration/seed, and FE/BE startup.
 - Implement/verify the root commands listed in the shared contract. pnpm dev should start frontend/backend with visible logs and clean shutdown; CLI runs separately.
 - Keep migrations and local seed explicit before startup. An API restart must not reset data.
@@ -22,7 +22,7 @@ compose.yaml, .env.example, local infrastructure initialization, setup scripts/d
 - Ensure only the API receives database/storage secrets. Web/CLI receive HTTP origins.
 - Integrate the independently developed tasks and reconcile shared dependencies/lockfile.
 - Update root README to distinguish implemented behavior from future plans and include commands verified on the actual checkout.
-- Provide a short troubleshooting path for unavailable containers, missing seed, missing bucket, port conflicts, and backend URL errors.
+- Provide a short troubleshooting path for unavailable containers, missing seed, missing or unauthorized S3 bucket, port conflicts, and backend URL errors.
 
 ## End-to-end acceptance
 
@@ -36,7 +36,7 @@ Run against the real local stack, not mocks:
 6. Upload a second file with --access org_shared. Confirm it appears in both tabs.
 7. Using isolated test fixtures, create another user's org_shared/private artifacts. Confirm the list semantics without adding a user switcher.
 8. Verify the raw content endpoint sends sandbox/CSP headers and the iframe cannot access the parent DOM or make external requests.
-9. Stop and restart applications/infrastructure without deleting volumes. Confirm metadata and bytes remain viewable.
+9. Stop and restart applications and PostgreSQL without deleting the database volume. Confirm metadata remains and the AWS object bytes remain viewable.
 10. Run workspace build/typecheck and targeted tests, then record actual results.
 
 Use a browser check for visible rendering; HTTP status alone is insufficient. Do not claim full MVP completion if the UI, CLI, or persistence was only tested with mocks.
@@ -47,4 +47,4 @@ List verified setup commands, relevant test results, known local-only limitation
 
 ## Exclusions
 
-No cloud deployment, AWS account provisioning, paid resources, production TLS setup, authentication, CI/CD platform, multi-host orchestration, or product features beyond upload/list/view.
+No cloud deployment of Factrove, AWS account or bucket provisioning, production TLS setup, local S3 emulator, filesystem storage adapter, authentication, CI/CD platform, multi-host orchestration, or product features beyond upload/list/view.
