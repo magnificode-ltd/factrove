@@ -1,6 +1,6 @@
 import { Global, Module } from "@nestjs/common";
-import { ArtifactsRepository } from "./artifacts/artifacts.repository.js";
 import { PrismaService } from "./prisma.service.js";
+import { ArtifactsRepository } from "./repositories/artifacts.repository.js";
 
 @Global()
 @Module({

@@ -1,5 +1,5 @@
-export type { ArtifactRecord, CreatePendingArtifactInput, ListReadyArtifactsInput } from "./prisma/artifacts/artifact-record.js";
-export { ArtifactsRepository } from "./prisma/artifacts/artifacts.repository.js";
-export { DatabaseModule } from "./prisma/database.module.js";
-export { PrismaService } from "./prisma/prisma.service.js";
-export { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "./prisma/identities/seed-local-identities.js";
+export { DatabaseModule } from "./database.module.js";
+export { PrismaService } from "./prisma.service.js";
+export { ArtifactsRepository } from "./repositories/artifacts.repository.js";
+export { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "./seed-local-identities.js";
+export type { ArtifactRecord, CreatePendingArtifactInput, ListReadyArtifactsInput } from "./types/artifact-record.js";

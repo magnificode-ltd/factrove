@@ -7,18 +7,18 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { CreatePendingArtifactInput } from "../src/database/prisma/artifacts/artifact-record.js";
-import { ArtifactsRepository } from "../src/database/prisma/artifacts/artifacts.repository.js";
-import { PrismaService } from "../src/database/prisma/prisma.service.js";
+import type { CreatePendingArtifactInput } from "../src/database/types/artifact-record.js";
+import { ArtifactsRepository } from "../src/database/repositories/artifacts.repository.js";
+import { PrismaService } from "../src/database/prisma.service.js";
 import {
   localOrganizationFixture,
   localUserFixture,
   seedLocalIdentities,
-} from "../src/database/prisma/identities/seed-local-identities.js";
+} from "../src/database/seed-local-identities.js";
 
 const execFileAsync = promisify(execFile);
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
-const schemaPath = fileURLToPath(new URL("../src/database/prisma/schema.prisma", import.meta.url));
+const schemaPath = fileURLToPath(new URL("../prisma/schema.prisma", import.meta.url));
 const configPath = fileURLToPath(new URL("../auth-schema.config.ts", import.meta.url));
 const testDatabaseName = "factrove_test";
 
@@ -95,7 +95,7 @@ describe("PostgreSQL artifact persistence", () => {
     const testUrl = withDatabase(baseUrl, testDatabaseName);
     process.env.DATABASE_URL = testUrl;
     const migrateEnv = { ...process.env, DATABASE_URL: testUrl };
-    const migrateArgs = ["exec", "prisma", "migrate", "deploy", "--schema", "src/database/prisma/schema.prisma"];
+    const migrateArgs = ["exec", "prisma", "migrate", "deploy"];
     await execFileAsync("pnpm", migrateArgs, { cwd: apiRoot, env: migrateEnv });
     const second = await execFileAsync("pnpm", migrateArgs, { cwd: apiRoot, env: migrateEnv });
     secondDeployOutput = `${second.stdout}\n${second.stderr}`;

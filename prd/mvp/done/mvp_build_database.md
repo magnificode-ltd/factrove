@@ -8,7 +8,7 @@ Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](.
 
 ## Owns
 
-Follow the [canonical README backend directory structure](../../../README.md#backend-directory-structure): repositories in `src/database/repositories/`, record/input types in `src/database/types/`, module/service/seed files directly in `src/database/`, and schema/migrations in `apps/api/prisma/`. Directory placement is part of acceptance. The completion notes below describe the delivered implementation; its current nested `src/database/prisma/` layout still needs alignment with this structure, including command paths and imports.
+Follow the [canonical README backend directory structure](../../../README.md#backend-directory-structure): repositories in `src/database/repositories/`, record/input types in `src/database/types/`, module/service/seed files directly in `src/database/`, and schema/migrations in `apps/api/prisma/`. Directory placement is part of acceptance.
 
 apps/api/prisma/**, apps/api/src/database/**, a backend-local schema-generation configuration such as apps/api/auth-schema.config.ts, and database integration tests. Coordinate pinned Better Auth/generator dependencies and API manifest changes with task 04; task 07 owns final setup/lockfile integration.
 
@@ -56,7 +56,7 @@ Setup references: [Better Auth installation](https://better-auth.com/docs/instal
 
 Pinned Better Auth 1.7.7, `@better-auth/prisma-adapter` 1.7.7, and the `auth` CLI 1.7.7 against the workspace Prisma 6.19.0 pin. Identity models come from `apps/api/auth-schema.config.ts`: `prismaAdapter(prisma, { provider: "postgresql" })` and `plugins: [organization()]`. That file is a schema-generation config, not a mounted auth server.
 
-`pnpm --filter @factrove/api db:generate-schema` regenerates `apps/api/src/database/prisma/schema.prisma` and is idempotent. `pnpm db:migrate` applies `prisma migrate deploy`. `pnpm db:seed` upserts `local-user` (Local User, `local@example.invalid`) and `local-org` (Local Organization, slug `local`) into the generated user and organization tables. It does not create credentials, sessions, or memberships, and it is not called from API startup.
+`pnpm --filter @factrove/api db:generate-schema` regenerates `apps/api/prisma/schema.prisma` and is idempotent. `pnpm db:migrate` applies `prisma migrate deploy`. `pnpm db:seed` upserts `local-user` (Local User, `local@example.invalid`) and `local-org` (Local Organization, slug `local`) into the generated user and organization tables. It does not create credentials, sessions, or memberships, and it is not called from API startup.
 
 The initial migration creates Better Auth tables `user`, `session`, `account`, `verification`, `organization`, `member`, and `invitation`, plus `artifact`. Artifact foreign keys reference those same `user` and `organization` ids with `ON DELETE RESTRICT`. `member.userId` is indexed and not unique. `org_shared` rows require `organization_id`. Ready artifact timestamps are `timestamptz`. `pnpm test` recreates the isolated `factrove_test` database from `DATABASE_URL` in gitignored `apps/api/.env`.
 

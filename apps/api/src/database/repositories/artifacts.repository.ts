@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Artifact } from "@prisma/client";
-import type { ArtifactRecord, CreatePendingArtifactInput, ListReadyArtifactsInput } from "./artifact-record.js";
+import type { ArtifactRecord, CreatePendingArtifactInput, ListReadyArtifactsInput } from "../types/artifact-record.js";
 import { PrismaService } from "../prisma.service.js";
 
 function toArtifactRecord(row: Artifact): ArtifactRecord {
