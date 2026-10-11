@@ -4,14 +4,14 @@
 
 Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL and object storage persist the result. No authentication, API keys, or cloud service are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Task 01 is complete; the remaining briefs are implementation assignments. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01 and 02 are complete; the remaining briefs are implementation assignments. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 
 | ID | Brief | Status | Owns | Prerequisites |
 | --- | --- | --- | --- | --- |
 | 01 | [Workspace and shared client](mvp/done/mvp_build_workspace.md) | Done | Root workspace/config, initial app scaffolds, packages/contracts, packages/api-client, fixture HTML | Shared contract |
-| 02 | [Database](mvp_build_database.md) | Not started | API Prisma schema/migrations/seed and src/database | 01 baseline |
+| 02 | [Database](mvp/done/mvp_build_database.md) | Done | API Prisma schema/migrations/seed and src/database | 01 baseline |
 | 03 | [Storage](mvp_build_storage.md) | Not started | API src/storage and storage-focused tests | 01 baseline |
 | 04 | [Backend](mvp_build_backend.md) | Not started | API bootstrap, controllers, services, rendering | 01; 02/03 interfaces, implementations for final verification |
 | 05 | [Frontend](mvp_build_frontend.md) | Not started | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
@@ -54,4 +54,4 @@ Use Artifact as the custom product table alongside the schema required by Better
 - [ ] Root build/typecheck and the targeted checks documented by each task pass.
 - [ ] Setup instructions distinguish unauthenticated list classifications from actual access control.
 
-Task 01's baseline is ready for the remaining implementation streams. Tasks 02–07 have not been dispatched or marked complete.
+Tasks 01 and 02 are complete. Tasks 03–07 have not been dispatched or marked complete.

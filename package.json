@@ -8,12 +8,12 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
-    "test": "pnpm --filter @factrove/api-client test",
+    "test": "pnpm -r --if-present test",
     "dev": "node scripts/pending.mjs 'dev stack (Task 07)'",
     "infra:up": "node scripts/pending.mjs 'local services (Task 07)'",
     "infra:down": "node scripts/pending.mjs 'local services (Task 07)'",
-    "db:migrate": "node scripts/pending.mjs 'database migrations (Task 02)'",
-    "db:seed": "node scripts/pending.mjs 'database seed (Task 02)'",
+    "db:migrate": "pnpm --filter @factrove/api db:migrate",
+    "db:seed": "pnpm --filter @factrove/api db:seed",
     "factrove": "pnpm --filter @factrove/cli start"
   },
   "devDependencies": {

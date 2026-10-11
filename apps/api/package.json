@@ -4,17 +4,32 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
-    "dev": "pnpm build && node dist/main.js"
+    "dev": "pnpm build && node dist/main.js",
+    "test": "prisma generate && vitest run",
+    "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "pnpm build && node dist/database/seed.js"
   },
   "dependencies": {
+    "@better-auth/prisma-adapter": "1.7.7",
+    "@factrove/contracts": "workspace:*",
     "@nestjs/common": "11.1.9",
     "@nestjs/core": "11.1.9",
     "@nestjs/platform-express": "11.1.9",
+    "@prisma/client": "6.19.0",
+    "better-auth": "1.7.7",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
-  "devDependencies": { "typescript": "5.9.3" }
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "auth": "1.7.7",
+    "pg": "8.23.1",
+    "prisma": "6.19.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
 }

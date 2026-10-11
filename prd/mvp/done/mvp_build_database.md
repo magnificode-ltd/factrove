@@ -4,7 +4,7 @@
 
 Persist Artifact using Better Auth's User and Organization identities, and provide the repository methods the API needs. The MVP remains unauthenticated at runtime; identity schema reuse is part of this database task.
 
-Read [the MVP end state](../docs/MVP_END_STATE.md), [../README.md](../README.md) and [mvp_contract.md](mvp_contract.md). Status: not started. Depends on task 01's baseline.
+Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
 
 ## Owns
 
@@ -49,3 +49,13 @@ Tests may create additional fixture identities in an isolated test database; do 
 No custom cross-database abstraction, Mongo support, live Better Auth endpoints, login/signup UI, session/API-key enforcement, membership administration, product API routes, storage I/O, or automatic migration execution in API initialization. Better Auth's official Prisma adapter and schema generation are explicitly included.
 
 Setup references: [Better Auth installation](https://better-auth.com/docs/installation) and [Better Auth with Prisma](https://better-auth.com/docs/adapters/prisma). The generator supplies the configured identity models; Prisma owns the committed SQL migration history. Better Auth's direct migration command for its built-in Kysely adapter is not the Prisma migration workflow.
+
+## Completion and handoff
+
+Pinned Better Auth 1.7.7, `@better-auth/prisma-adapter` 1.7.7, and the `auth` CLI 1.7.7 against the workspace Prisma 6.19.0 pin. Identity models come from `apps/api/auth-schema.config.ts`: `prismaAdapter(prisma, { provider: "postgresql" })` and `plugins: [organization()]`. That file is a schema-generation config, not a mounted auth server.
+
+`pnpm --filter @factrove/api db:generate-schema` regenerates `apps/api/prisma/schema.prisma` and is idempotent. `pnpm db:migrate` applies `prisma migrate deploy`. `pnpm db:seed` upserts `local-user` (Local User, `local@example.invalid`) and `local-org` (Local Organization, slug `local`) into the generated user and organization tables. It does not create credentials, sessions, or memberships, and it is not called from API startup.
+
+The initial migration creates Better Auth tables `user`, `session`, `account`, `verification`, `organization`, `member`, and `invitation`, plus `artifact`. Artifact foreign keys reference those same `user` and `organization` ids with `ON DELETE RESTRICT`. `member.userId` is indexed and not unique. `org_shared` rows require `organization_id`. Ready artifact timestamps are `timestamptz`. `pnpm test` recreates the isolated `factrove_test` database from `DATABASE_URL` in gitignored `apps/api/.env`.
+
+Task 04 should import `DatabaseModule` once from `apps/api/src/database/index.ts`. The module is global and exports `PrismaService` and `ArtifactsRepository`. Repository methods return `ArtifactRecord` values with `Date` timestamps; `uploadedAt` is null until `markUploaded`. `findReadyById` returns null for missing or pending rows. `listReady({ view, userId, organizationId })` returns ready rows only, ordered by `createdAt` descending and then `id` descending. An org view with `organizationId: null` returns an empty list. `markUploaded` throws Prisma `P2025` when the id is missing. `localUserFixture`, `localOrganizationFixture`, and `seedLocalIdentities` are exported from the same barrel. Task 04 maps records to HTTP DTOs and still owns wiring this module into `AppModule`. Task 07 still owns `.env.example`, infrastructure scripts, and lockfile reconciliation.
