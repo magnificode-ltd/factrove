@@ -27,3 +27,9 @@ Documentation follows these roles: README.md provides long-term codebase documen
 ## Tooling
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-workspace.yaml`. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.
+
+## Cursor Cloud specific instructions
+
+Node 24.16.0 is installed at `/usr/local/bin/node`, and pnpm 11.25.0 is activated with Corepack. Agent shells can resolve `node` to an older binary that appears earlier on `PATH`. Export `PATH="/usr/local/bin:$PATH"` before `pnpm`, `node`, or app commands so engine checks use the pinned runtime.
+
+On boot, the API scaffold listens on `127.0.0.1:3001` and the Next.js dev server listens on port 3000. A Nest `404` for `GET /` is the empty API scaffold. The web page is the Factrove scaffold at `/`. Run `pnpm --filter @factrove/cli start` for the CLI; the compiled process exits immediately with no product command yet. Root `dev`, `infra:up`, `infra:down`, `db:migrate`, and `db:seed` are pending stubs. PostgreSQL and object storage are not part of this baseline.
