@@ -18,10 +18,10 @@ API bootstrap/app.module, src/controllers/**, src/services/**, src/rendering/**,
 - Resolve the configured seeded user/org in a small LocalActorService. This is configuration, not auth. Ignore/reject client attempts to select creator/org; no auth guards or placeholder credentials.
 - Create private artifacts by default; capture configured organization_id, require it for org_shared.
 - Validate bounded multipart input, filenames/extensions, UTF-8, size, and accessType. Preserve uploaded source bytes.
-- Generate UUID and flat UUID.html key, create pending metadata, write S3, then finalize uploaded_at. Return success only after both storage and metadata succeed.
-- Keep S3 I/O outside database transactions. Attempt cleanup on failure; keep failures non-viewable. Document residual crash/orphan limitations without adding new tables/workers.
+- Generate UUID and flat UUID.html key. Write the object, then insert the artifact with uploaded_at set. Return success only after both succeed.
+- Treat the upload as atomic. If the object write fails, do not insert an artifact row. A failed upload leaves no artifact in the database.
 - Map internal records to the shared DTO; construct URLs from configured origins.
-- Implement exact mine/org filters via repositories, and 404 for unknown/pending IDs.
+- Implement exact mine/org filters via repositories, and 404 for an unknown id.
 - Stream original HTML through the content endpoint using the fixed CSP/headers. No generic renderer registry, transformation, or server-side execution.
 - Configure loopback binding and exact web-origin CORS. Do not accept the sandboxed document's opaque null origin.
 
@@ -29,7 +29,7 @@ API bootstrap/app.module, src/controllers/**, src/services/**, src/rendering/**,
 
 - Endpoint tests cover defaults, access filters, malformed requests, file limits/types, missing IDs, and common error envelopes.
 - A real local PostgreSQL/S3 run uploads fixture HTML and retrieves identical bytes through content.
-- Simulated storage/finalization failures never return successful upload metadata or make pending rows listable.
+- Simulated storage failures never return successful upload metadata and never leave an artifact row.
 - HTML response headers enforce the shared sandbox policy, including direct navigation to content.
 - A private artifact can be fetched by ID without credentials in this deliberately unauthenticated build; document that rather than implying privacy enforcement.
 - Hand working base URL/configuration and verified responses to tasks 05/06/07.

@@ -26,7 +26,7 @@ The backend-local Better Auth schema configuration uses `database: prismaAdapter
 
 ## Listing semantics
 
-Only include rows with uploaded_at set.
+Return stored artifacts. A failed upload has no row.
 
 - `view=mine`: creator_user_id equals the configured local user. Includes their private and organization-shared artifacts.
 - `view=org`: organization_id equals the configured local organization AND access_type is org_shared. Includes artifacts by other creators. If there is no configured organization, return an empty list.
@@ -50,7 +50,7 @@ type ArtifactDto = {
   sizeBytes: number;
   createdAt: string;
   updatedAt: string;
-  uploadedAt: string; // Only finalized artifacts are returned.
+  uploadedAt: string; // Set when the row is inserted after the object write succeeds.
   viewerUrl: string;  // WEB_ORIGIN + /artifacts/{id}
   contentUrl: string; // API_PUBLIC_ORIGIN + /api/v1/artifacts/{id}/content
 };
@@ -70,7 +70,7 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/v1/artifacts/{id} | None | 200 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts/{id}/content | None | 200 original HTML bytes |
 
-The API builds absolute URLs from configuration, never an untrusted Host header. Get-by-ID and content return 404 for missing or pending rows. They do not enforce private/org access in this no-auth build.
+The API builds absolute URLs from configuration, never an untrusted Host header. Get-by-ID and content return 404 for an unknown id. They do not enforce private/org access in this no-auth build.
 
 ### Upload behavior
 
@@ -80,8 +80,8 @@ The API builds absolute URLs from configuration, never an untrusted Host header.
 - Maximum file size: 10 MiB (10,485,760 bytes). Enforce during request parsing, not after accepting an unbounded body. Bounded buffering is acceptable for this MVP.
 - accessType defaults to private; reject any other enum value. Reject org_shared without a configured organization.
 - Each request creates a new artifact. No idempotency or automatic upload retries; rerunning a successful request creates another artifact.
-- Create a pending row, write the object, then set uploaded_at and return the finalized DTO. Do not keep a database transaction open over S3 I/O.
-- On failure, do not return a successful upload or expose a pending row. Attempt object cleanup; leave pending metadata if needed for diagnosis. A crash may leave pending metadata/orphaned bytes; document this limitation rather than adding job tables or a recovery worker.
+- Write the object, then insert the artifact row with `uploaded_at` set. Return the DTO only after both succeed.
+- The upload is atomic. If the object write fails, do not insert an artifact row. A failed upload leaves no artifact in the database.
 - This API does not watch/import files written to S3 outside Factrove.
 
 ### Errors
@@ -94,8 +94,8 @@ Return the common JSON envelope without stack traces or secrets:
 | 400 | ORGANIZATION_REQUIRED | org_shared without local organization |
 | 413 | FILE_TOO_LARGE | Above 10 MiB |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
-| 404 | ARTIFACT_NOT_FOUND | Unknown or pending artifact |
-| 503 | STORAGE_UNAVAILABLE | S3 failure or missing blob for finalized metadata |
+| 404 | ARTIFACT_NOT_FOUND | Unknown artifact |
+| 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
 
 A network failure has no API envelope; clients must report it separately.

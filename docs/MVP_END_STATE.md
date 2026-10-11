@@ -117,9 +117,8 @@ There is no user-to-org foreign key or global uniqueness on member.userId encodi
 
 ### Timestamp and lifecycle meaning
 
-- Creating metadata sets `created_at` and `updated_at`; `uploaded_at` starts null.
-- Successful object upload and metadata finalization set `uploaded_at` and `updated_at`.
-- Lists and viewers expose only finalized artifacts.
+- The artifact row is inserted only after the object is stored. That insert sets `created_at`, `updated_at`, and `uploaded_at` together.
+- Lists and viewers return stored artifacts. A failed upload has no row.
 - Future metadata-only edits would change `updated_at` without changing `uploaded_at`.
 - Future replacement could retain the artifact ID and `created_at` while updating content metadata and `uploaded_at`. Replacement behavior and concurrency are outside this MVP.
 
@@ -137,9 +136,9 @@ The original upload may end in `.htm`; the stored key always uses `.html`. Group
 
 The backend-local storage module has one S3 implementation, with a configurable endpoint for local S3-compatible development storage. This small provider interface prepares for Azure/GCP later. Database persistence remains PostgreSQL-only, without a database-provider abstraction.
 
-Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`, creates pending metadata, writes the object, then finalizes metadata and returns the artifact. Storage I/O occurs outside database transactions.
+Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`. It writes the object, then inserts the artifact row, and returns the artifact only after both succeed.
 
-A failed upload does not appear as a completed artifact. The API attempts cleanup; crash recovery may leave pending metadata or orphaned bytes in this initial build. This limitation is documented rather than introducing additional models or background infrastructure.
+The upload is atomic. If the object write fails, the database insert does not happen. A failed upload leaves no artifact in the database.
 
 The upload endpoint is the ingestion path. Files placed into the bucket independently are not automatically imported.
 
