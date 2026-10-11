@@ -70,9 +70,7 @@ PostgreSQL stores metadata and identities; object storage holds file bytes. Arti
 | `creator_user_id` | Text, required FK → User | User who created the artifact |
 | `organization_id` | Text, nullable FK → Organization | Organization captured at upload |
 | `access_type` | `private` or `org_shared`; default `private` | Library classification |
-| `filename` | Text, required | Original/display basename, without the client's filesystem path |
 | `mime_type` | Text, required | `text/html` for every MVP artifact |
-| `object_key` | Text, required and unique | Actual storage key; initially `{artifactId}.html` |
 | `size_bytes` | Nonnegative integer | Actual accepted file size |
 | `created_at` | Timestamp with time zone | Database row creation time |
 | `updated_at` | Timestamp with time zone | Last row modification, maintained by persistence code |
@@ -82,7 +80,7 @@ An artifact has one creator and optionally one associated organization. Both IDs
 
 Local uploads capture the configured organization even for private artifacts. A personal upload with no configured organization has a null organization ID. `org_shared` requires an organization ID, enforced by a database check.
 
-The object key is persisted even though its initial naming rule is simple. A later naming change can therefore preserve existing object references. Filename is the initial display label; a separate title is unnecessary for this MVP.
+The storage key is `{artifactId}.html` and is not stored. The original filename is not stored.
 
 ### User
 

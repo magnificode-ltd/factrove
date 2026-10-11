@@ -134,9 +134,7 @@ model Artifact {
   organizationId String?       @map("organization_id")
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   accessType     AccessType    @default(private) @map("access_type")
-  filename       String
   mimeType       String        @map("mime_type")
-  objectKey      String        @unique @map("object_key")
   sizeBytes      Int           @map("size_bytes")
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)

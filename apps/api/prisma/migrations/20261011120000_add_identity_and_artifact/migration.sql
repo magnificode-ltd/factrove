@@ -103,9 +103,7 @@ CREATE TABLE "artifact" (
     "creator_user_id" TEXT NOT NULL,
     "organization_id" TEXT,
     "access_type" "access_type" NOT NULL DEFAULT 'private',
-    "filename" TEXT NOT NULL,
     "mime_type" TEXT NOT NULL,
-    "object_key" TEXT NOT NULL,
     "size_bytes" INTEGER NOT NULL,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -144,9 +142,6 @@ CREATE INDEX "invitation_organizationId_idx" ON "invitation"("organizationId");
 
 -- CreateIndex
 CREATE INDEX "invitation_email_idx" ON "invitation"("email");
-
--- CreateIndex
-CREATE UNIQUE INDEX "artifact_object_key_key" ON "artifact"("object_key");
 
 -- CreateIndex
 CREATE INDEX "artifact_creator_created_id_idx" ON "artifact"("creator_user_id", "created_at" DESC, "id" DESC);

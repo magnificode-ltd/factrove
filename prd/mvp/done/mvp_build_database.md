@@ -18,7 +18,7 @@ apps/api/prisma/**, apps/api/src/database/**, a backend-local schema-generation 
 - Generate the Prisma identity schema from a pinned Better Auth configuration with its organization plugin. User and Organization are Better Auth's models, not independently designed Factrove models or temporary tables for a later identity migration. Keep the generator configuration/command reproducible and backend-local.
 - Retain the supporting models required by that generated configuration, including core session/account/verification and organization member/invitation models. These are library-owned schema, not additional Factrove product concepts. There is no requirement for exactly three physical tables.
 - Add Factrove's Artifact model as defined in docs/MVP_END_STATE.md, referencing the generated User and Organization models directly, using the persistence interfaces in the shared contract. Preserve adapter-compatible identity model/field mappings.
-- Commit an initial Prisma SQL migration with foreign keys, object-key uniqueness, access values, the org_shared organization check, and list indexes.
+- Commit an initial Prisma SQL migration with foreign keys, access values, the org_shared organization check, and list indexes. The storage key is `{artifactId}.html` and is not a column. The original filename is not a column.
 - Do not add custom content, usage, upload-operation, sharing, or token tables. Do not enforce one organization per user; in particular, member.userId must not be globally unique. Generated pair-level membership constraints are a separate concern.
 - Add an explicit, idempotent seed into the actual Better Auth user/organization tables, including their required fields, for the configured local identities. No credentials or sessions are needed. Do not put demo data into ordinary application startup.
 - Use Better Auth tooling to generate schema only; create/review/commit SQL with Prisma Migrate. Keep auth routes, session/key checks, and runtime membership enforcement deferred. The schema-generation configuration is not mounted as a live auth server in the MVP.
@@ -40,7 +40,7 @@ Against real PostgreSQL:
 - Run the local seed twice; IDs remain stable and rows are not duplicated.
 - Create private and org_shared artifacts for two fixture users. Verify mine/org filters independently.
 - Pending records never appear in ready queries.
-- Database rejects duplicate object keys, missing creators, and org_shared rows without an organization.
+- Database rejects missing creators and org_shared rows without an organization.
 - Marking an upload complete sets uploaded_at without changing created_at.
 - Publish exports and any generated type details to task 04.
 

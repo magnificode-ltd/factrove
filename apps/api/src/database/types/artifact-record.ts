@@ -5,9 +5,7 @@ export type ArtifactRecord = {
   creatorUserId: string;
   organizationId: string | null;
   accessType: AccessType;
-  filename: string;
   mimeType: string;
-  objectKey: string;
   sizeBytes: number;
   createdAt: Date;
   updatedAt: Date;
@@ -19,9 +17,7 @@ export type CreatePendingArtifactInput = {
   creatorUserId: string;
   organizationId: string | null;
   accessType: AccessType;
-  filename: string;
   mimeType: string;
-  objectKey: string;
   sizeBytes: number;
 };
 

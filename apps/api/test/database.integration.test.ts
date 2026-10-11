@@ -35,9 +35,7 @@ function artifactInput(overrides: Partial<CreatePendingArtifactInput> = {}): Cre
     creatorUserId: localUserFixture.id,
     organizationId: localOrganizationFixture.id,
     accessType: "private",
-    filename: "report.html",
     mimeType: "text/html",
-    objectKey: `${id}.html`,
     sizeBytes: 12,
     ...overrides,
   };
@@ -182,7 +180,6 @@ describe("PostgreSQL artifact persistence", () => {
     `;
     expect(artifactIndexes.map((row) => row.indexname)).toEqual([
       "artifact_creator_created_id_idx",
-      "artifact_object_key_key",
       "artifact_org_access_created_id_idx",
       "artifact_pkey",
     ]);
@@ -353,16 +350,12 @@ describe("PostgreSQL artifact persistence", () => {
     expect(stored.uploadedAt?.toISOString()).toBe("2026-10-11T15:04:05.000Z");
   });
 
-  it("rejects duplicate object keys, missing creators, org_shared without an organization, and unknown access values", async () => {
+  it("rejects missing creators, org_shared without an organization, and unknown access values", async () => {
     const personal = await repository.createPending(
       artifactInput({ organizationId: null, accessType: "private" }),
     );
     expect(personal.organizationId).toBeNull();
 
-    await repository.createPending(artifactInput({ objectKey: "shared-key.html" }));
-    await expect(repository.createPending(artifactInput({ objectKey: "shared-key.html" }))).rejects.toMatchObject({
-      code: "P2002",
-    });
     await expect(repository.createPending(artifactInput({ creatorUserId: "missing-user" }))).rejects.toMatchObject({
       code: "P2003",
     });
@@ -376,12 +369,11 @@ describe("PostgreSQL artifact persistence", () => {
     const id = randomUUID();
     await expect(
       prisma.$executeRawUnsafe(
-        `INSERT INTO "artifact" ("id", "creator_user_id", "organization_id", "access_type", "filename", "mime_type", "object_key", "size_bytes", "updated_at")
-         VALUES ($1::uuid, $2, $3, 'public', 'a.html', 'text/html', $4, 1, NOW())`,
+        `INSERT INTO "artifact" ("id", "creator_user_id", "organization_id", "access_type", "mime_type", "size_bytes", "updated_at")
+         VALUES ($1::uuid, $2, $3, 'public', 'text/html', 1, NOW())`,
         id,
         localUserFixture.id,
         localOrganizationFixture.id,
-        `${id}.html`,
       ),
     ).rejects.toThrow(/invalid input value for enum/);
   });

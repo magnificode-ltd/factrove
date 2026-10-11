@@ -120,7 +120,7 @@ File placement follows the [canonical README backend directory structure](../REA
 
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
-- `createPending({ id, creatorUserId, organizationId, accessType, filename, mimeType, objectKey, sizeBytes })`
+- `createPending({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes })`
 - `markUploaded(id, uploadedAt)`
 - `findReadyById(id)`
 - `listReady({ view, userId, organizationId })`
