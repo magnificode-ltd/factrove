@@ -90,7 +90,7 @@ Identity models come from Better Auth: its core schema provides User, and its or
 
 Better Auth connects to PostgreSQL through its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, with `organization()` configured for organization models. This configuration lives in the backend and uses its Prisma setup. Better Auth tooling generates the identity schema; Prisma Migrate manages the committed SQL migrations. See the [installation guide](https://better-auth.com/docs/installation) and [Prisma adapter guide](https://better-auth.com/docs/adapters/prisma).
 
-Object storage is another backend-local module. Its small provider interface separates file operations from the S3 implementation and accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
+Object storage is another backend-local module. Its S3 implementation uses the configured AWS bucket and region. The small provider interface accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
 
 Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation and delivery policy.
 

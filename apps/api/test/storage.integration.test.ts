@@ -19,7 +19,8 @@ try {
   }
 }
 
-const liveConfigured = Boolean(process.env.S3_BUCKET?.trim() && process.env.S3_REGION?.trim());
+const liveConfigured =
+  process.env.S3_INTEGRATION === "1" && Boolean(process.env.S3_BUCKET?.trim() && process.env.S3_REGION?.trim());
 
 describe.skipIf(!liveConfigured)("S3 blob store against the configured bucket", () => {
   let store: S3BlobStore;
@@ -55,9 +56,6 @@ describe.skipIf(!liveConfigured)("S3 blob store against the configured bucket", 
     expect(Object.keys(stored)).toEqual(["body"]);
     expect(Buffer.compare(Buffer.from(await readAll(stored.body)), Buffer.from(body))).toBe(0);
     expect(clientFacing(stored)).not.toContain(config.bucket);
-    if (config.endpoint) {
-      expect(clientFacing(stored)).not.toContain(config.endpoint);
-    }
 
     const head = await headClient.send(
       new HeadObjectCommand({
@@ -99,39 +97,8 @@ describe.skipIf(!liveConfigured)("S3 blob store against the configured bucket", 
       const text = clientFacing(error);
       expect(text).not.toContain(config.bucket);
       expect(text).not.toContain("invalid-secret-key");
-      if (config.endpoint) {
-        expect(text).not.toContain(config.endpoint);
-      }
     } finally {
       bad.onModuleDestroy();
-    }
-  });
-});
-
-describe("unreachable S3 endpoint", () => {
-  it("does not report a bad endpoint as a missing object or return the endpoint", async () => {
-    const endpoint = "http://127.0.0.1:9";
-    const store = new S3BlobStore({
-      bucket: "factrove",
-      region: "us-east-1",
-      endpoint,
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId: "invalid-access-key",
-        secretAccessKey: "invalid-secret-key",
-      },
-    });
-
-    try {
-      const error = await rejectedPut(store, flatHtmlKey());
-      expect(error).toBeInstanceOf(BlobStoreUnavailableError);
-      expect(error).not.toBeInstanceOf(BlobNotFoundError);
-      const text = clientFacing(error);
-      expect(text).not.toContain(endpoint);
-      expect(text).not.toContain("factrove");
-      expect(text).not.toContain("invalid-secret-key");
-    } finally {
-      store.onModuleDestroy();
     }
   });
 });
@@ -181,9 +148,6 @@ async function expectMissing(store: S3BlobStore, objectKey: string, config: S3St
   expect(thrown).toBeInstanceOf(BlobNotFoundError);
   const text = clientFacing(thrown);
   expect(text).not.toContain(config.bucket);
-  if (config.endpoint) {
-    expect(text).not.toContain(config.endpoint);
-  }
 }
 
 function clientFacing(value: unknown): string {

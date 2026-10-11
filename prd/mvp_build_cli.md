@@ -35,7 +35,7 @@ Using a local HTTP stub:
 - Verify missing file, directory path, unsupported extension, oversize file, server error, and unreachable API.
 - Verify the command exits without a lingering Nest process.
 
-Using the real local API/S3/PostgreSQL stack:
+Using the real local API, local PostgreSQL, and configured AWS S3 bucket:
 
 - Run the documented command against fixtures/hello.html and follow its returned viewer link.
 - Confirm the returned artifact appears in the appropriate UI lists after refresh.

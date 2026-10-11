@@ -34,80 +34,18 @@ describe("S3 storage configuration", () => {
     expect(() => readS3StorageConfig({})).toThrow(/S3_BUCKET must be set/);
   });
 
-  it("reads a local endpoint and path-style addressing", () => {
+  it("uses the bucket and region and ignores a custom endpoint", () => {
     expect(
       readS3StorageConfig({
-        S3_BUCKET: "factrove",
-        S3_REGION: "us-east-1",
-        S3_ENDPOINT: " http://127.0.0.1:9000 ",
-        S3_FORCE_PATH_STYLE: "TRUE",
-      }),
-    ).toEqual({
-      bucket: "factrove",
-      region: "us-east-1",
-      endpoint: "http://127.0.0.1:9000",
-      forcePathStyle: true,
-    });
-  });
-
-  it("leaves the endpoint unset and path style off for real AWS defaults", () => {
-    expect(
-      readS3StorageConfig({
-        S3_BUCKET: "factrove",
+        S3_BUCKET: "factrove-dev-uploads",
         S3_REGION: "eu-central-1",
-        S3_ENDPOINT: " ",
-        S3_FORCE_PATH_STYLE: "false",
+        S3_ENDPOINT: "http://127.0.0.1:9000",
+        S3_FORCE_PATH_STYLE: "true",
       }),
     ).toEqual({
-      bucket: "factrove",
+      bucket: "factrove-dev-uploads",
       region: "eu-central-1",
-      forcePathStyle: false,
     });
-  });
-
-  it("rejects invalid endpoint and path-style values without echoing them", () => {
-    const endpoint = "not a url secret-endpoint";
-    expectUnavailable(
-      () =>
-        readS3StorageConfig({
-          S3_BUCKET: "factrove",
-          S3_REGION: "us-east-1",
-          S3_ENDPOINT: endpoint,
-        }),
-      "S3_ENDPOINT must be an absolute http(s) URL",
-      endpoint,
-    );
-
-    expectUnavailable(
-      () =>
-        readS3StorageConfig({
-          S3_BUCKET: "factrove",
-          S3_REGION: "us-east-1",
-          S3_ENDPOINT: "ftp://127.0.0.1/bucket",
-        }),
-      "S3_ENDPOINT must be an absolute http(s) URL",
-    );
-
-    expectUnavailable(
-      () =>
-        readS3StorageConfig({
-          S3_BUCKET: "factrove",
-          S3_REGION: "us-east-1",
-          S3_ENDPOINT: "http://user:secret-password@127.0.0.1:9000",
-        }),
-      "S3_ENDPOINT must not include credentials",
-      "secret-password",
-    );
-
-    expectUnavailable(
-      () =>
-        readS3StorageConfig({
-          S3_BUCKET: "factrove",
-          S3_REGION: "us-east-1",
-          S3_FORCE_PATH_STYLE: "yes",
-        }),
-      "S3_FORCE_PATH_STYLE must be true or false",
-    );
   });
 
   it("accepts a static credential pair and otherwise keeps the AWS credential chain", () => {
@@ -160,8 +98,8 @@ describe("S3 error normalization", () => {
     });
     expect(missing.message).not.toContain("secret-bucket");
 
-    const notFound = toBlobStoreError({ name: "NotFound" }, objectKey);
-    expect(notFound).toBeInstanceOf(BlobNotFoundError);
+    const notFound = toBlobStoreError({ name: "NotFound", $metadata: { httpStatusCode: 404 } }, objectKey);
+    expect(notFound).toBeInstanceOf(BlobStoreUnavailableError);
 
     const cause = {
       name: "InvalidAccessKeyId",

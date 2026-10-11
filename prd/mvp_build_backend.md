@@ -28,7 +28,7 @@ API bootstrap/app.module, src/controllers/**, src/services/**, src/rendering/**,
 ## Acceptance
 
 - Endpoint tests cover defaults, access filters, malformed requests, file limits/types, missing IDs, and common error envelopes.
-- A real local PostgreSQL/S3 run uploads fixture HTML and retrieves identical bytes through content.
+- A real local PostgreSQL and configured AWS S3 run uploads fixture HTML and retrieves identical bytes through content.
 - Simulated storage failures never return successful upload metadata and never leave an artifact row.
 - HTML response headers enforce the shared sandbox policy, including direct navigation to content.
 - A private artifact can be fetched by ID without credentials in this deliberately unauthenticated build; document that rather than implying privacy enforcement.

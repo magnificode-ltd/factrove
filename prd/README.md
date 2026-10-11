@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL and object storage persist the result. No authentication, API keys, or cloud service are required.
+Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and a configured AWS S3 bucket persists artifact bytes. No Factrove authentication or API keys are required.
 
 The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01 and 02 are complete; the remaining briefs are implementation assignments. Completed briefs are archived under `prd/mvp/done/`.
 
@@ -24,7 +24,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 
 1. Complete 01 and hand off a buildable baseline with agreed dependency versions, exports, API client, and app skeletons. It is a small integration prerequisite, not the entire application.
 2. Start 02, 03, 05, and 06 independently. Task 04 can implement against the repository/storage contracts while 02/03 are in progress.
-3. Task 07 can prepare local PostgreSQL/storage services and setup instructions alongside those tasks.
+3. Task 07 can prepare local PostgreSQL and setup instructions alongside those tasks. The AWS bucket is supplied by the operator.
 4. Integrate 02/03 into 04, then verify web and CLI against the real backend. Complete 07's end-to-end acceptance.
 
 With fewer agents, schedule these streams in waves. With shared checkouts, respect the disjoint ownership above; isolated branches/worktrees can also be used. Do not overwrite another task's in-progress work.
@@ -37,12 +37,12 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred.
 
-Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary; a local S3-compatible service exercises that same implementation.
+Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary aimed at the configured AWS bucket.
 
 ## Final acceptance checklist
 
 - [ ] A fresh clone has a verified macOS setup path using pinned Node/pnpm versions and a documented container runtime prerequisite.
-- [ ] PostgreSQL and local S3-compatible storage start with persistent volumes and a dedicated bucket.
+- [ ] PostgreSQL starts with a persistent volume. Artifact bytes use the configured AWS S3 bucket.
 - [ ] Committed migrations apply to an empty database; explicit seed runs twice without duplicates or destructive resets.
 - [ ] One command starts FE/BE; the CLI runs from another terminal without database/storage credentials.
 - [ ] Private upload returns a viewer URL; refreshing My artifacts shows it; it is absent from Organization artifacts.
