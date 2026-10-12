@@ -1,6 +1,5 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -8,7 +7,6 @@ import { PrismaClient } from "@prisma/client";
 import { artifactEnvelopeSchema } from "@factrove/contracts";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
 import { configureHttpApp } from "../src/configure-http-app.js";
@@ -16,37 +14,27 @@ import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from 
 import { API_CONFIG, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, type BlobStore } from "../src/storage/blob-store.js";
 import { contentSecurityPolicy } from "../src/rendering/html-policy.js";
+import { createIsolatedDatabase, dropIsolatedDatabase, readOptionalEnvValue, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env.S3_INTEGRATION === "1";
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
-const envPath = fileURLToPath(new URL("../.env", import.meta.url));
 const fixturePath = fileURLToPath(new URL("../../../fixtures/hello.html", import.meta.url));
-const testDatabaseName = "factrove_test";
 
 describe.skipIf(!enabled)("S3 content round trip", () => {
   const previousDatabaseUrl = process.env.DATABASE_URL;
+  let isolated: IsolatedDatabase | undefined;
   let app: INestApplication | undefined;
   let baseUrl = "";
   let uploadedId: string | undefined;
 
   beforeAll(async () => {
     applyEnv(["S3_BUCKET", "S3_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]);
-    const adminUrl = requiredFileEnv("DATABASE_URL");
-    const testUrl = withDatabase(adminUrl, testDatabaseName);
-    const admin = new Client({ connectionString: withDatabase(adminUrl, "postgres") });
-    await admin.connect();
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS ${testDatabaseName} WITH (FORCE)`);
-      await admin.query(`CREATE DATABASE ${testDatabaseName}`);
-    } finally {
-      await admin.end();
-    }
-
-    process.env.DATABASE_URL = testUrl;
+    isolated = await createIsolatedDatabase();
+    process.env.DATABASE_URL = isolated.databaseUrl;
     await execFileAsync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
       cwd: apiRoot,
-      env: { ...process.env, DATABASE_URL: testUrl },
+      env: { ...process.env, DATABASE_URL: isolated.databaseUrl },
     });
     const seeder = new PrismaClient();
     await seeder.$connect();
@@ -83,6 +71,9 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
     if (app) {
       await app.close();
     }
+    if (isolated) {
+      await dropIsolatedDatabase(isolated);
+    }
     if (previousDatabaseUrl === undefined) {
       delete process.env.DATABASE_URL;
     } else {
@@ -108,39 +99,12 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
 
 function applyEnv(names: string[]): void {
   for (const name of names) {
-    const value = fileEnv(name);
-    if (value && !process.env[name]) {
+    if (process.env[name]) {
+      continue;
+    }
+    const value = readOptionalEnvValue(name);
+    if (value) {
       process.env[name] = value;
     }
   }
-}
-
-function requiredFileEnv(name: string): string {
-  const value = fileEnv(name);
-  if (!value) {
-    throw new Error(`${name} is required in apps/api/.env`);
-  }
-  return value;
-}
-
-function fileEnv(name: string): string | undefined {
-  const text = readFileSync(envPath, "utf8");
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator === -1 || trimmed.slice(0, separator) !== name) {
-      continue;
-    }
-    return trimmed.slice(separator + 1).trim().replaceAll(/^["']|["']$/g, "");
-  }
-  return undefined;
-}
-
-function withDatabase(databaseUrl: string, database: string): string {
-  const url = new URL(databaseUrl);
-  url.pathname = `/${database}`;
-  return url.href;
 }

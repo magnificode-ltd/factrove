@@ -1,12 +1,10 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { Client } from "pg";
 import { PrismaClient } from "@prisma/client";
 import {
   apiErrorSchema,
@@ -27,12 +25,11 @@ import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from 
 import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
 import { MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
+import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
-const envPath = fileURLToPath(new URL("../.env", import.meta.url));
 const fixturePath = fileURLToPath(new URL("../../../fixtures/hello.html", import.meta.url));
-const testDatabaseName = "factrove_test";
 
 const config: ApiConfig = {
   host: "127.0.0.1",
@@ -48,6 +45,8 @@ class MemoryBlobStore implements BlobStore {
   failPut = false;
   putError: Error | undefined;
   failGet = false;
+  throwBeforeChunk = false;
+  interruptAfterFirstChunk = false;
 
   async put(input: { objectKey: string; body: Uint8Array; contentType: string }): Promise<void> {
     if (this.putError) {
@@ -66,6 +65,21 @@ class MemoryBlobStore implements BlobStore {
     const stored = this.objects.get(objectKey);
     if (!stored) {
       throw new BlobNotFoundError(objectKey);
+    }
+    if (this.throwBeforeChunk) {
+      return {
+        body: (async function* failed() {
+          throw new BlobStoreUnavailableError("Object storage is unavailable");
+        })(),
+      };
+    }
+    if (this.interruptAfterFirstChunk) {
+      return {
+        body: (async function* interrupted() {
+          yield stored.subarray(0, 1);
+          throw new BlobStoreUnavailableError("Object storage is unavailable");
+        })(),
+      };
     }
     const midpoint = Math.ceil(stored.byteLength / 2);
     const head = stored.subarray(0, midpoint);
@@ -89,6 +103,8 @@ class MemoryBlobStore implements BlobStore {
     this.failPut = false;
     this.putError = undefined;
     this.failGet = false;
+    this.throwBeforeChunk = false;
+    this.interruptAfterFirstChunk = false;
   }
 }
 
@@ -111,26 +127,17 @@ describe("API configuration", () => {
 describe("HTTP API", () => {
   const store = new MemoryBlobStore();
   const previousDatabaseUrl = process.env.DATABASE_URL;
+  let isolated: IsolatedDatabase | undefined;
   let app: INestApplication;
   let baseUrl = "";
   let prisma: PrismaService;
 
   beforeAll(async () => {
-    const adminUrl = databaseUrlFromEnvFile();
-    const admin = new Client({ connectionString: withDatabase(adminUrl, "postgres") });
-    await admin.connect();
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS ${testDatabaseName} WITH (FORCE)`);
-      await admin.query(`CREATE DATABASE ${testDatabaseName}`);
-    } finally {
-      await admin.end();
-    }
-
-    const testUrl = withDatabase(adminUrl, testDatabaseName);
-    process.env.DATABASE_URL = testUrl;
+    isolated = await createIsolatedDatabase();
+    process.env.DATABASE_URL = isolated.databaseUrl;
     await execFileAsync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
       cwd: apiRoot,
-      env: { ...process.env, DATABASE_URL: testUrl },
+      env: { ...process.env, DATABASE_URL: isolated.databaseUrl },
     });
 
     const seeder = new PrismaClient();
@@ -150,6 +157,9 @@ describe("HTTP API", () => {
   afterAll(async () => {
     if (app) {
       await app.close();
+    }
+    if (isolated) {
+      await dropIsolatedDatabase(isolated);
     }
     if (previousDatabaseUrl === undefined) {
       delete process.env.DATABASE_URL;
@@ -457,6 +467,41 @@ describe("HTTP API", () => {
     expect((await errorOf(getFailure)).code).toBe("STORAGE_UNAVAILABLE");
   });
 
+  it("returns json when content streaming fails before any bytes are sent", async () => {
+    const artifact = await upload(baseUrl, "early.html", new TextEncoder().encode("<p>early</p>"));
+    store.throwBeforeChunk = true;
+    const response = await settledWithin(
+      fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`).then(async (pending) => ({
+        status: pending.status,
+        error: await errorOf(pending),
+      })),
+      2000,
+    );
+    expect(response.status).toBe(503);
+    expect(response.error).toEqual({
+      code: "STORAGE_UNAVAILABLE",
+      message: "Object storage is unavailable.",
+    });
+  });
+
+  it("aborts a content response when storage fails after the first chunk", async () => {
+    const bytes = new TextEncoder().encode(`<p>${"x".repeat(4096)}</p>`);
+    const artifact = await upload(baseUrl, "partial.html", bytes);
+    store.interruptAfterFirstChunk = true;
+    const started = Date.now();
+    let failure: unknown;
+    try {
+      await settledWithin(readContent(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`), 2000);
+      failure = new Error("content response completed");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toMatch(/timed out/);
+    expect((failure as Error).message).not.toBe("content response completed");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("allows only the configured web origin through CORS", async () => {
     const allowed = await fetch(`${baseUrl}/api/v1/health`, {
       headers: { Origin: "http://localhost:3000" },
@@ -634,32 +679,18 @@ function getWithHost(url: string, host: string): Promise<{ status: number; json:
   });
 }
 
-function databaseUrlFromEnvFile(): string {
-  const value = envValue("DATABASE_URL");
-  if (!value) {
-    throw new Error("DATABASE_URL is required in apps/api/.env");
-  }
-  return value;
+function settledWithin<T>(work: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${milliseconds}ms`)), milliseconds);
+  });
+  work.catch(() => undefined);
+  return Promise.race([work, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
-function envValue(name: string): string | undefined {
-  const text = readFileSync(envPath, "utf8");
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator === -1 || trimmed.slice(0, separator) !== name) {
-      continue;
-    }
-    return trimmed.slice(separator + 1).trim().replaceAll(/^["']|["']$/g, "");
-  }
-  return undefined;
-}
-
-function withDatabase(databaseUrl: string, database: string): string {
-  const url = new URL(databaseUrl);
-  url.pathname = `/${database}`;
-  return url.href;
+async function readContent(url: string): Promise<Uint8Array> {
+  const response = await fetch(url);
+  return new Uint8Array(await response.arrayBuffer());
 }

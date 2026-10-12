@@ -56,10 +56,14 @@ export class ArtifactsController {
     }
     const file = new StreamableFile(Readable.from(opened.body));
     file.setErrorHandler((error, streamResponse) => {
-      if (streamResponse.destroyed || streamResponse.headersSent) {
-        if (!streamResponse.destroyed) {
-          streamResponse.end();
+      if (streamResponse.headersSent) {
+        // Keep the socket from idling on a Content-Length the rest of the body will never fill.
+        if (!streamResponse.destroyed && "destroy" in streamResponse && typeof streamResponse.destroy === "function") {
+          streamResponse.destroy();
         }
+        return;
+      }
+      if (streamResponse.destroyed) {
         return;
       }
       const mapped = contentFailure(error);
