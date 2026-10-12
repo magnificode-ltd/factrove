@@ -1,13 +1,29 @@
 import type { ReactNode } from "react";
 
-export function PageIntro({ title, actions }: { title: string; actions?: ReactNode }) {
+export function AppBar({ children }: { children?: ReactNode }) {
   return (
-    <header className="masthead">
-      <div className="title-block">
-        <p className="product">Factrove</p>
-        <h1>{title}</h1>
-      </div>
-      {actions}
+    <header className="app-bar">
+      <a className="wordmark" href="/">
+        Factrove
+      </a>
+      {children}
+    </header>
+  );
+}
+
+export function ViewerBar({ title, meta }: { title: string; meta?: ReactNode }) {
+  return (
+    <header className="app-bar">
+      <a className="wordmark" href="/">
+        Factrove
+      </a>
+      <a className="back" href="/">
+        Back to library
+      </a>
+      <h1 className="bar-title" title={title}>
+        {title}
+      </h1>
+      {meta}
     </header>
   );
 }

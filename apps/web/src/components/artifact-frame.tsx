@@ -16,7 +16,7 @@ export function ArtifactFrame({ contentUrl }: { contentUrl: string }) {
 
   return (
     <iframe
-      className="viewer"
+      className="stage-frame"
       title="Uploaded HTML"
       src={contentUrl}
       // allow-scripts only: the document cannot read the Next.js parent.

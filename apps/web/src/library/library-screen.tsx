@@ -1,5 +1,5 @@
 import type { ContextEnvelope } from "@factrove/contracts";
-import { ModeNote, PageIntro } from "@/components/chrome";
+import { AppBar, ModeNote } from "@/components/chrome";
 import { accessLabel, formatBytes, formatUploadedAt } from "@/format";
 import type { LibraryModel } from "@/library/load-library";
 
@@ -14,18 +14,8 @@ function refreshHref(state: LibraryModel): string {
 export function LibraryScreen({ state }: { state: LibraryModel }) {
   const title = state.view === "mine" ? "My artifacts" : "Organization artifacts";
   return (
-    <main className="page">
-      <PageIntro
-        title={title}
-        actions={
-          <a className="refresh" href={refreshHref(state)}>
-            Refresh
-          </a>
-        }
-      />
-      <ModeNote />
-      {state.status === "unavailable" ? null : <p className="context">{contextLabel(state.context)}</p>}
-      <div className="toolbar">
+    <div className="library-page">
+      <AppBar>
         <nav className="tabs" aria-label="Artifact lists">
           <a href="/" aria-current={state.view === "mine" ? "page" : undefined}>
             My artifacts
@@ -34,9 +24,17 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
             Organization artifacts
           </a>
         </nav>
-      </div>
-      <LibraryBody state={state} />
-    </main>
+        <a className="refresh" href={refreshHref(state)}>
+          Refresh
+        </a>
+      </AppBar>
+      <main className="catalog">
+        <h1 className="page-title">{title}</h1>
+        <ModeNote />
+        {state.status === "unavailable" ? null : <p className="context">{contextLabel(state.context)}</p>}
+        <LibraryBody state={state} />
+      </main>
+    </div>
   );
 }
 
@@ -71,12 +69,10 @@ function LibraryBody({ state }: { state: LibraryModel }) {
     <ul className="list">
       {state.items.map((artifact) => (
         <li key={artifact.id}>
-          <a className="card" href={`/artifacts/${encodeURIComponent(artifact.id)}`}>
-            <span className="card-top">
-              <span className="filename">{artifact.filename}</span>
-              <span className="badge">{accessLabel(artifact.accessType)} · list only</span>
-            </span>
-            <span className="meta">
+          <a className="row" href={`/artifacts/${encodeURIComponent(artifact.id)}`}>
+            <span className="filename">{artifact.filename}</span>
+            <span className="row-meta">
+              <span>{accessLabel(artifact.accessType)} · list only</span>
               <time dateTime={artifact.uploadedAt}>{formatUploadedAt(artifact.uploadedAt)}</time>
               <span>{formatBytes(artifact.sizeBytes)}</span>
             </span>
