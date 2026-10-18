@@ -15,7 +15,8 @@
     "infra:reset": "node scripts/infra.mjs reset",
     "db:migrate": "pnpm --filter @factrove/api db:migrate",
     "db:seed": "pnpm --filter @factrove/contracts build && pnpm --filter @factrove/api db:seed",
-    "factrove": "node scripts/factrove.mjs"
+    "factrove": "node scripts/factrove.mjs",
+    "e2e": "node scripts/e2e-local.mjs"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

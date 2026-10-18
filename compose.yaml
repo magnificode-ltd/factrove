@@ -1,6 +1,7 @@
 # Local Factrove infrastructure.
-# PostgreSQL only. Artifact bytes stay in the configured AWS bucket.
-# The digest is the official multi-arch image index (linux/amd64 and linux/arm64),
+# PostgreSQL stores metadata. Garage stores artifact bytes for local development.
+# Leave S3_ENDPOINT unset to use real AWS S3 instead of this Garage service.
+# The digests are official multi-arch image indexes (linux/amd64 and linux/arm64),
 # so Apple Silicon and Intel Macs each pull their own build.
 
 name: factrove
@@ -23,5 +24,28 @@ services:
       retries: 30
       start_period: 10s
 
+  garage:
+    image: dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    ports:
+      - "127.0.0.1:3900:3900"
+    environment:
+      GARAGE_RPC_SECRET: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+      GARAGE_DEFAULT_ACCESS_KEY: factrove-local
+      GARAGE_DEFAULT_SECRET_KEY: factrove-local-secret
+      GARAGE_DEFAULT_BUCKET: factrove
+    volumes:
+      - ./infra/garage.toml:/etc/garage.toml:ro
+      - factrove-garage-meta:/var/lib/garage/meta
+      - factrove-garage-data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
 volumes:
   factrove-postgres:
+  factrove-garage-meta:
+  factrove-garage-data:

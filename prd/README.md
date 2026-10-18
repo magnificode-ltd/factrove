@@ -2,9 +2,9 @@
 
 ## Outcome
 
-Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and a configured AWS S3 bucket persists artifact bytes. No Factrove authentication or API keys are required.
+Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the AWS upload loop, the S3-gated integration tests, and the macOS run; those checks were not run. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the live upload loop on the local S3 stand-in, the S3-gated integration tests, and the macOS run. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 
@@ -19,14 +19,14 @@ All implementation tasks follow the [canonical backend directory structure](../R
 | 05 | [Frontend](mvp/done/mvp_build_frontend.md) | Done | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
 | 06 | [CLI](mvp/done/mvp_build_cli.md) | Done — stub-verified | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
 | 07 | [Local runtime and integration](mvp/done/mvp_integrate_local.md) | Done — runtime verified; AWS live loop not run | compose.yaml, .env.example, setup docs/scripts, integration checks, shared lockfile reconciliation | 01 to start; 02–06 to finish |
-| 08 | [End-to-end AWS and macOS checks](mvp/mvp_verify_end_to_end.md) | Not started | Live CLI upload to AWS, viewer and list refresh, content CSP, AWS bytes after restart, macOS setup, S3-gated integration tests | 07 |
+| 08 | [End-to-end local acceptance](mvp/mvp_verify_end_to_end.md) | In progress | Local Garage stand-in, live CLI upload, viewer and list refresh, content CSP, bytes after restart, macOS setup, S3-gated integration tests | 07 |
 
 ## Parallel execution
 
 1. Complete 01 and hand off a buildable baseline with agreed dependency versions, exports, API client, and app skeletons. It is a small integration prerequisite, not the entire application.
 2. Start 02, 03, 05, and 06 independently. Task 04 can implement against the repository/storage contracts while 02/03 are in progress.
-3. Task 07 can prepare local PostgreSQL and setup instructions alongside those tasks. The AWS bucket is supplied by the operator.
-4. Integrate 02/03 into 04, then verify web and CLI against the real backend. Task 07 provides the local runtime. Task 08 runs the remaining live AWS and macOS checks.
+3. Task 07 can prepare local PostgreSQL and setup instructions alongside those tasks. Task 08 adds the local Garage stand-in. An AWS bucket remains an optional configuration.
+4. Integrate 02/03 into 04, then verify web and CLI against the real backend. Task 07 provides the local runtime. Task 08 runs the remaining live upload and macOS checks.
 
 With fewer agents, schedule these streams in waves. With shared checkouts, respect the disjoint ownership above; isolated branches/worktrees can also be used. Do not overwrite another task's in-progress work.
 
@@ -38,12 +38,12 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred.
 
-Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary aimed at the configured AWS bucket.
+Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary. Local development uses Garage. Real AWS S3 remains the configuration with `S3_ENDPOINT` unset.
 
 ## Final acceptance checklist
 
 - [ ] A fresh clone has a verified macOS setup path using pinned Node/pnpm versions and a documented container runtime prerequisite.
-- [ ] PostgreSQL starts with a persistent volume. Artifact bytes use the configured AWS S3 bucket.
+- [ ] PostgreSQL starts with a persistent volume. Artifact bytes use the configured S3 bucket. Local setup uses Garage. AWS remains available when `S3_ENDPOINT` is unset.
 - [x] Committed migrations apply to an empty database; explicit seed runs twice without duplicates or destructive resets.
 - [x] One command starts FE/BE; the CLI runs from another terminal without database/storage credentials.
 - [ ] Private upload returns a viewer URL; refreshing My artifacts shows it; it is absent from Organization artifacts.
@@ -52,12 +52,12 @@ Use Artifact as the custom product table alongside the schema required by Better
 - [x] A second user's seeded organization-shared artifact appears in Organization artifacts but not My artifacts; their private artifact appears in neither list.
 - [ ] Missing files, unsupported inputs, oversized uploads, unknown IDs, and an unavailable backend produce useful errors.
 - [x] The CLI exits cleanly and JSON output contains no framework startup logs.
-- [ ] Restarting FE/BE and PostgreSQL without deleting the database volume preserves metadata. Artifact bytes remain in the AWS bucket.
+- [ ] Restarting FE/BE, PostgreSQL, and local object storage without deleting the data volumes preserves metadata and object bytes. AWS objects stay in AWS when that configuration is used.
 - [ ] No raw HTML is injected into the Next.js application DOM; iframe/CSP isolation is checked.
 - [x] Root build, typecheck, and the default test suites pass.
 - [ ] S3-gated integration tests pass (`storage.integration` and `content.s3.integration`, enabled with `S3_INTEGRATION=1`).
 - [x] Setup instructions distinguish unauthenticated list classifications from actual access control.
 
-Checked items were observed on October 18, 2026 against local PostgreSQL. The second-user list check used rows inserted into that database, then the real API and library UI. Unchecked items that still need the configured AWS bucket, a content response, a Mac run, or `S3_INTEGRATION=1` are owned by task 08. PostgreSQL restart preserved metadata; AWS object bytes were not checked. CLI errors for a missing file, a non-HTML file, an oversized file, an unknown id, and `STORAGE_UNAVAILABLE` were checked; the web unavailable-backend screen was not rechecked live. Root build, typecheck, and the default test suites passed. `storage.integration` and `content.s3.integration` were skipped.
+Checked items were observed on October 18, 2026 against local PostgreSQL. The second-user list check used rows inserted into that database, then the real API and library UI. Unchecked items that still need the upload loop, a content response, a Mac run, or `S3_INTEGRATION=1` are owned by task 08. PostgreSQL restart preserved metadata; object bytes were not checked. CLI errors for a missing file, a non-HTML file, an oversized file, an unknown id, and `STORAGE_UNAVAILABLE` were checked; the web unavailable-backend screen was not rechecked live. Root build, typecheck, and the default test suites passed. `storage.integration` and `content.s3.integration` were skipped.
 
-Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the live AWS upload loop, the S3-gated integration tests, and the macOS run.
+Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the live upload loop on Garage, the S3-gated integration tests, and the macOS run.

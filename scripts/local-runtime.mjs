@@ -119,10 +119,16 @@ export function infraFailureHint(stderr) {
     return "The container runtime is not running. Start Docker Desktop, then run pnpm infra:up again.";
   }
   if (text.includes("address already in use") || text.includes("port is already allocated")) {
-    return "127.0.0.1:5432 is already in use. Stop the other PostgreSQL process, or change the host port in compose.yaml and DATABASE_URL together.";
+    if (text.includes("3900")) {
+      return "127.0.0.1:3900 is already in use. Stop the other process, or change the Garage host port in compose.yaml and S3_ENDPOINT together.";
+    }
+    if (text.includes("5432")) {
+      return "127.0.0.1:5432 is already in use. Stop the other PostgreSQL process, or change the host port in compose.yaml and DATABASE_URL together.";
+    }
+    return "A host port in compose.yaml is already in use. Stop the other process, or change that port and the matching API setting together.";
   }
   if (text.includes("pull access denied") || text.includes("manifest unknown") || text.includes("failed to resolve reference")) {
-    return "Could not pull the pinned Postgres image. Check that this machine can reach Docker Hub.";
+    return "Could not pull a pinned container image. Check that this machine can reach Docker Hub.";
   }
   return "";
 }

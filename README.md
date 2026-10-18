@@ -90,13 +90,13 @@ Identity models come from Better Auth: its core schema provides User, and its or
 
 Better Auth connects to PostgreSQL through its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, with `organization()` configured for organization models. This configuration lives in the backend and uses its Prisma setup. Better Auth tooling generates the identity schema; Prisma Migrate manages the committed SQL migrations. See the [installation guide](https://better-auth.com/docs/installation) and [Prisma adapter guide](https://better-auth.com/docs/adapters/prisma).
 
-Object storage is another backend-local module. Its S3 implementation uses the configured AWS bucket and region. The small provider interface accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
+Object storage is another backend-local module. Its S3 implementation uses the configured bucket and region, and `S3_ENDPOINT` when that variable selects an S3-compatible service. The small provider interface accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
 
 Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation and delivery policy.
 
 ## Local setup
 
-This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to an existing AWS S3 bucket. The web app and CLI receive HTTP origins. Database and storage credentials stay in the API environment.
+This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to Garage, the local S3-compatible server started with it. Real AWS S3 stays available: set the bucket, region, and credentials, and leave `S3_ENDPOINT` unset. The web app and CLI receive HTTP origins. Database and storage credentials stay in the API environment.
 
 `private` and `org_shared` choose which library list an artifact appears in. This build is unauthenticated: those labels are list classifications, and opening an artifact URL does not check membership. Login, API keys, and managed hosting are later work described in the [MVP end state](docs/MVP_END_STATE.md).
 
@@ -106,7 +106,7 @@ This checkout runs the local upload, library, and viewer loop. PostgreSQL runs i
 - pnpm 11.25.0, pinned by `packageManager` in [package.json](package.json).
 - Docker Desktop on Apple Silicon or Intel Mac, or another runtime that provides Docker Compose v2 (`docker compose`). OrbStack and Colima qualify when they provide that command. Start the runtime before `pnpm infra:up`.
 
-The Postgres image is pinned to the official `postgres:17.11` multi-arch index, so the Mac's architecture selects its own build. Host port `5432` is bound to `127.0.0.1`.
+The Postgres image is pinned to the official `postgres:17.11` multi-arch index, so the Mac's architecture selects its own build. Host port `5432` is bound to `127.0.0.1`. Garage `v2.3.0` is pinned the same way. Its S3 API is bound to `127.0.0.1:3900`, and it creates the `factrove` bucket on startup.
 
 ### Environment
 
@@ -118,9 +118,9 @@ cp .env.example .env
 Edit `apps/api/.env` before uploading:
 
 - `DATABASE_URL` already matches the Compose database `factrove` on `127.0.0.1:5432`, user `factrove`, password `factrove`.
-- Set `S3_BUCKET` and `S3_REGION` to the existing bucket. Factrove does not create the bucket and does not run an S3 service.
-- Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` together, with `AWS_SESSION_TOKEN` when the key is temporary. Leave those unset to use `AWS_PROFILE` or the default AWS credential chain.
-- The API calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
+- `S3_BUCKET=factrove`, `S3_REGION=us-east-1`, `S3_ENDPOINT=http://127.0.0.1:3900`, and `S3_FORCE_PATH_STYLE=true` match Garage. The access key `factrove-local` and secret `factrove-local-secret` are local credentials from [compose.yaml](compose.yaml). `pnpm infra:up` creates the bucket.
+- For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`, and set `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for a temporary key). Leave that pair unset to use `AWS_PROFILE` or the default credential chain. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
+- AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
 
 The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command.
 
@@ -134,7 +134,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-`pnpm infra:up` starts PostgreSQL and waits until it accepts connections. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the local user `local-user` (Local User) and organization `local-org` (Local Organization). Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup.
+`pnpm infra:up` starts PostgreSQL and Garage and waits until both are healthy. Garage creates the `factrove` bucket when it starts. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the local user `local-user` (Local User) and organization `local-org` (Local Organization). Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup.
 
 `pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C, SIGTERM, and closing the terminal stop both. If one app exits, the command stops the other. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change. While it is running, Next.js may rewrite `apps/web/next-env.d.ts`. The command restores the committed copy when it exits.
 
@@ -149,7 +149,7 @@ pnpm factrove upload --help
 
 Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
-`pnpm infra:down` stops PostgreSQL and keeps the data volume. `pnpm infra:reset` stops it and deletes that volume. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. Reset is the only command that drops local metadata. It does not delete S3 objects: bytes for the removed artifact rows stay in the bucket.
+`pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops them and deletes those volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. Reset is the only command that drops local metadata and local object bytes. Objects in a real AWS bucket are outside these volumes and stay there.
 
 Workspace checks:
 
@@ -158,7 +158,10 @@ pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
+pnpm e2e
 ```
+
+`pnpm e2e` deletes the local PostgreSQL and Garage volumes, then runs the upload, library, viewer, restart, and `S3_INTEGRATION=1` checks against Garage. It refuses to run unless `apps/api/.env` points at `http://127.0.0.1:3900`. It does not call AWS. The default `pnpm test` still skips the S3 integration files unless `S3_INTEGRATION=1`.
 
 `pnpm --filter @factrove/web dev` and `pnpm --filter @factrove/api dev` still start one app at a time. `pnpm dev` is the command that runs them together.
 
@@ -166,9 +169,10 @@ pnpm test
 
 - **Container runtime unavailable.** `pnpm infra:up` exits when `docker` is missing or the daemon is stopped. Start Docker Desktop and run `pnpm infra:up` again.
 - **Port 5432 is taken.** Another PostgreSQL is listening on `127.0.0.1:5432`. Stop it, or change the host port in [compose.yaml](compose.yaml) and `DATABASE_URL` together.
+- **Port 3900 is taken.** Another process is listening on `127.0.0.1:3900`. Stop it, or change the Garage host port in [compose.yaml](compose.yaml) and `S3_ENDPOINT` together.
 - **Port 3000 or 3001 is taken.** Stop the other process and run `pnpm dev` again. The web origin is `http://localhost:3000` and the API origin is `http://localhost:3001`.
 - **The API stops and asks for a seed.** `LOCAL_USER_ID` or `LOCAL_ORGANIZATION_ID` has no matching row. Run `pnpm db:seed`, then `pnpm dev`.
-- **Upload returns `STORAGE_UNAVAILABLE`.** The bucket name, region, or credentials cannot write the object. Check `S3_BUCKET`, `S3_REGION`, and the AWS credential chain in `apps/api/.env`. A failed upload leaves no artifact row. `S3_BUCKET=your-bucket` is the placeholder from the example file.
+- **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
 - **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`.
 - **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in the root `.env` or the environment, then restart `pnpm dev`.
 

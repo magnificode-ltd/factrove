@@ -35,18 +35,93 @@ describe("S3 storage configuration", () => {
     expect(() => readS3StorageConfig({})).toThrow(/S3_BUCKET must be set/);
   });
 
-  it("uses the bucket and region and ignores a custom endpoint", () => {
+  it("keeps regional AWS settings when S3_ENDPOINT is unset", () => {
     expect(
       readS3StorageConfig({
         S3_BUCKET: "factrove-dev-uploads",
         S3_REGION: "eu-central-1",
-        S3_ENDPOINT: "http://127.0.0.1:9000",
-        S3_FORCE_PATH_STYLE: "true",
+        AWS_ENDPOINT_URL: "http://127.0.0.1:9000",
+        AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9000",
       }),
     ).toEqual({
       bucket: "factrove-dev-uploads",
       region: "eu-central-1",
+      forcePathStyle: false,
     });
+  });
+
+  it("reads an explicit endpoint and defaults to path-style addressing", () => {
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://127.0.0.1:3900/",
+        AWS_ACCESS_KEY_ID: "factrove-local",
+        AWS_SECRET_ACCESS_KEY: "factrove-local-secret",
+      }),
+    ).toEqual({
+      bucket: "factrove",
+      region: "us-east-1",
+      endpoint: "http://127.0.0.1:3900",
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: "factrove-local",
+        secretAccessKey: "factrove-local-secret",
+      },
+    });
+
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://127.0.0.1:3900",
+        S3_FORCE_PATH_STYLE: "false",
+      }).forcePathStyle,
+    ).toBe(false);
+  });
+
+  it("rejects a malformed endpoint or path-style flag without echoing it", () => {
+    const secret = "super-secret-value";
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_ENDPOINT: "not a url",
+        }),
+      "S3_ENDPOINT must be an http(s) URL",
+      "not a url",
+    );
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_ENDPOINT: `http://user:${secret}@127.0.0.1:3900`,
+        }),
+      "S3_ENDPOINT must not include credentials",
+      secret,
+    );
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_ENDPOINT: "http://127.0.0.1:3900/factrove",
+        }),
+      "S3_ENDPOINT must be an origin without a path, query, or hash",
+      "/factrove",
+    );
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_FORCE_PATH_STYLE: "yes",
+        }),
+      "S3_FORCE_PATH_STYLE must be true or false",
+      "yes",
+    );
   });
 
   it("calls regional AWS even when AWS endpoint URL variables are set", async () => {
@@ -85,6 +160,52 @@ describe("S3 storage configuration", () => {
     }
 
     expect(host).toBe("factrove-dev-uploads.s3.eu-central-1.amazonaws.com");
+  });
+
+  it("sends path-style requests to S3_ENDPOINT and ignores ambient AWS endpoint URLs", async () => {
+    const previousEndpoint = process.env.AWS_ENDPOINT_URL;
+    const previousS3Endpoint = process.env.AWS_ENDPOINT_URL_S3;
+    process.env.AWS_ENDPOINT_URL = "http://169.254.169.254";
+    process.env.AWS_ENDPOINT_URL_S3 = "http://169.254.169.254";
+    const client = createS3Client(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://127.0.0.1:3900",
+        AWS_ACCESS_KEY_ID: "test-key",
+        AWS_SECRET_ACCESS_KEY: "test-secret",
+      }),
+    );
+    let host = "";
+    let path = "";
+    client.middlewareStack.add(
+      () => async (args) => {
+        if (args.request && typeof args.request === "object") {
+          if ("hostname" in args.request && typeof args.request.hostname === "string") {
+            host = args.request.hostname;
+          }
+          if ("path" in args.request && typeof args.request.path === "string") {
+            path = args.request.path;
+          }
+        }
+        throw new Error("stop-before-send");
+      },
+      { step: "finalizeRequest", name: "captureEndpoint", priority: "low" },
+    );
+
+    try {
+      await client.send(new GetObjectCommand({ Bucket: "factrove", Key: "x.html" }));
+      expect.fail("request should stop before it is sent");
+    } catch (error) {
+      expect(error).toMatchObject({ message: "stop-before-send" });
+    } finally {
+      client.destroy();
+      restoreEnv("AWS_ENDPOINT_URL", previousEndpoint);
+      restoreEnv("AWS_ENDPOINT_URL_S3", previousS3Endpoint);
+    }
+
+    expect(host).toBe("127.0.0.1");
+    expect(path.startsWith("/factrove/x.html")).toBe(true);
   });
 
   it("accepts a static credential pair and otherwise keeps the AWS credential chain", () => {

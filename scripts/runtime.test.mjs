@@ -77,6 +77,7 @@ describe("local runtime", () => {
         BASE_URL: "http://127.0.0.1:3001",
         AWS_PROFILE: "dev",
         S3_REGION: "eu-central-1",
+        S3_ENDPOINT: "http://127.0.0.1:3900",
         NEXT_PUBLIC_API_URL: "",
       },
       {
@@ -91,6 +92,7 @@ describe("local runtime", () => {
     assert.equal(env.BASE_URL, undefined);
     assert.equal(env.AWS_PROFILE, undefined);
     assert.equal(env.S3_REGION, undefined);
+    assert.equal(env.S3_ENDPOINT, undefined);
     assert.equal(env.FACTROVE_API_URL, undefined);
     assert.equal(env.PATH, "/usr/bin");
     assert.equal(workspaceBuildArgs.includes("@factrove/web"), false);
@@ -125,17 +127,22 @@ describe("local runtime", () => {
   it("explains a stopped daemon and a taken Postgres port", () => {
     assert.match(infraFailureHint("Cannot connect to the Docker daemon at unix:///var/run/docker.sock"), /Start Docker Desktop/);
     assert.match(infraFailureHint("Bind for 127.0.0.1:5432 failed: port is already allocated"), /5432/);
+    assert.match(infraFailureHint("Bind for 127.0.0.1:3900 failed: port is already allocated"), /3900/);
+    assert.match(infraFailureHint("failed to resolve reference"), /pinned container image/);
     assert.equal(infraFailureHint("network factrove_default removed"), "");
   });
 
-  it("pins a loopback Postgres service and keeps object storage out of Compose", () => {
+  it("pins loopback Postgres and the local Garage S3 stand-in", () => {
     const compose = readFileSync(composeFile, "utf8");
     assert.match(compose, /127\.0\.0\.1:5432:5432/);
     assert.match(compose, /postgres:17\.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3/);
     assert.match(compose, /factrove-postgres:/);
-    assert.equal(compose.toLowerCase().includes("minio"), false);
-    assert.equal(compose.toLowerCase().includes("localstack"), false);
-    assert.equal(compose.includes("S3_"), false);
+    assert.match(compose, /127\.0\.0\.1:3900:3900/);
+    assert.match(compose, /dxflrs\/garage:v2\.3\.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690/);
+    assert.match(compose, /--default-bucket/);
+    assert.match(compose, /factrove-garage-meta:/);
+    assert.match(compose, /factrove-garage-data:/);
+    assert.match(compose, /GARAGE_DEFAULT_BUCKET: factrove/);
 
     const rootExample = readFileSync(join(repoRoot, ".env.example"), "utf8");
     assert.match(rootExample, /^FACTROVE_API_URL=http:\/\/localhost:3001$/m);
@@ -146,7 +153,12 @@ describe("local runtime", () => {
 
     const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
     assert.match(apiExample, /^DATABASE_URL=postgresql:\/\/factrove:factrove@127\.0\.0\.1:5432\/factrove$/m);
-    assert.match(apiExample, /^S3_BUCKET=your-bucket$/m);
+    assert.match(apiExample, /^S3_BUCKET=factrove$/m);
+    assert.match(apiExample, /^S3_REGION=us-east-1$/m);
+    assert.match(apiExample, /^S3_ENDPOINT=http:\/\/127\.0\.0\.1:3900$/m);
+    assert.match(apiExample, /^S3_FORCE_PATH_STYLE=true$/m);
+    assert.match(apiExample, /^AWS_ACCESS_KEY_ID=factrove-local$/m);
+    assert.match(apiExample, /^AWS_SECRET_ACCESS_KEY=factrove-local-secret$/m);
   });
 
   it("restores a snapshotted file and leaves a missing snapshot untouched", async () => {
@@ -186,8 +198,9 @@ describe("local runtime", () => {
     });
     const [code] = await withTimeout(once(child, "close"), 5000, "infra reset refusal");
     assert.equal(code, 1);
-    assert.match(stderr, /Refusing to delete the local PostgreSQL volume/);
-    assert.match(stderr, /S3 objects/);
+    assert.match(stderr, /Refusing to delete the local PostgreSQL and object-storage volumes/);
+    assert.match(stderr, /local S3 stand-in/);
+    assert.match(stderr, /real AWS bucket/);
     assert.equal(stderr.includes("docker"), false);
   });
 });

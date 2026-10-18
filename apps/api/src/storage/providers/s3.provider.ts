@@ -18,25 +18,33 @@ export type S3StorageCredentials = {
 export type S3StorageConfig = {
   bucket: string;
   region: string;
+  endpoint?: string;
+  forcePathStyle?: boolean;
   credentials?: S3StorageCredentials;
 };
 
 export function readS3StorageConfig(env: NodeJS.ProcessEnv = process.env): S3StorageConfig {
   const bucket = requiredSetting(env, "S3_BUCKET");
   const region = requiredSetting(env, "S3_REGION");
+  const endpoint = readEndpoint(env);
   const credentials = readCredentials(env);
   return {
     bucket,
     region,
+    forcePathStyle: readForcePathStyle(env, endpoint !== undefined),
+    ...(endpoint ? { endpoint } : {}),
     ...(credentials ? { credentials } : {}),
   };
 }
 
 export function createS3Client(config: S3StorageConfig): S3Client {
+  const endpoint = config.endpoint;
   return new S3Client({
     region: config.region,
-    forcePathStyle: false,
+    forcePathStyle: config.forcePathStyle ?? Boolean(endpoint),
+    // Ambient AWS endpoint variables stay ignored. S3_ENDPOINT is the only custom endpoint.
     ignoreConfiguredEndpointUrls: true,
+    ...(endpoint ? { endpoint } : {}),
     requestHandler: {
       connectionTimeout: 10_000,
       requestTimeout: 60_000,
@@ -136,6 +144,44 @@ function requiredSetting(env: NodeJS.ProcessEnv, name: "S3_BUCKET" | "S3_REGION"
     throw new BlobStoreUnavailableError(`${name} must be set`);
   }
   return value;
+}
+
+function readEndpoint(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.S3_ENDPOINT?.trim() ?? "";
+  if (raw.length === 0) {
+    return undefined;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new BlobStoreUnavailableError("S3_ENDPOINT must be an http(s) URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new BlobStoreUnavailableError("S3_ENDPOINT must be an http(s) URL");
+  }
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new BlobStoreUnavailableError("S3_ENDPOINT must not include credentials");
+  }
+  if (url.pathname !== "/" || url.search.length > 0 || url.hash.length > 0) {
+    throw new BlobStoreUnavailableError("S3_ENDPOINT must be an origin without a path, query, or hash");
+  }
+  return url.origin;
+}
+
+function readForcePathStyle(env: NodeJS.ProcessEnv, endpointSet: boolean): boolean {
+  const raw = env.S3_FORCE_PATH_STYLE?.trim() ?? "";
+  if (raw.length === 0) {
+    return endpointSet;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new BlobStoreUnavailableError("S3_FORCE_PATH_STYLE must be true or false");
 }
 
 function readCredentials(env: NodeJS.ProcessEnv): S3StorageCredentials | undefined {
