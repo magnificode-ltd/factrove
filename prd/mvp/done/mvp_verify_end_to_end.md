@@ -64,9 +64,13 @@ A missing file returned `FILE_NOT_FOUND`. `README.md` returned `INVALID_INPUT`. 
 
 `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed. `pnpm test` reported api-client 6, web 17, cli 24, api 44 passed and 4 skipped, plus 12 runtime script tests.
 
+### Review follow-up
+
+`pnpm e2e` now uses Compose project `factrove-e2e` (Postgres `127.0.0.1:5433`, Garage `127.0.0.1:3910`, web `127.0.0.1:3100`, API `127.0.0.1:3101`). A second run on October 18 exported an empty `S3_ENDPOINT`, `S3_BUCKET=real-bucket`, and AWS credential and endpoint variables. The run still passed. The dev containers stayed on `127.0.0.1:5432` and `127.0.0.1:3900`. Volumes `factrove_factrove-postgres`, `factrove_factrove-garage-meta`, and `factrove_factrove-garage-data` remained. The dev database still had 3 artifacts, and the dev Garage object was unchanged. `apps/web/next-env.d.ts` was unchanged. The `factrove-e2e` project was removed at the end. Root lint, typecheck, test, and build passed again: api 46 passed and 4 skipped, plus 14 runtime script tests.
+
 ### Not run
 
-- A macOS execution. The Garage and Postgres image pins include linux/arm64 and linux/amd64. On macOS, `localhost` may resolve to `::1` while the API and web bind `127.0.0.1`. That browser and Node fetch check is still open.
+- A macOS execution. The Garage and Postgres image pins include linux/arm64 and linux/amd64. On macOS, `localhost` may resolve to `::1` while the API and web bind `127.0.0.1`. That browser and Node fetch check is still open in [mvp/mvp_macos_localhost.md](../mvp_macos_localhost.md).
 - A live call to a real AWS bucket. The regional host is covered by a unit test only.
 
 No product decision is blocking. Garage 2.3.0, the local key `factrove-local`, and the bucket name `factrove` are local runtime choices.
