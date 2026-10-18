@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { DEFAULT_API_URL, parseCliArgs, type CliInvocation } from "./parse-args.js";
+import { CliError } from "./cli-error.js";
+import { DEFAULT_API_URL, apiKeyForInvocation, parseCliArgs, type CliInvocation } from "./parse-args.js";
 
 @Injectable()
 export class CliConfigService {
@@ -15,6 +16,17 @@ export class CliConfigService {
     if (invocation.kind === "help") {
       return DEFAULT_API_URL;
     }
+    if (invocation.kind === "configure") {
+      return invocation.suggestedApiUrl;
+    }
     return invocation.apiUrl;
+  }
+
+  requireApiKey(): string {
+    const key = apiKeyForInvocation(this.load());
+    if (!key) {
+      throw new CliError("INVALID_INPUT", "An API key is required. Run: pnpm factrove configure");
+    }
+    return key;
   }
 }

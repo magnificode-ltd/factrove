@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { CliError } from "../src/cli-error.js";
-import { cliWantsJson, DEFAULT_API_URL, parseCliArgs } from "../src/parse-args.js";
+import { apiKeyForInvocation, cliWantsJson, DEFAULT_API_URL, parseCliArgs } from "../src/parse-args.js";
 
 const file = "./report.html";
 const artifactId = "123e4567-e89b-42d3-a456-426614174000";
+const isolated = { FACTROVE_CONFIG_DIR: "/tmp/factrove-parse-missing-7044" };
 
 describe("CLI argument parsing", () => {
   it("defaults access to private and the API origin to localhost", () => {
-    expect(parseCliArgs(["upload", file], {})).toEqual({
+    expect(parseCliArgs(["upload", file], isolated)).toEqual({
       kind: "upload",
       path: file,
       access: "private",
       json: false,
       apiUrl: DEFAULT_API_URL,
+      profile: "default",
     });
   });
 
@@ -77,17 +79,18 @@ describe("CLI argument parsing", () => {
 
 describe("factrove get arguments", () => {
   it("defaults format to html and the API origin to localhost", () => {
-    expect(parseCliArgs(["get", artifactId], {})).toEqual({
+    expect(parseCliArgs(["get", artifactId], isolated)).toEqual({
       kind: "get",
       id: artifactId,
       format: "html",
       json: false,
       apiUrl: DEFAULT_API_URL,
+      profile: "default",
     });
   });
 
   it("accepts markdown, json, and the same API origin precedence as upload", () => {
-    expect(parseCliArgs(["--json", "get", "--format", "markdown", artifactId], {})).toMatchObject({
+    expect(parseCliArgs(["--json", "get", "--format", "markdown", artifactId], isolated)).toMatchObject({
       kind: "get",
       id: artifactId,
       format: "markdown",
@@ -95,12 +98,13 @@ describe("factrove get arguments", () => {
       apiUrl: DEFAULT_API_URL,
     });
     expect(parseCliArgs(["get", artifactId, "--format=html", "--api-url", "http://127.0.0.1:4020"], {
+      ...isolated,
       FACTROVE_API_URL: "http://127.0.0.1:4010",
     })).toMatchObject({
       format: "html",
       apiUrl: "http://127.0.0.1:4020",
     });
-    expect(parseCliArgs(["get", artifactId.toUpperCase()], { FACTROVE_API_URL: "http://127.0.0.1:4010" })).toMatchObject({
+    expect(parseCliArgs(["get", artifactId.toUpperCase()], { ...isolated, FACTROVE_API_URL: "http://127.0.0.1:4010" })).toMatchObject({
       id: artifactId.toUpperCase(),
       apiUrl: "http://127.0.0.1:4010",
     });
@@ -119,8 +123,22 @@ describe("factrove get arguments", () => {
   });
 });
 
+describe("factrove configure arguments", () => {
+  it("keeps the key flag off the resolved upload command", () => {
+    expect(failure(["upload", file, "--api-key", "ftrv_secret"], {}).message).toMatch(/only valid for the configure command/);
+    const configured = parseCliArgs(["configure", "--profile", "dev", "--api-key", "ftrv_secret"], isolated);
+    expect(configured).toMatchObject({ kind: "configure", profile: "dev", apiKey: "ftrv_secret" });
+    expect(apiKeyForInvocation(configured, isolated)).toBeUndefined();
+  });
+
+  it("reads FACTROVE_API_KEY before the profile file", () => {
+    const invocation = upload(["upload", file, "--profile", "dev"]);
+    expect(apiKeyForInvocation(invocation, { ...isolated, FACTROVE_API_KEY: "ftrv_from_env" })).toBe("ftrv_from_env");
+  });
+});
+
 function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {
-  const parsed = parseCliArgs(argv, env);
+  const parsed = parseCliArgs(argv, { ...isolated, ...env });
   if (parsed.kind !== "upload") {
     throw new Error("expected an upload invocation");
   }
@@ -129,7 +147,7 @@ function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {
 
 function failure(argv: string[], env: NodeJS.ProcessEnv): CliError {
   try {
-    parseCliArgs(argv, env);
+    parseCliArgs(argv, { ...isolated, ...env });
   } catch (error) {
     expect(error).toBeInstanceOf(CliError);
     return error as CliError;

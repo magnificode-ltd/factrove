@@ -5,13 +5,12 @@ export type ApiConfig = {
   port: number;
   webOrigin: string;
   apiPublicOrigin: string;
-  localUserId: string;
-  localOrganizationId: string | null;
+  authSecret: string;
 };
 
 const DEFAULT_WEB_ORIGIN = "http://localhost:3000";
 const DEFAULT_API_ORIGIN = "http://localhost:3001";
-const DEFAULT_LOCAL_USER_ID = "local-user";
+const MIN_AUTH_SECRET_LENGTH = 32;
 
 export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   return {
@@ -19,8 +18,7 @@ export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     port: readPort(env.PORT),
     webOrigin: readOrigin(env.WEB_ORIGIN, DEFAULT_WEB_ORIGIN, "WEB_ORIGIN"),
     apiPublicOrigin: readOrigin(env.API_PUBLIC_ORIGIN, DEFAULT_API_ORIGIN, "API_PUBLIC_ORIGIN"),
-    localUserId: readLocalUserId(env.LOCAL_USER_ID),
-    localOrganizationId: readOptionalId(env.LOCAL_ORGANIZATION_ID),
+    authSecret: readAuthSecret(env.BETTER_AUTH_SECRET),
   };
 }
 
@@ -64,12 +62,10 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readLocalUserId(value: string | undefined): string {
-  const userId = value?.trim() ?? "";
-  return userId.length > 0 ? userId : DEFAULT_LOCAL_USER_ID;
-}
-
-function readOptionalId(value: string | undefined): string | null {
-  const id = value?.trim() ?? "";
-  return id.length > 0 ? id : null;
+function readAuthSecret(value: string | undefined): string {
+  const secret = value?.trim() ?? "";
+  if (secret.length < MIN_AUTH_SECRET_LENGTH) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters.");
+  }
+  return secret;
 }

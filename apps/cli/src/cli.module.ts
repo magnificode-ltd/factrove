@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { createFactroveClient, type FactroveClient } from "@factrove/api-client";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
+import { ConfigureCommand } from "./configure.command.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { GetCommand } from "./get.command.js";
 import { UploadCommand } from "./upload.command.js";
@@ -13,6 +14,7 @@ import { UploadFileService } from "./upload-file.service.js";
     UploadFileService,
     UploadCommand,
     GetCommand,
+    ConfigureCommand,
     {
       provide: FACTROVE_CLIENT,
       inject: [CliConfigService],
@@ -27,8 +29,9 @@ function lazyClient(config: CliConfigService): FactroveClient {
   const resolve = (): FactroveClient => {
     if (!client) {
       const baseUrl = config.apiUrl();
+      const apiKey = config.requireApiKey();
       try {
-        client = createFactroveClient({ baseUrl });
+        client = createFactroveClient({ baseUrl, apiKey });
       } catch (error) {
         const detail = error instanceof Error ? error.message : "Invalid API URL";
         throw new CliError("INVALID_INPUT", `API URL must be an absolute HTTP or HTTPS URL. ${detail}`);

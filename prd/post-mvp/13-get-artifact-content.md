@@ -4,7 +4,7 @@
 
 Read one artifact's content by id as HTML or Markdown. Factrove stores only the HTML. Markdown is converted from that HTML when the caller asks for it, and the conversion is not saved.
 
-Read [the MVP end state](../../docs/MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done — stub-verified, October 18, 2026.**
+Read [the MVP end state](../../docs/MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done, October 18, 2026.** Live content reads were verified against local Garage. Real AWS was not tested.
 
 ## Owns
 
@@ -24,7 +24,7 @@ The content format on `GET /api/v1/artifacts/{id}/content`, the shared contract 
 
 `pnpm --filter @factrove/api exec vitest run test/html-to-markdown.test.ts` covers headings, lists, tables, fenced code, links, ordered-list start, multi-paragraph items, the hello fixture, script and unsafe-URL removal, malformed fragments, the size and output limits, deep lists and blockquotes, a large flat document, and worker responsiveness. Safety cases, including link syntax, image syntax, and reference definitions in ordinary text, emphasis, table cells, and link text, are rendered with `marked` and `markdown-it` (`html: true`) and must not produce a script, an event-handler attribute, an iframe, or a `javascript:`, `vbscript:`, or `data:text` URL. Literal `#`, `1.`, `-`, and `>` stay text. The same file checks that a saturated pool fails fast with `limit: "busy"`.
 
-HTTP coverage is in `apps/api/test/http.integration.test.ts` against PostgreSQL with `BLOB_STORE` overridden. It checks byte-identical HTML, a leading BOM, an `Accept: text/markdown` request that still returns HTML, Markdown output and headers, invalid formats, a missing id, a storage failure, `422 CONTENT_TOO_COMPLEX` when Markdown output exceeds 16 MiB, and `503 CONVERSION_UNAVAILABLE` when the conversion pool is full. The live S3 content test was not run. This environment has no AWS credential chain, and `S3_INTEGRATION` was unset, so `content.s3.integration.test.ts` stays skipped.
+HTTP coverage is in `apps/api/test/http.integration.test.ts` against PostgreSQL with `BLOB_STORE` overridden. It checks byte-identical HTML, a leading BOM, an `Accept: text/markdown` request that still returns HTML, Markdown output and headers, invalid formats, a missing id, a storage failure, `422 CONTENT_TOO_COMPLEX` when Markdown output exceeds 16 MiB, and `503 CONVERSION_UNAVAILABLE` when the conversion pool is full. PR #8's final verification ran `content.s3.integration.test.ts` with `S3_INTEGRATION=1` against local Garage (1 passed) and `pnpm e2e` with the Garage storage and content tests (4 passed). Real AWS was not tested.
 
 `packages/api-client/test/client.test.ts` checks the default HTML URL, the Markdown query, id encoding, a preserved BOM, error envelopes, and an unexpected content type.
 

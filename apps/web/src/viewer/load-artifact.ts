@@ -5,6 +5,7 @@ import { unavailableMessage } from "@/api/errors";
 export type ViewerModel =
   | { status: "ready"; artifact: ArtifactDto }
   | { status: "missing"; message: string }
+  | { status: "signed-out"; message: string }
   | { status: "unavailable"; message: string };
 
 export async function loadArtifact(client: FactroveClient, id: string): Promise<ViewerModel> {
@@ -15,6 +16,9 @@ export async function loadArtifact(client: FactroveClient, id: string): Promise<
     if (error instanceof FactroveApiError && error.status === 404) {
       const message = error.message.trim() || "This artifact does not exist.";
       return { status: "missing", message };
+    }
+    if (error instanceof FactroveApiError && error.status === 401) {
+      return { status: "signed-out", message: "Sign in to continue." };
     }
     return { status: "unavailable", message: unavailableMessage(error) };
   }

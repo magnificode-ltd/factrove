@@ -70,4 +70,7 @@ These items are outside the local MVP task list. They follow the same contract a
 
 | ID | Brief | Status | Owns |
 | --- | --- | --- | --- |
-| 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — stub-verified | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
+| 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — Garage-verified; real AWS not tested | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
+| 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented in this change | Better Auth sign-in, sessions, hashed API keys, owner and member access |
+
+Task 20 supersedes the unauthenticated local actor in the MVP outcome above. The MVP itself did not require login.

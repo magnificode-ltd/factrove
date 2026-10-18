@@ -78,8 +78,10 @@ describe("library requests", () => {
     expect(mineHtml).toContain(`${mineId}.html`);
     expect(mineHtml).toContain(`${sharedId}.html`);
     expect(mineHtml).not.toContain(`${otherId}.html`);
-    expect(mineHtml).toContain("Private · list only");
-    expect(mineHtml).toContain("Organization shared · list only");
+    expect(mineHtml).toContain("Private");
+    expect(mineHtml).toContain("Organization shared");
+    expect(mineHtml).not.toContain("list only");
+    expect(mineHtml).toContain("Private artifacts are visible only to you.");
     expect(orgHtml).toContain(`${otherId}.html`);
     expect(orgHtml).not.toContain(`${mineId}.html`);
     expect(mineHtml.indexOf(`${mineId}.html`)).toBeLessThan(mineHtml.indexOf(`${sharedId}.html`));
@@ -130,7 +132,21 @@ describe("library requests", () => {
     expect(html).toContain("The Factrove API is unavailable");
     expect(html).toContain('href="/?view=org"');
     expect(html).not.toContain("<ul");
-    expect(html).toContain("They are not access control.");
+    expect(html).not.toContain("list only");
+  });
+
+  it("treats an unauthenticated library as signed out", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadLibrary(client, "mine");
+    expect(state).toEqual({ status: "signed-out", view: "mine" });
+    const html = renderToStaticMarkup(<LibraryScreen state={state} />);
+    expect(html).toContain("Sign in to see your artifacts.");
+    expect(html).toContain('href="/login"');
+    expect(html).not.toContain("The Factrove API is unavailable");
+    expect(html).not.toContain("<ul");
   });
 
   it("shows the API error message when a list request fails", async () => {
@@ -188,6 +204,19 @@ describe("viewer", () => {
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("javascript:");
     expect(html).toContain("The artifact content could not be loaded");
+  });
+
+  it("asks a signed-out viewer to sign in", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadArtifact(client, mineId);
+    const html = renderToStaticMarkup(<ViewerScreen state={state} />);
+    expect(state).toMatchObject({ status: "signed-out" });
+    expect(html).toContain("Sign in to continue.");
+    expect(html).toContain('href="/login"');
+    expect(html).not.toContain("<iframe");
   });
 });
 

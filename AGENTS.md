@@ -12,7 +12,7 @@ Factrove is a TypeScript pnpm monorepo for a self-hostable artifact library.
 
 The backend owns database and storage access. Its database module is global within NestJS. Shared packages are linked through pnpm workspaces and expose compiled exports.
 
-User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities.
+User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities. Runtime sign-in uses email and password sessions. API keys use the `@better-auth/api-key` plugin at the same Better Auth version, and the plugin stores only a hash. Organization HTTP routes stay unmounted, and membership is read from the member table.
 
 ## Documentation map
 

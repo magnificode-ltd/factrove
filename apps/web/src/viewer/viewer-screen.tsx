@@ -5,7 +5,13 @@ import type { ViewerModel } from "@/viewer/load-artifact";
 
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const title =
-    state.status === "ready" ? state.artifact.filename : state.status === "missing" ? "Artifact not found" : "Artifact unavailable";
+    state.status === "ready"
+      ? state.artifact.filename
+      : state.status === "missing"
+        ? "Artifact not found"
+        : state.status === "signed-out"
+          ? "Sign in"
+          : "Artifact unavailable";
   return (
     <div className="viewer-page">
       <ViewerBar title={title} meta={state.status === "ready" ? <ViewerFacts state={state} /> : null} />
@@ -13,9 +19,16 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
         {state.status === "ready" ? (
           <ReadyArtifact state={state} />
         ) : (
-          <p role="alert" className="banner error">
-            {state.message}
-          </p>
+          <>
+            <p role={state.status === "signed-out" ? "status" : "alert"} className={state.status === "signed-out" ? "banner" : "banner error"}>
+              {state.message}
+            </p>
+            {state.status === "signed-out" ? (
+              <p className="banner">
+                <a href="/login">Sign in</a>
+              </p>
+            ) : null}
+          </>
         )}
       </main>
     </div>
@@ -26,7 +39,7 @@ function ViewerFacts({ state }: { state: Extract<ViewerModel, { status: "ready" 
   const { artifact } = state;
   return (
     <p className="bar-meta">
-      <span>{accessLabel(artifact.accessType)} · list only</span>
+      <span>{accessLabel(artifact.accessType)}</span>
       <time dateTime={artifact.uploadedAt}>{formatUploadedAt(artifact.uploadedAt)}</time>
       <span>{formatBytes(artifact.sizeBytes)}</span>
     </p>

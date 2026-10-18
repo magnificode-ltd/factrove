@@ -15,8 +15,8 @@ const api = vi.hoisted(() => ({
   uploadArtifact: vi.fn()
 }));
 
-vi.mock("@/api/client", () => ({
-  createWebClient: () => api
+vi.mock("@/api/server-client", () => ({
+  createRequestClient: async () => api
 }));
 
 const artifact: ArtifactDto = {
