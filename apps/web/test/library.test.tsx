@@ -146,7 +146,7 @@ describe("library requests", () => {
 });
 
 describe("viewer", () => {
-  it("loads a deep-linked artifact into a sandboxed iframe and keeps HTML out of the page", async () => {
+  it("keeps unconfirmed artifact HTML out of the server render", async () => {
     const item = artifact(mineId, "private");
     const fetchImpl = stubFetch(async (url) => {
       expect(url).toBe(`http://localhost:3001/api/v1/artifacts/${mineId}`);
@@ -156,9 +156,8 @@ describe("viewer", () => {
     const state = await loadArtifact(client, mineId);
     const html = renderToStaticMarkup(<ViewerScreen state={state} />);
 
-    expect(html).toContain(`src="${item.contentUrl}"`);
-    expect(html).toContain('sandbox="allow-scripts"');
-    expect(html).toContain('referrerPolicy="no-referrer"');
+    expect(html).toContain("Checking artifact content…");
+    expect(html).not.toContain("<iframe");
     expect(html).not.toContain("allow-same-origin");
     expect(html).toContain(`${mineId}.html`);
     expect(html).toContain("Back to library");

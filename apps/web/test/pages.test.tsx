@@ -74,12 +74,12 @@ describe("library page", () => {
 });
 
 describe("artifact page", () => {
-  it("requests the deep-linked artifact and renders its content URL", async () => {
+  it("requests the deep-linked artifact and withholds the iframe until content is confirmed", async () => {
     api.getArtifact.mockResolvedValue({ artifact });
     const html = renderToStaticMarkup(await ArtifactPage({ params: Promise.resolve({ id: artifact.id }) }));
     expect(api.getArtifact).toHaveBeenCalledWith(artifact.id);
-    expect(html).toContain(`src="${artifact.contentUrl}"`);
-    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).toContain("Checking artifact content…");
+    expect(html).not.toContain("<iframe");
     expect(html).not.toContain("allow-same-origin");
   });
 
