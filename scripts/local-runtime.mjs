@@ -18,6 +18,18 @@ export const webAppDir = join(repoRoot, "apps/web");
 export const webDevBin = join(webAppDir, "node_modules/.bin/next");
 export const webDevArgs = ["dev", "--hostname", "127.0.0.1", "--port", "3000"];
 
+export const e2eProjectName = "factrove-e2e";
+export const e2ePostgresPort = "5433";
+export const e2eGaragePort = "3910";
+export const e2eWebPort = "3100";
+export const e2eApiPort = "3101";
+export const localGarageBucket = "factrove";
+export const localGarageRegion = "us-east-1";
+export const localGarageAccessKey = "factrove-local";
+export const localGarageSecretKey = "factrove-local-secret";
+
+const preservedStorageKeys = new Set(["S3_INTEGRATION"]);
+
 const secretKeys = new Set(["DATABASE_URL", "BASE_URL"]);
 
 export function readDotEnv(filePath) {
@@ -96,7 +108,67 @@ export function missingApiSettings(fileEnv, processEnv) {
 }
 
 export function composeArgs(action) {
-  const base = ["compose", "-f", composeFile, "--project-directory", repoRoot];
+  return composeCommand(composeBase(), action);
+}
+
+export function e2eComposeBase() {
+  return ["compose", "-p", e2eProjectName, "-f", composeFile, "--project-directory", repoRoot];
+}
+
+export function e2eComposeArgs(action) {
+  return composeCommand(e2eComposeBase(), action);
+}
+
+export function e2eInfraEnv(parent) {
+  return {
+    ...parent,
+    FACTROVE_POSTGRES_PORT: e2ePostgresPort,
+    FACTROVE_GARAGE_PORT: e2eGaragePort,
+  };
+}
+
+export function assertLoopbackHttpEndpoint(endpoint) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error("The effective S3 endpoint must be an http loopback origin.");
+  }
+  const host = url.hostname.startsWith("[") && url.hostname.endsWith("]") ? url.hostname.slice(1, -1) : url.hostname;
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+  if (url.protocol !== "http:" || !loopback || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("The effective S3 endpoint must be an http loopback origin.");
+  }
+  return url.origin;
+}
+
+export function prepareLocalGarageEnv(env, options = {}) {
+  const endpoint = assertLoopbackHttpEndpoint(`http://127.0.0.1:${garagePort(env, options)}`);
+  for (const key of Object.keys(env)) {
+    if (isStorageOverride(key)) {
+      delete env[key];
+    }
+  }
+  env.S3_BUCKET = localGarageBucket;
+  env.S3_REGION = localGarageRegion;
+  env.S3_ENDPOINT = endpoint;
+  env.S3_FORCE_PATH_STYLE = "true";
+  env.AWS_ACCESS_KEY_ID = localGarageAccessKey;
+  env.AWS_SECRET_ACCESS_KEY = localGarageSecretKey;
+  return endpoint;
+}
+
+export function localGarageEnv(parent, options = {}) {
+  const env = { ...parent };
+  prepareLocalGarageEnv(env, options);
+  return env;
+}
+
+function composeBase() {
+  return ["compose", "-f", composeFile, "--project-directory", repoRoot];
+}
+
+function composeCommand(base, action) {
   if (action === "up") {
     return [...base, "up", "-d", "--wait", "--wait-timeout", "120"];
   }
@@ -109,6 +181,25 @@ export function composeArgs(action) {
   throw new Error(`Unknown infra action: ${action}`);
 }
 
+function garagePort(env, options) {
+  const requested = options.garagePort?.trim() || env.FACTROVE_GARAGE_PORT?.trim() || "3900";
+  if (!/^[0-9]+$/.test(requested)) {
+    throw new Error("Garage port must be an integer from 1 to 65535.");
+  }
+  const port = Number(requested);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("Garage port must be an integer from 1 to 65535.");
+  }
+  return String(port);
+}
+
+function isStorageOverride(key) {
+  if (preservedStorageKeys.has(key)) {
+    return false;
+  }
+  return key.startsWith("AWS_") || key.startsWith("S3_");
+}
+
 export function infraFailureHint(stderr) {
   const text = stderr.toLowerCase();
   if (
@@ -119,10 +210,22 @@ export function infraFailureHint(stderr) {
     return "The container runtime is not running. Start Docker Desktop, then run pnpm infra:up again.";
   }
   if (text.includes("address already in use") || text.includes("port is already allocated")) {
-    return "127.0.0.1:5432 is already in use. Stop the other PostgreSQL process, or change the host port in compose.yaml and DATABASE_URL together.";
+    if (text.includes("3900")) {
+      return "127.0.0.1:3900 is already in use. Stop the other process, or change the Garage host port in compose.yaml and S3_ENDPOINT together.";
+    }
+    if (text.includes("5433")) {
+      return "127.0.0.1:5433 is already in use. Stop the other PostgreSQL process. pnpm e2e publishes its database on that port.";
+    }
+    if (text.includes("5432")) {
+      return "127.0.0.1:5432 is already in use. Stop the other PostgreSQL process, or change the host port in compose.yaml and DATABASE_URL together.";
+    }
+    if (text.includes("3910")) {
+      return "127.0.0.1:3910 is already in use. Stop the other process. pnpm e2e publishes Garage on that port.";
+    }
+    return "A host port in compose.yaml is already in use. Stop the other process, or change that port and the matching API setting together.";
   }
   if (text.includes("pull access denied") || text.includes("manifest unknown") || text.includes("failed to resolve reference")) {
-    return "Could not pull the pinned Postgres image. Check that this machine can reach Docker Hub.";
+    return "Could not pull a pinned container image. Check that this machine can reach Docker Hub.";
   }
   return "";
 }

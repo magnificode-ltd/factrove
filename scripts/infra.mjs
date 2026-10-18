@@ -12,7 +12,7 @@ if (action === "reset") {
   const decision = resetDecision(process.argv.slice(3), Boolean(process.stdin.isTTY));
   if (decision === "refuse") {
     process.stderr.write(
-      "Refusing to delete the local PostgreSQL volume without confirmation. Run pnpm infra:reset -- --yes. Reset removes database rows only; S3 objects for those artifacts stay in the bucket.\n",
+      "Refusing to delete the local PostgreSQL and object-storage volumes without confirmation. Run pnpm infra:reset -- --yes. Reset removes database rows and objects stored in the local S3 stand-in. Objects in a real AWS bucket are not deleted.\n",
     );
     process.exit(1);
   }
@@ -20,7 +20,7 @@ if (action === "reset") {
     const rl = createInterface({ input: process.stdin, output: process.stderr });
     const answer = (
       await rl.question(
-        "Delete the local PostgreSQL volume? Artifact rows in that volume are removed. S3 objects for those rows stay in the bucket. Type yes to continue: ",
+        "Delete the local PostgreSQL and object-storage volumes? Artifact rows and objects stored in the local S3 stand-in are removed. Objects in a real AWS bucket are not deleted. Type yes to continue: ",
       )
     ).trim();
     rl.close();
@@ -30,7 +30,7 @@ if (action === "reset") {
     }
   }
   process.stderr.write(
-    "Deleting the local PostgreSQL volume. Artifact metadata in that volume will be removed. S3 objects for those artifacts stay in the bucket.\n",
+    "Deleting the local PostgreSQL and object-storage volumes. Artifact metadata and objects stored in the local S3 stand-in will be removed. Objects in a real AWS bucket are not deleted.\n",
   );
 }
 
@@ -69,12 +69,15 @@ child.on("exit", (code, signal) => {
   }
   if (action === "up") {
     process.stderr.write("PostgreSQL is ready on 127.0.0.1:5432 (database factrove).\n");
-    process.stderr.write("The data volume is kept by pnpm infra:down. Next: pnpm db:migrate && pnpm db:seed\n");
+    process.stderr.write("Local S3 is ready on http://127.0.0.1:3900 (bucket factrove).\n");
+    process.stderr.write("The data volumes are kept by pnpm infra:down. Next: pnpm db:migrate && pnpm db:seed\n");
   } else if (action === "down") {
-    process.stderr.write("Stopped local services. The PostgreSQL volume was kept.\n");
-    process.stderr.write("To delete that volume, run pnpm infra:reset.\n");
+    process.stderr.write("Stopped local services. The PostgreSQL and local object-storage volumes were kept.\n");
+    process.stderr.write("To delete those volumes, run pnpm infra:reset.\n");
   } else {
-    process.stderr.write("Stopped local services and deleted the PostgreSQL volume. S3 objects were left in the bucket.\n");
+    process.stderr.write(
+      "Stopped local services and deleted the PostgreSQL and local object-storage volumes. Objects in a real AWS bucket were not deleted.\n",
+    );
   }
   process.exit(0);
 });

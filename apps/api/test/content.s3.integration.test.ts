@@ -15,6 +15,7 @@ import { API_CONFIG, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, type BlobStore } from "../src/storage/blob-store.js";
 import { contentSecurityPolicy } from "../src/rendering/html-policy.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, readOptionalEnvValue, type IsolatedDatabase } from "./isolated-database.js";
+import { useLocalGarage } from "./local-garage.js";
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env.S3_INTEGRATION === "1";
@@ -29,7 +30,17 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
   let uploadedId: string | undefined;
 
   beforeAll(async () => {
-    applyEnv(["S3_BUCKET", "S3_REGION", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]);
+    applyEnv([
+      "S3_BUCKET",
+      "S3_REGION",
+      "S3_ENDPOINT",
+      "S3_FORCE_PATH_STYLE",
+      "AWS_PROFILE",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+    ]);
+    useLocalGarage();
     isolated = await createIsolatedDatabase();
     process.env.DATABASE_URL = isolated.databaseUrl;
     await execFileAsync("pnpm", ["exec", "prisma", "migrate", "deploy"], {

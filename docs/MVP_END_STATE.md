@@ -134,7 +134,7 @@ Each installation dedicates one bucket to Factrove. MVP objects are flat:
 
 The original upload may end in `.htm`; the stored key always uses `.html`. Group prefixes and artifact versions are future work.
 
-The backend-local storage module has one S3 implementation aimed at the configured AWS bucket and region. This small provider interface prepares for Azure/GCP later. Database persistence remains PostgreSQL-only, without a database-provider abstraction.
+The backend-local storage module has one S3 implementation. It uses the configured bucket and region. `S3_ENDPOINT` points it at an S3-compatible service; when that variable is unset, it uses AWS S3 in that region. This small provider interface prepares for Azure/GCP later. Database persistence remains PostgreSQL-only, without a database-provider abstraction.
 
 Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`. It writes the object, then inserts the artifact row, and returns the artifact only after both succeed.
 
@@ -156,9 +156,9 @@ Database and storage access remain in the backend. CLI/web communicate through t
 
 ## Self-hosted end state
 
-A documented fresh-checkout setup works on the owner's Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in an existing AWS S3 bucket named by configuration.
+A documented fresh-checkout setup works on the owner's Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in the configured S3 bucket. Local setup starts Garage beside PostgreSQL and creates that bucket. Real AWS S3 remains available when `S3_ENDPOINT` is unset.
 
-Before `pnpm dev`, the API process needs `S3_BUCKET`, `S3_REGION`, and AWS credentials for that existing bucket.
+Before `pnpm dev`, the API process needs `S3_BUCKET` and `S3_REGION`. The local defaults also set `S3_ENDPOINT`, path-style addressing, and the Garage credentials. An AWS configuration supplies credentials for an existing bucket and leaves `S3_ENDPOINT` unset.
 
 The target setup sequence is:
 
@@ -176,7 +176,7 @@ Migration/seed steps are explicit. Re-running setup and restarting applications 
 
 ## Completion criteria
 
-The MVP is complete when demonstrated against real local PostgreSQL and the configured AWS S3 bucket:
+The MVP is complete when demonstrated against real local PostgreSQL and the configured S3 bucket:
 
 1. A fresh checkout starts through the documented setup, with committed migrations and an idempotent seed.
 2. An agent invokes the CLI on a local HTML file without credentials and receives a valid viewer URL.
@@ -187,7 +187,7 @@ The MVP is complete when demonstrated against real local PostgreSQL and the conf
 7. Inline HTML behavior works within the isolated viewer.
 8. Missing/unsupported/oversized files, unknown artifacts, and an unavailable backend have useful failure states.
 9. CLI JSON output is parseable and the process exits cleanly.
-10. Restarting applications and PostgreSQL without removing the database volume preserves metadata. Artifact bytes remain in the AWS bucket.
+10. Restarting applications and PostgreSQL without removing the database volume preserves metadata. Artifact bytes remain in the configured bucket: the local Garage volume, or AWS when that is the configuration.
 
 Mocks help individual tasks develop independently; the final acceptance loop uses the integrated system.
 

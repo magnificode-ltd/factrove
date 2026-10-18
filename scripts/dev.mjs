@@ -29,7 +29,7 @@ if (missing.length > 0) {
 
 if (effectiveApiSetting(fileEnv, process.env, "S3_BUCKET") === "your-bucket") {
   process.stderr.write(
-    "S3_BUCKET is still the example placeholder. The API can start, and uploads fail until apps/api/.env names an existing AWS bucket.\n",
+    "S3_BUCKET is still the placeholder from an older apps/api/.env. The API can start, and uploads fail until that file names the local Garage bucket or an existing AWS bucket.\n",
   );
 }
 
