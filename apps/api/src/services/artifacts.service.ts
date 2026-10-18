@@ -6,10 +6,13 @@ import {
   type AccessType,
   type ArtifactDto,
   type ArtifactView,
+  type ContentFormat,
 } from "@factrove/contracts";
 import { ArtifactsRepository, type ArtifactRecord } from "../database/index.js";
+import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
+import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
-import { BLOB_STORE, BlobNotFoundError, type BlobStore } from "../storage/index.js";
+import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
 import { LocalActorService } from "./local-actor.service.js";
@@ -97,16 +100,39 @@ export class ArtifactsService {
     return this.toDto(record);
   }
 
-  async openContent(id: string): Promise<{ sizeBytes: number; body: AsyncIterable<Uint8Array> }> {
+  async openContent(id: string, format: ContentFormat): Promise<OpenedArtifactContent> {
     const record = await this.requireRecord(id);
+    let stored: { body: AsyncIterable<Uint8Array> };
     try {
-      const stored = await this.blobs.get(artifactObjectKey(record.id));
-      return { sizeBytes: record.sizeBytes, body: stored.body };
+      stored = await this.blobs.get(artifactObjectKey(record.id));
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
         throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
       }
       throw error;
+    }
+    if (format === "html") {
+      return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+    }
+
+    try {
+      const bytes = await readBoundedHtml(stored.body);
+      const markdown = await convertHtmlToMarkdown(decodeUtf8(bytes));
+      return { format: "markdown", body: Buffer.from(markdown, "utf8") };
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) {
+        throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+      }
+      if (error instanceof BlobStoreUnavailableError || error instanceof ApiErrorException) {
+        throw error;
+      }
+      const conversion = markdownConversionError(error);
+      if (conversion) {
+        throw conversion;
+      }
+      this.logger.error("Could not convert artifact HTML to Markdown");
+      this.logger.error(error instanceof Error ? error.message : "Unknown conversion error");
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
   }
 
@@ -162,6 +188,40 @@ export class ArtifactsService {
       this.logger.error(error instanceof Error ? error.message : "Unknown error");
     }
   }
+}
+
+export type OpenedArtifactContent =
+  | { format: "html"; sizeBytes: number; body: AsyncIterable<Uint8Array> }
+  | { format: "markdown"; body: Buffer };
+
+function decodeUtf8(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ApiErrorException(400, "INVALID_REQUEST", "Artifact HTML is not valid UTF-8.");
+  }
+}
+
+function markdownConversionError(error: unknown): ApiErrorException | undefined {
+  if (!(error instanceof HtmlConversionError) || error.limit === undefined) {
+    return undefined;
+  }
+  if (error.limit === "input") {
+    return new ApiErrorException(413, "CONTENT_TOO_LARGE", "HTML exceeds the Markdown conversion limit.");
+  }
+  if (error.limit === "time") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML took too long to convert to Markdown.");
+  }
+  if (error.limit === "memory") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML used too much memory to convert to Markdown.");
+  }
+  if (error.limit === "output") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "Markdown output exceeds the conversion limit.");
+  }
+  if (error.limit === "busy") {
+    return new ApiErrorException(503, "CONVERSION_UNAVAILABLE", "Markdown conversion is busy. Try again.");
+  }
+  return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML is too complex to convert to Markdown.");
 }
 
 function formFields(body: unknown): Record<string, unknown> {

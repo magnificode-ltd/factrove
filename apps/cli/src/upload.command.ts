@@ -20,6 +20,9 @@ export class UploadCommand {
       process.stdout.write(helpText());
       return;
     }
+    if (invocation.kind !== "upload") {
+      throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+    }
 
     const upload = await this.files.read(invocation.path);
     const file = new Blob([arrayBufferOf(upload.bytes)], { type: "text/html" });

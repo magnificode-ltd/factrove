@@ -2,10 +2,13 @@ import {
   apiErrorSchema,
   artifactEnvelopeSchema,
   artifactListEnvelopeSchema,
+  contentMediaTypes,
   contextEnvelopeSchema,
   type AccessType,
   type ArtifactEnvelope,
   type ArtifactListEnvelope,
+  type ContentFormat,
+  type ContentMediaType,
   type ContextEnvelope
 } from "@factrove/contracts";
 
@@ -35,11 +38,18 @@ export interface UploadArtifactInput {
   accessType?: AccessType;
 }
 
+export interface ArtifactContent {
+  format: ContentFormat;
+  mediaType: ContentMediaType;
+  content: string;
+}
+
 export interface FactroveClient {
   getContext(): Promise<ContextEnvelope>;
   uploadArtifact(input: UploadArtifactInput): Promise<ArtifactEnvelope>;
   listArtifacts(input?: { view?: "mine" | "org" }): Promise<ArtifactListEnvelope>;
   getArtifact(id: string): Promise<ArtifactEnvelope>;
+  getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -77,14 +87,17 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
   const root = `${normalizeBaseUrl(options.baseUrl)}${API_PREFIX}`;
   const requestFetch = options.fetch ?? globalThis.fetch;
 
-  async function request<T>(path: string, init: RequestInit, schema: { parse(value: unknown): T }): Promise<T> {
-    let response: Response;
+  async function send(path: string, init: RequestInit): Promise<Response> {
     try {
-      response = await requestFetch(`${root}${path}`, init);
+      return await requestFetch(`${root}${path}`, init);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Network request failed";
       throw new FactroveApiError(message, { status: null, code: "NETWORK_ERROR" });
     }
+  }
+
+  async function request<T>(path: string, init: RequestInit, schema: { parse(value: unknown): T }): Promise<T> {
+    const response = await send(path, init);
 
     let payload: unknown;
     try {
@@ -108,6 +121,35 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     }
   }
 
+  async function requestText(path: string, mediaType: ContentMediaType): Promise<string> {
+    const response = await send(path, { method: "GET" });
+    if (!response.ok) {
+      let payload: unknown = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      throw parseErrorPayload(payload, response.status);
+    }
+    const received = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+    if (received !== mediaType) {
+      throw new FactroveApiError("The API returned an unexpected content type", {
+        status: response.status,
+        code: "INVALID_RESPONSE"
+      });
+    }
+    try {
+      const bytes = await response.arrayBuffer();
+      return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+    } catch {
+      throw new FactroveApiError("The API returned an invalid content response", {
+        status: response.status,
+        code: "INVALID_RESPONSE"
+      });
+    }
+  }
+
   return {
     getContext: () => request("/context", { method: "GET" }, contextEnvelopeSchema),
     uploadArtifact: ({ file, filename, accessType }) => {
@@ -120,6 +162,16 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       const query = new URLSearchParams({ view });
       return request(`/artifacts?${query.toString()}`, { method: "GET" }, artifactListEnvelopeSchema);
     },
-    getArtifact: (id) => request(`/artifacts/${encodeURIComponent(id)}`, { method: "GET" }, artifactEnvelopeSchema)
+    getArtifact: (id) => request(`/artifacts/${encodeURIComponent(id)}`, { method: "GET" }, artifactEnvelopeSchema),
+    getArtifactContent: (id, input) => {
+      const format = input?.format ?? "html";
+      const mediaType = contentMediaTypes[format];
+      const query = format === "markdown" ? "?format=markdown" : "";
+      return requestText(`/artifacts/${encodeURIComponent(id)}/content${query}`, mediaType).then((content) => ({
+        format,
+        mediaType,
+        content
+      }));
+    }
   };
 }

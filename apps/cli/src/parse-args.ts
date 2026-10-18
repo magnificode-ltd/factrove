@@ -3,6 +3,7 @@ import { CliError } from "./cli-error.js";
 export const DEFAULT_API_URL = "http://localhost:3001";
 
 export type AccessType = "private" | "org_shared";
+export type ContentFormat = "html" | "markdown";
 
 export type UploadInvocation = {
   kind: "upload";
@@ -12,32 +13,56 @@ export type UploadInvocation = {
   apiUrl: string;
 };
 
-export type CliInvocation = UploadInvocation | { kind: "help" };
+export type GetInvocation = {
+  kind: "get";
+  id: string;
+  format: ContentFormat;
+  json: boolean;
+  apiUrl: string;
+};
 
-const HELP = `Upload a local HTML file and print its viewer URL.
+export type CliInvocation = UploadInvocation | GetInvocation | { kind: "help" };
+
+const HELP = `Upload HTML and print artifact content.
 
 Usage:
   pnpm factrove upload <path> [--access private|org_shared] [--api-url <origin>] [--json]
+  pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>]
+
+Commands:
+  upload    Upload a local HTML file and print its viewer URL.
+  get       Print an artifact's stored HTML, or Markdown converted from that HTML.
 
 Options:
-  --access <private|org_shared>  Library classification. Defaults to private.
+  --access <private|org_shared>  upload only. Library classification. Defaults to private.
+  --format <html|markdown>       get only. Defaults to html.
   --api-url <origin>             API origin. Overrides FACTROVE_API_URL. Defaults to http://localhost:3001.
-  --json                         Print the artifact response envelope as one JSON line.
+  --json                         Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content.
   -h, --help                     Show this help.
 
 Examples:
   pnpm factrove upload ./fixtures/hello.html
   pnpm factrove upload ./report.html --access org_shared --json
   pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
+  pnpm factrove get 123e4567-e89b-42d3-a456-426614174000
+  pnpm factrove get 123e4567-e89b-42d3-a456-426614174000 --format markdown
+  pnpm factrove get 123e4567-e89b-42d3-a456-426614174000 --format markdown --json
 
-Relative paths resolve from the directory where you ran pnpm.
-Plain success prints only the viewer URL and a newline.
-JSON success prints the artifact response envelope on one line.
+Relative upload paths resolve from the directory where you ran pnpm.
+Plain upload success prints only the viewer URL and a newline.
+Plain get success prints the content with no extra bytes.
+JSON success prints one line.
 Errors go to stderr and the process exits nonzero.
 With --json, errors use {"error":{"code":"...","message":"..."}}.
 Local error codes are FILE_NOT_FOUND, INVALID_INPUT, and NETWORK_ERROR.
 API error codes are passed through.
 `;
+
+const OPTIONS_WITH_VALUES = new Set(["--access", "--api-url", "--format"]);
+
+// Same shape as the API UUID check: RFC 4122 versions 1-8, plus the nil and max UUIDs.
+const ARTIFACT_ID =
+  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
 
 export function helpText(): string {
   return HELP;
@@ -51,6 +76,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   const positionals: string[] = [];
   let json = false;
   let access: AccessType | undefined;
+  let format: ContentFormat | undefined;
   let apiUrlFlag: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -75,6 +101,15 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       access = assignOnce(access, parseAccess(value), "--access");
       continue;
     }
+    if (arg === "--format" || arg.startsWith("--format=")) {
+      const inline = arg.startsWith("--format=");
+      const value = readOption(argv, arg, "--format", index);
+      if (!inline) {
+        index += 1;
+      }
+      format = assignOnce(format, parseFormat(value), "--format");
+      continue;
+    }
     if (arg === "--api-url" || arg.startsWith("--api-url=")) {
       const inline = arg.startsWith("--api-url=");
       const value = readOption(argv, arg, "--api-url", index);
@@ -85,33 +120,58 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       continue;
     }
     if (arg.startsWith("-")) {
-      throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: pnpm factrove upload --help`);
+      throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: pnpm factrove --help`);
     }
     positionals.push(arg);
   }
 
   const command = positionals[0];
   if (command === undefined) {
-    throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove upload --help");
+    throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
   }
-  if (command !== "upload") {
-    throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: pnpm factrove upload --help`);
+  const apiUrl = resolveApiUrl(apiUrlFlag, env);
+  if (command === "upload") {
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    const filePath = positionals[1];
+    if (filePath === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing file path. Run: pnpm factrove upload <path>");
+    }
+    if (positionals.length > 2) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    return {
+      kind: "upload",
+      path: filePath,
+      access: access ?? "private",
+      json,
+      apiUrl,
+    };
   }
-  const filePath = positionals[1];
-  if (filePath === undefined) {
-    throw new CliError("INVALID_INPUT", "Missing file path. Run: pnpm factrove upload <path>");
+  if (command === "get") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    const id = positionals[1];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove get <id>");
+    }
+    if (positionals.length > 2) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    return {
+      kind: "get",
+      id,
+      format: format ?? "html",
+      json,
+      apiUrl,
+    };
   }
-  if (positionals.length > 2) {
-    throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
-  }
-
-  return {
-    kind: "upload",
-    path: filePath,
-    access: access ?? "private",
-    json,
-    apiUrl: resolveApiUrl(apiUrlFlag, env),
-  };
+  throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: pnpm factrove --help`);
 }
 
 export function cliWantsJson(argv: readonly string[]): boolean {
@@ -128,7 +188,7 @@ export function cliWantsJson(argv: readonly string[]): boolean {
       json = true;
       continue;
     }
-    if (arg === "--access" || arg === "--api-url") {
+    if (OPTIONS_WITH_VALUES.has(arg)) {
       const next = argv[index + 1];
       if (next !== undefined && !next.startsWith("-")) {
         index += 1;
@@ -163,7 +223,7 @@ function requestsHelp(argv: readonly string[]): boolean {
     if (arg === "--help" || arg === "-h") {
       return true;
     }
-    if (arg === "--access" || arg === "--api-url") {
+    if (OPTIONS_WITH_VALUES.has(arg)) {
       const next = argv[index + 1];
       if (next !== undefined && !next.startsWith("-")) {
         index += 1;
@@ -196,6 +256,13 @@ function parseAccess(value: string): AccessType {
     return value;
   }
   throw new CliError("INVALID_INPUT", "access must be private or org_shared.");
+}
+
+function parseFormat(value: string): ContentFormat {
+  if (value === "html" || value === "markdown") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "format must be html or markdown.");
 }
 
 function assignOnce<T>(current: T | undefined, next: T, name: string): T {

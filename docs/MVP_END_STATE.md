@@ -193,6 +193,8 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Better Auth runtime login/session flows and API keys, real personal/org authorization, membership management, specific-person sharing, additional CLI commands, UI uploading, replacement/history, grouping, search/pagination, Markdown and other formats, Azure/GCP implementations, and managed hosting are later work.
+Better Auth runtime login/session flows and API keys, real personal/org authorization, membership management, specific-person sharing, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting are later work.
+
+Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 
 This MVP intentionally ends at the local HTML upload, list, and view experience.

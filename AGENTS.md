@@ -24,6 +24,10 @@ Documentation follows these roles: README.md provides long-term codebase documen
 - [prd/mvp_contract.md](prd/mvp_contract.md) defines the shared HTTP and package contracts.
 - [prd/mvp/done/](prd/mvp/done/) contains completed task briefs and handoff notes.
 
+## CLI
+
+When in doubt, follow aws s3 conventions. Command names, flags, and follow-ups are described in [README.md](README.md) and [prd/mvp_contract.md](prd/mvp_contract.md).
+
 ## Tooling
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-workspace.yaml`. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.

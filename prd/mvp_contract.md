@@ -68,9 +68,19 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | POST /api/v1/artifacts | multipart/form-data: one `file`, optional `accessType` | 201 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts?view=mine\|org | Default mine | 200 `{ items: ArtifactDto[] }` |
 | GET /api/v1/artifacts/{id} | None | 200 `{ artifact: ArtifactDto }` |
-| GET /api/v1/artifacts/{id}/content | None | 200 original HTML bytes |
+| GET /api/v1/artifacts/{id}/content | Optional `format=html\|markdown`. Omitted means `html`. | 200 HTML bytes, or Markdown converted from those bytes |
 
 The API builds absolute URLs from configuration, never an untrusted Host header. Get-by-ID and content return 404 for an unknown id. They do not enforce private/org access in this no-auth build.
+
+`contentUrl` stays the HTML content URL with no format query, so the viewer iframe keeps loading the stored document. Clients that want Markdown add `?format=markdown`. An invalid `format` is `400 INVALID_REQUEST`. `Accept` is not used to choose the format: a request with no `format` returns the original HTML bytes and the existing HTML headers, including when the caller sends `Accept: text/markdown`.
+
+HTML responses are unchanged: `text/html; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and the sandbox CSP. Markdown responses use `text/markdown; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and a CSP with `sandbox` and no script or style sources. Markdown is produced from the stored HTML on a worker thread. It is not written to PostgreSQL or object storage. A conversion failure does not change the stored artifact.
+
+The converter walks the parsed document once. Text keeps `&`, `<`, and `>` as `&amp;`, `&lt;`, and `&gt;`. Other Markdown punctuation in text is backslash-escaped: `\`, `` ` ``, `*`, `_`, `[`, `]`, `(`, `)`, `!`, `|`, and `~`. At the start of a line, `#`, `-`, `+`, `=`, and an ordered-list marker (`1.` or `1)`) are backslash-escaped, so literal text such as `# not a heading` stays text. Code is left unchanged. Code fences are longer than any backtick run in the code. Link and image destinations allow `http`, `https`, `mailto`, and relative URLs, written as `<destination>` with spaces, `<`, `>`, `\`, and control characters percent-encoded. `javascript:`, `vbscript:`, `data:`, and any other scheme are dropped. An `<img src="https://…">` stays a Markdown image, so a renderer that loads remote images will request that URL.
+
+Conversion uses a small worker pool. `MARKDOWN_CONVERSION_CONCURRENCY` is how many workers run at once (default 2, clamped to 1–4). `MARKDOWN_CONVERSION_QUEUE` is how many further conversions may wait (default 2, clamped to 0–8). A full queue fails immediately with `503 CONVERSION_UNAVAILABLE` and message `Markdown conversion is busy. Try again.`
+
+Input larger than the 10 MiB stored-HTML limit is `413 CONTENT_TOO_LARGE` with message `HTML exceeds the Markdown conversion limit.` Output larger than 16 MiB is `422 CONTENT_TOO_COMPLEX` with message `Markdown output exceeds the conversion limit.` A conversion that exceeds 5 seconds is `422 CONTENT_TOO_COMPLEX` with message `HTML took too long to convert to Markdown.` A worker that runs out of memory is `422 CONTENT_TOO_COMPLEX` with message `HTML used too much memory to convert to Markdown.` Nesting deeper than 100 levels is flattened. HTML that still cannot be converted within those limits is `422 CONTENT_TOO_COMPLEX` with message `HTML is too complex to convert to Markdown.` Invalid UTF-8 discovered while decoding stored HTML for Markdown is `400 INVALID_REQUEST`. An unexpected converter failure is `500 INTERNAL_ERROR`.
 
 ### Upload behavior
 
@@ -90,12 +100,15 @@ Return the common JSON envelope without stack traces or secrets:
 
 | Status | Code | Example |
 | --- | --- | --- |
-| 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/ID, invalid UTF-8 |
+| 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/format/ID, invalid UTF-8 |
 | 400 | ORGANIZATION_REQUIRED | org_shared without local organization |
 | 413 | FILE_TOO_LARGE | Above 10 MiB |
+| 413 | CONTENT_TOO_LARGE | Stored HTML exceeds the Markdown conversion limit |
+| 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact |
 | 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
+| 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
 
 A network failure has no API envelope; clients must report it separately.
@@ -110,7 +123,10 @@ client.getContext()
 client.uploadArtifact({ file: Blob, filename, accessType? })
 client.listArtifacts({ view: "mine" | "org" })
 client.getArtifact(id)
+client.getArtifactContent(id, { format?: "html" | "markdown" })
 ```
+
+`getArtifactContent` returns `{ format, mediaType, content }`. `format` defaults to `html`. `mediaType` is `text/html` or `text/markdown`. `content` is the response body as text, including a leading UTF-8 BOM when the stored HTML has one. HTML requests omit the format query. Markdown requests use `?format=markdown`. The HTTP success body stays raw text; this object is the client result, not a second JSON envelope from the API.
 
 baseUrl is the API origin, without /api/v1. The client appends route paths, uses multipart FormData, maps the documented envelopes, and exposes errors with status/code/message. Do not manually set a multipart boundary. Allow fetch injection for contract tests. No credentials or auth plugin are needed.
 
@@ -156,7 +172,7 @@ The caller needs `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the ob
 
 Next.js `/artifacts/[id]` fetches metadata, shows filename/context, and uses the returned contentUrl in an iframe. Do not use dangerouslySetInnerHTML or inline uploaded markup in the application DOM.
 
-Set iframe sandbox to `allow-scripts` without allow-same-origin, and referrer policy to no-referrer. API content responses set text/html; charset=utf-8, no-store, nosniff, no-referrer, and a CSP that:
+Set iframe sandbox to `allow-scripts` without allow-same-origin, and referrer policy to no-referrer. HTML content responses set text/html; charset=utf-8, no-store, nosniff, no-referrer, and a CSP that:
 
 - includes `sandbox allow-scripts`;
 - allows inline scripts/styles and embedded data/blob images, plus embedded fonts as needed;
@@ -165,7 +181,7 @@ Set iframe sandbox to `allow-scripts` without allow-same-origin, and referrer po
 
 Keep the policy fixed and tested. API CORS allows only WEB_ORIGIN, not wildcard or the opaque null origin of sandboxed HTML. Error responses remain non-executable JSON. Content lives on the API origin (port 3001), separate from the Next.js origin (port 3000); this local arrangement must be revisited with authentication/public hosting.
 
-Self-contained HTML is the MVP contract. Documents relying on CDNs/network resources are not supported. Markdown, previews, screenshots, and headless rendering are out of scope.
+Self-contained HTML is the stored artifact. Documents relying on CDNs/network resources are not supported. Previews, screenshots, and headless rendering are out of scope. Markdown exists only as an on-request conversion of the stored HTML. Uploads remain HTML, and neither the database nor object storage gains a Markdown copy.
 
 ## CLI
 
@@ -175,16 +191,23 @@ Planned repository command:
 pnpm factrove upload ./report.html
 pnpm factrove upload ./report.html --access org_shared --json
 pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
+pnpm factrove get <artifact-id>
+pnpm factrove get <artifact-id> --format markdown --json
+pnpm factrove get <artifact-id> --api-url http://localhost:3001
 ```
 
-- API origin precedence: --api-url, FACTROVE_API_URL, default http://localhost:3001.
-- Access defaults to private.
-- Plain success prints only viewerUrl plus newline to stdout.
-- JSON success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
+- When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
+- API origin precedence: --api-url, FACTROVE_API_URL, default http://localhost:3001. `upload` and `get` share it.
+- Access defaults to private. `--access` is only valid for `upload`.
+- `--format html|markdown` is only valid for `get` and defaults to `html`.
+- Plain upload success prints only viewerUrl plus newline to stdout.
+- JSON upload success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
+- Plain get success prints the content bytes and does not add a newline of its own.
+- JSON get success prints one line: `{ format, mediaType, content }`, with `mediaType` of `text/html` or `text/markdown`.
 - Errors go to stderr and exit nonzero. In --json mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR.
 - No progress/framework startup logs on stdout. Close the Nest application context so the process exits.
 - No login/list/share/config commands, persisted credentials, background process, or separate CLI server.
-- Do not add automatic retries for uploads.
+- Do not add automatic retries for uploads. `get` calls the content endpoint once.
 
 ## Configuration and planned root commands
 
@@ -197,11 +220,12 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 | pnpm db:seed | Create/update local fixture rows idempotently |
 | pnpm dev | Run FE and BE together |
 | pnpm factrove upload ... | Run Nest CLI upload |
+| pnpm factrove get ... | Print artifact content as HTML or Markdown |
 | pnpm build / pnpm typecheck / pnpm test | Workspace verification |
 | pnpm infra:down | Stop services without removing data volumes |
 | pnpm e2e | Run the local upload, viewer, restart, and S3 integration checks against Compose project factrove-e2e |
 
-Backend env: DATABASE_URL, HOST (127.0.0.1), PORT (3001), WEB_ORIGIN, API_PUBLIC_ORIGIN, LOCAL_USER_ID, LOCAL_ORGANIZATION_ID, S3_BUCKET, S3_REGION, optional S3_ENDPOINT and S3_FORCE_PATH_STYLE, and the standard AWS credential chain (`AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN`). `S3_INTEGRATION=1` runs the storage integration tests against local Garage. Those tests set the Garage endpoint and credentials, remove `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before opening a client. With `S3_ENDPOINT` unset, the API does not use a custom S3 endpoint.
+Backend env: DATABASE_URL, HOST (127.0.0.1), PORT (3001), WEB_ORIGIN, API_PUBLIC_ORIGIN, LOCAL_USER_ID, LOCAL_ORGANIZATION_ID, S3_BUCKET, S3_REGION, optional S3_ENDPOINT and S3_FORCE_PATH_STYLE, and the standard AWS credential chain (`AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN`). `S3_INTEGRATION=1` runs the storage integration tests against local Garage. Those tests set the Garage endpoint and credentials, remove `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before opening a client. With `S3_ENDPOINT` unset, the API does not use a custom S3 endpoint. `MARKDOWN_CONVERSION_CONCURRENCY` (default 2) and `MARKDOWN_CONVERSION_QUEUE` (default 2) bound on-request Markdown conversion.
 
 Web env: NEXT_PUBLIC_API_URL, default http://localhost:3001. CLI env: FACTROVE_API_URL. Client packages must never receive database or storage credentials.
 

@@ -1,8 +1,10 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import { CliConfigService } from "./cli-config.service.js";
 import { CliModule } from "./cli.module.js";
 import { formatFailure } from "./cli-error.js";
-import { cliWantsJson } from "./parse-args.js";
+import { GetCommand } from "./get.command.js";
+import { cliWantsJson, helpText } from "./parse-args.js";
 import { UploadCommand } from "./upload.command.js";
 
 type ApplicationContext = Awaited<ReturnType<typeof NestFactory.createApplicationContext>>;
@@ -14,7 +16,14 @@ async function run(): Promise<void> {
       logger: false,
       abortOnError: false,
     });
-    await app.get(UploadCommand).execute();
+    const invocation = app.get(CliConfigService).load();
+    if (invocation.kind === "help") {
+      process.stdout.write(helpText());
+    } else if (invocation.kind === "get") {
+      await app.get(GetCommand).execute();
+    } else {
+      await app.get(UploadCommand).execute();
+    }
   } catch (error) {
     process.stderr.write(formatFailure(error, cliWantsJson(process.argv.slice(2))));
     process.exitCode = 1;

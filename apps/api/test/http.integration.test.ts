@@ -24,7 +24,8 @@ import { ArtifactsRepository } from "../src/database/repositories/artifacts.repo
 import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "../src/database/seed/seed-local-identities.js";
 import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
-import { MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
+import { withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
+import { markdownContentSecurityPolicy, MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
@@ -502,6 +503,139 @@ describe("HTTP API", () => {
     expect(Date.now() - started).toBeLessThan(2000);
   });
 
+  it("returns original HTML unless format=markdown is requested", async () => {
+    const bytes = new TextEncoder().encode(
+      "<h1>Notes</h1><p>See <a href=\"https://example.com/docs\">docs</a>.</p><script>SECRETTOKEN</script>",
+    );
+    const artifact = await upload(baseUrl, "notes.html", bytes);
+
+    const omitted = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`, {
+      headers: { Accept: "text/markdown" },
+    });
+    expect(omitted.status).toBe(200);
+    expect(Buffer.from(await omitted.arrayBuffer())).toEqual(Buffer.from(bytes));
+    expectHtmlHeaders(omitted.headers);
+
+    const explicit = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=html`);
+    expect(explicit.status).toBe(200);
+    expect(Buffer.from(await explicit.arrayBuffer())).toEqual(Buffer.from(bytes));
+    expectHtmlHeaders(explicit.headers);
+
+    const markdown = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+    expect(markdown.status).toBe(200);
+    const markdownBytes = new Uint8Array(await markdown.arrayBuffer());
+    const markdownText = new TextDecoder().decode(markdownBytes);
+    expect(markdownText).toContain("# Notes");
+    expect(markdownText).toContain("[docs](<https://example.com/docs>)");
+    expect(markdownText).not.toContain("SECRETTOKEN");
+    expect(markdownText).not.toContain("<script");
+    expectMarkdownHeaders(markdown.headers, markdownBytes.byteLength);
+
+    const stored = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await stored.arrayBuffer())).toEqual(Buffer.from(bytes));
+    expect(store.objects.get(`${artifact.id}.html`)).toEqual(bytes);
+    expect(await prisma.artifact.count()).toBe(1);
+
+    const upper = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id.toUpperCase()}/content?format=markdown`);
+    expect(upper.status).toBe(200);
+    expect(await upper.text()).toBe(markdownText);
+  });
+
+  it("returns stored HTML bytes, including a leading BOM, for format=html", async () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("<p>Hi</p>", "utf8")]);
+    const artifact = await upload(baseUrl, "bom.html", bytes);
+    const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=html`);
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    expectHtmlHeaders(response.headers);
+  });
+
+  it("returns CONTENT_TOO_COMPLEX when Markdown output exceeds the conversion limit", async () => {
+    const html = `<p>${"<".repeat(4_500_000)}</p>`;
+    const artifact = await upload(baseUrl, "wide.html", Buffer.from(html, "utf8"));
+    const started = Date.now();
+    const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+    expect(response.status).toBe(422);
+    expect(await errorOf(response)).toEqual({
+      code: "CONTENT_TOO_COMPLEX",
+      message: "Markdown output exceeds the conversion limit.",
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const health = await fetch(`${baseUrl}/api/v1/health`);
+    expect(health.status).toBe(200);
+  });
+
+  it("returns CONVERSION_UNAVAILABLE when the Markdown worker pool is full", async () => {
+    const previous = {
+      concurrency: process.env.MARKDOWN_CONVERSION_CONCURRENCY,
+      queue: process.env.MARKDOWN_CONVERSION_QUEUE,
+    };
+    process.env.MARKDOWN_CONVERSION_CONCURRENCY = "1";
+    process.env.MARKDOWN_CONVERSION_QUEUE = "0";
+    let releaseHeld = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    const held = withMarkdownConversionSlot(() => gate.then(() => "held"));
+    try {
+      const artifact = await upload(baseUrl, "busy.html", new TextEncoder().encode("<p>Busy</p>"));
+      const started = Date.now();
+      const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+      expect(response.status).toBe(503);
+      expect(await errorOf(response)).toEqual({
+        code: "CONVERSION_UNAVAILABLE",
+        message: "Markdown conversion is busy. Try again.",
+      });
+      expect(Date.now() - started).toBeLessThan(1_000);
+    } finally {
+      releaseHeld();
+      await held;
+      if (previous.concurrency === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_CONCURRENCY;
+      } else {
+        process.env.MARKDOWN_CONVERSION_CONCURRENCY = previous.concurrency;
+      }
+      if (previous.queue === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_QUEUE;
+      } else {
+        process.env.MARKDOWN_CONVERSION_QUEUE = previous.queue;
+      }
+    }
+  });
+
+  it("rejects an unknown content format and keeps markdown failures as JSON", async () => {
+    const artifact = await upload(baseUrl, "notes.html", new TextEncoder().encode("<p>Notes</p>"));
+    const invalid = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=md`);
+    expect(invalid.status).toBe(400);
+    expect(await errorOf(invalid)).toEqual({
+      code: "INVALID_REQUEST",
+      message: "format must be html or markdown.",
+    });
+
+    const blank = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=`);
+    expect(blank.status).toBe(400);
+    expect((await errorOf(blank)).code).toBe("INVALID_REQUEST");
+
+    const repeated = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=html&format=markdown`);
+    expect(repeated.status).toBe(400);
+    expect((await errorOf(repeated)).code).toBe("INVALID_REQUEST");
+
+    const missing = await fetch(`${baseUrl}/api/v1/artifacts/00000000-0000-4000-8000-000000000000/content?format=markdown`);
+    expect(missing.status).toBe(404);
+    expect(await errorOf(missing)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    store.failGet = true;
+    const unavailable = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+    expect(unavailable.status).toBe(503);
+    expect(await errorOf(unavailable)).toEqual({
+      code: "STORAGE_UNAVAILABLE",
+      message: "Object storage is unavailable.",
+    });
+  });
+
   it("allows only the configured web origin through CORS", async () => {
     const allowed = await fetch(`${baseUrl}/api/v1/health`, {
       headers: { Origin: "http://localhost:3000" },
@@ -626,6 +760,18 @@ async function errorOf(response: Response): Promise<{ code: string; message: str
   const parsed = apiErrorSchema.parse(body);
   expect(Object.keys(parsed.error)).toEqual(["code", "message"]);
   return parsed.error;
+}
+
+function expectMarkdownHeaders(headers: Headers, sizeBytes: number): void {
+  expect(headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+  expect(headers.get("content-length")).toBe(String(sizeBytes));
+  expect(headers.get("cache-control")).toContain("no-store");
+  expect(headers.get("x-content-type-options")).toBe("nosniff");
+  expect(headers.get("referrer-policy")).toBe("no-referrer");
+  const policy = headers.get("content-security-policy") ?? "";
+  expect(policy).toBe(markdownContentSecurityPolicy());
+  expect(policy).not.toContain("unsafe-inline");
+  expect(policy).not.toContain("allow-scripts");
 }
 
 function expectHtmlHeaders(headers: Headers): void {

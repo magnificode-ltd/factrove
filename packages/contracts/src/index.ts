@@ -2,6 +2,12 @@ import { z } from "zod";
 
 export const accessTypeSchema = z.enum(["private", "org_shared"]);
 export const artifactViewSchema = z.enum(["mine", "org"]);
+export const contentFormatSchema = z.enum(["html", "markdown"]);
+
+export const contentMediaTypes = {
+  html: "text/html",
+  markdown: "text/markdown"
+} as const;
 
 export const artifactDtoSchema = z.object({
   id: z.string().uuid(),
@@ -32,6 +38,8 @@ export const healthEnvelopeSchema = z.object({ status: z.literal("ok") });
 
 export type AccessType = z.infer<typeof accessTypeSchema>;
 export type ArtifactView = z.infer<typeof artifactViewSchema>;
+export type ContentFormat = z.infer<typeof contentFormatSchema>;
+export type ContentMediaType = (typeof contentMediaTypes)[ContentFormat];
 export type ArtifactDto = z.infer<typeof artifactDtoSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ArtifactEnvelope = z.infer<typeof artifactEnvelopeSchema>;

@@ -63,3 +63,11 @@ Checked items were observed on October 18, 2026. The upload loop, library refres
 The macOS item is unchecked. This run was Linux x86_64, Node 24.16.0, pnpm 11.25.0, Docker Engine 29.1.3, and Compose 2.40.3. A real AWS bucket was not called. A unit test checks that an unset `S3_ENDPOINT` still targets the regional AWS host. The second-user list check remains the earlier database insert plus the real API and library UI. The oversized-file CLI error remains the earlier check; missing file, non-HTML, unknown id, and the web unavailable-backend screen were checked again.
 
 Tasks 01–08 are complete except the macOS localhost check in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Task 08's local stack is verified.
+
+## Post-MVP
+
+These items are outside the local MVP task list. They follow the same contract and directory conventions.
+
+| ID | Brief | Status | Owns |
+| --- | --- | --- | --- |
+| 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — stub-verified | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
