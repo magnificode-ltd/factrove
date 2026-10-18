@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { composeArgs, infraFailureHint } from "./local-runtime.mjs";
+import { createInterface } from "node:readline/promises";
+import { composeArgs, infraFailureHint, resetDecision } from "./local-runtime.mjs";
 
 const action = process.argv[2];
 if (action !== "up" && action !== "down" && action !== "reset") {
@@ -8,7 +9,29 @@ if (action !== "up" && action !== "down" && action !== "reset") {
 }
 
 if (action === "reset") {
-  process.stderr.write("Deleting the local PostgreSQL volume. Artifact metadata in that volume will be removed.\n");
+  const decision = resetDecision(process.argv.slice(3), Boolean(process.stdin.isTTY));
+  if (decision === "refuse") {
+    process.stderr.write(
+      "Refusing to delete the local PostgreSQL volume without confirmation. Run pnpm infra:reset -- --yes. Reset removes database rows only; S3 objects for those artifacts stay in the bucket.\n",
+    );
+    process.exit(1);
+  }
+  if (decision === "prompt") {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const answer = (
+      await rl.question(
+        "Delete the local PostgreSQL volume? Artifact rows in that volume are removed. S3 objects for those rows stay in the bucket. Type yes to continue: ",
+      )
+    ).trim();
+    rl.close();
+    if (answer !== "yes") {
+      process.stderr.write("Reset cancelled.\n");
+      process.exit(1);
+    }
+  }
+  process.stderr.write(
+    "Deleting the local PostgreSQL volume. Artifact metadata in that volume will be removed. S3 objects for those artifacts stay in the bucket.\n",
+  );
 }
 
 const child = spawn("docker", composeArgs(action), { stdio: ["ignore", "inherit", "pipe"] });
@@ -51,7 +74,7 @@ child.on("exit", (code, signal) => {
     process.stderr.write("Stopped local services. The PostgreSQL volume was kept.\n");
     process.stderr.write("To delete that volume, run pnpm infra:reset.\n");
   } else {
-    process.stderr.write("Stopped local services and deleted the PostgreSQL volume.\n");
+    process.stderr.write("Stopped local services and deleted the PostgreSQL volume. S3 objects were left in the bucket.\n");
   }
   process.exit(0);
 });

@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -125,6 +125,45 @@ export function infraFailureHint(stderr) {
     return "Could not pull the pinned Postgres image. Check that this machine can reach Docker Hub.";
   }
   return "";
+}
+
+export function resetDecision(args, isTTY) {
+  if (args.includes("--yes")) {
+    return "run";
+  }
+  if (isTTY) {
+    return "prompt";
+  }
+  return "refuse";
+}
+
+export function snapshotFile(filePath) {
+  try {
+    return readFileSync(filePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export function restoreFileSnapshot(filePath, snapshot) {
+  if (snapshot === null) {
+    return;
+  }
+  let current = null;
+  try {
+    current = readFileSync(filePath);
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+  if (current && current.equals(snapshot)) {
+    return;
+  }
+  writeFileSync(filePath, snapshot);
 }
 
 export function signalProcessGroup(child, signal) {

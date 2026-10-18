@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,6 +14,9 @@ import {
   invocationCwd,
   missingApiSettings,
   repoRoot,
+  resetDecision,
+  restoreFileSnapshot,
+  snapshotFile,
   webDevArgs,
   webDevBin,
   webLaunchEnv,
@@ -143,4 +148,205 @@ describe("local runtime", () => {
     assert.match(apiExample, /^DATABASE_URL=postgresql:\/\/factrove:factrove@127\.0\.0\.1:5432\/factrove$/m);
     assert.match(apiExample, /^S3_BUCKET=your-bucket$/m);
   });
+
+  it("restores a snapshotted file and leaves a missing snapshot untouched", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-snapshot-"));
+    try {
+      const filePath = join(directory, "next-env.d.ts");
+      writeFileSync(filePath, "original\n");
+      const snapshot = snapshotFile(filePath);
+      writeFileSync(filePath, "rewritten\n");
+      restoreFileSnapshot(filePath, snapshot);
+      assert.equal(readFileSync(filePath, "utf8"), "original\n");
+      restoreFileSnapshot(filePath, snapshot);
+      assert.equal(readFileSync(filePath, "utf8"), "original\n");
+
+      const absent = join(directory, "absent.d.ts");
+      restoreFileSnapshot(absent, null);
+      assert.equal(snapshotFile(absent), null);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("requires confirmation before deleting the Postgres volume", async () => {
+    assert.equal(resetDecision(["--yes"], false), "run");
+    assert.equal(resetDecision([], true), "prompt");
+    assert.equal(resetDecision([], false), "refuse");
+    assert.equal(resetDecision(["--volumes"], false), "refuse");
+
+    const child = spawn(process.execPath, [join(repoRoot, "scripts/infra.mjs"), "reset"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdin.end();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const [code] = await withTimeout(once(child, "close"), 5000, "infra reset refusal");
+    assert.equal(code, 1);
+    assert.match(stderr, /Refusing to delete the local PostgreSQL volume/);
+    assert.match(stderr, /S3 objects/);
+    assert.equal(stderr.includes("docker"), false);
+  });
 });
+
+describe("process supervision", () => {
+  it("stops both child processes on SIGHUP", async () => {
+    const run = await superviseFixture("hold");
+    try {
+      process.kill(run.child.pid, "SIGHUP");
+      const [code, signal] = await withTimeout(run.exited, 8000, "SIGHUP shutdown");
+      assert.equal(signal, null);
+      assert.equal(code, 0);
+      await waitGone(run.pids.api);
+      await waitGone(run.pids.web);
+    } finally {
+      killProcess(run.child.pid);
+      killProcess(run.pids.api);
+      killProcess(run.pids.web);
+    }
+  });
+
+  it("stops the other child when one exits on its own", async () => {
+    const run = await superviseFixture("one-exits");
+    try {
+      const [code, signal] = await withTimeout(run.exited, 8000, "sibling shutdown");
+      assert.equal(signal, null);
+      assert.equal(code, 0);
+      await waitGone(run.pids.api);
+      await waitGone(run.pids.web);
+    } finally {
+      killProcess(run.child.pid);
+      killProcess(run.pids.api);
+      killProcess(run.pids.web);
+    }
+  });
+
+  it("stops both child processes when the supervisor exits", async () => {
+    const run = await superviseFixture("exit-now");
+    try {
+      const [code, signal] = await withTimeout(run.exited, 8000, "exit hook");
+      assert.equal(signal, null);
+      assert.equal(code, 3);
+      await waitGone(run.pids.api);
+      await waitGone(run.pids.web);
+    } finally {
+      killProcess(run.child.pid);
+      killProcess(run.pids.api);
+      killProcess(run.pids.web);
+    }
+  });
+});
+
+function superviseFixture(mode) {
+  const child = spawn(process.execPath, [join(repoRoot, "scripts/supervise-fixture.mjs"), mode], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = once(child, "exit");
+  return readSupervisorPids(child)
+    .then((pids) => ({ child, pids, exited }))
+    .catch((error) => {
+      killProcess(child.pid);
+      throw error;
+    });
+}
+
+function readSupervisorPids(child) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      reject(new Error(`supervisor did not report both pids\n${buffer}\n${stderr}`));
+    }, 5000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      const api = /pid api (\d+)/.exec(buffer);
+      const web = /pid web (\d+)/.exec(buffer);
+      if (api && web && !settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve({ api: Number(api[1]), web: Number(web[1]) });
+      }
+    });
+    child.on("exit", (code, signal) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`supervisor exited (${signal ?? code}) before both pids\n${buffer}\n${stderr}`));
+      }
+    });
+    child.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  });
+}
+
+function waitGone(pid) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (isGone(pid)) {
+        clearInterval(timer);
+        resolve();
+        return;
+      }
+      if (Date.now() - started > 2000) {
+        clearInterval(timer);
+        reject(new Error(`process ${pid} is still running`));
+      }
+    }, 50);
+  });
+}
+
+function isGone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return Boolean(error && typeof error === "object" && "code" in error && error.code === "ESRCH");
+  }
+}
+
+function killProcess(pid) {
+  if (!pid) {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process has already exited.
+    }
+  }
+}
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}

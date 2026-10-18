@@ -21,7 +21,7 @@ compose.yaml, .env.example, local infrastructure initialization, setup scripts/d
 - Make infra:down preserve volumes; any destructive reset must be separately named/documented and never part of normal setup.
 - Ensure only the API receives database/storage secrets. Web/CLI receive HTTP origins.
 - Put `FACTROVE_API_URL=http://localhost:3001` in the root `.env.example`. The CLI already documents that key in `apps/cli/.env.example` and reads it only from the process environment. `--api-url` overrides it.
-- Keep `pnpm factrove` on `node scripts/factrove.mjs`, which runs `node apps/cli/dist/main.js` in the caller's directory. Relative upload paths resolve from `INIT_CWD`. Do not point the script back at `pnpm --filter @factrove/cli start`.
+- Keep `pnpm factrove` on `node scripts/factrove.mjs`, which runs `node apps/cli/dist/main.js` in the caller's directory. The launcher sets that directory from `INIT_CWD`. The CLI resolves a relative path from its own working directory. Do not point the script back at `pnpm --filter @factrove/cli start`.
 - Integrate the independently developed tasks and reconcile shared dependencies/lockfile.
 - Update root README to distinguish implemented behavior from future plans and include commands verified on the actual checkout.
 - Provide a short troubleshooting path for unavailable containers, missing seed, missing or unauthorized S3 bucket, port conflicts, and backend URL errors.
@@ -50,10 +50,10 @@ Use a browser check for visible rendering; HTTP status alone is insufficient. Do
 ### What landed
 
 - `compose.yaml` runs official Postgres `17.11`, pinned by the multi-arch image index `sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3` (linux/amd64 and linux/arm64). Host port `5432` is bound to `127.0.0.1`. The named volume `factrove-postgres` holds the data. There is no S3 service.
-- `pnpm infra:up` waits until Postgres is healthy. `pnpm infra:down` removes the container and network and keeps the volume. `pnpm infra:reset` is the only command that deletes the volume.
-- `pnpm dev` builds the API, CLI, and shared packages, then starts both apps with `[api]` and `[web]` logs. Ctrl+C stops both. It does not migrate or seed. The API listens on `127.0.0.1:3001` and loads `apps/api/.env`. The web app listens on `127.0.0.1:3000`.
+- `pnpm infra:up` waits until Postgres is healthy. `pnpm infra:down` removes the container and network and keeps the volume. `pnpm infra:reset` is the only command that deletes the volume. It asks for confirmation in a terminal and otherwise requires `pnpm infra:reset -- --yes`. Deleting the volume removes Postgres metadata. S3 objects for those rows stay in the bucket.
+- `pnpm dev` builds the API, CLI, and shared packages, then starts both apps with `[api]` and `[web]` logs. Ctrl+C, SIGTERM, and SIGHUP (closing the terminal) stop both. If one app exits, the command stops the other. It does not migrate or seed. The API listens on `127.0.0.1:3001` and loads `apps/api/.env`. The web app listens on `127.0.0.1:3000`. On exit it restores `apps/web/next-env.d.ts` when Next.js rewrote that file.
 - The root `.env.example` documents `FACTROVE_API_URL` and `NEXT_PUBLIC_API_URL`. `pnpm factrove` applies `FACTROVE_API_URL` from that file only when the process variable is unset. `--api-url` still wins. Database and storage variables are removed from the web and CLI process environments.
-- `scripts/factrove.mjs` sets the CLI working directory from `INIT_CWD` and removes `INIT_CWD` from the child environment, so the CLI resolves paths from its own working directory. Direct `node apps/cli/dist/main.js` still honors `INIT_CWD`.
+- `scripts/factrove.mjs` sets the CLI working directory from `INIT_CWD` and removes `INIT_CWD` from the child environment. The CLI resolves paths from its own working directory and ignores `INIT_CWD`, including a direct `node apps/cli/dist/main.js` run.
 - `apps/api/.env.example` uses `postgresql://factrove:factrove@127.0.0.1:5432/factrove`, matching Compose. Those are local loopback credentials.
 
 ### Commands run on October 18, 2026
@@ -80,7 +80,7 @@ pnpm test
 pnpm build
 ```
 
-`pnpm db:migrate` applied `20261011120000_add_identity_and_artifact` to an empty database. A second deploy reported no pending migrations. Two seeds left one `local-user` and one `local-org`. `pnpm infra:down` kept volume `factrove_factrove-postgres`. After `pnpm infra:up`, those identity rows were still there. `docker port` showed `5432/tcp -> 127.0.0.1:5432`. `pnpm infra:reset` was not executed. The runtime test asserts that only that command passes `--volumes`. `pnpm infra:reset` was not executed. The runtime test asserts that only that command passes `--volumes`.
+`pnpm db:migrate` applied `20261011120000_add_identity_and_artifact` to an empty database. A second deploy reported no pending migrations. Two seeds left one `local-user` and one `local-org`. `pnpm infra:down` kept volume `factrove_factrove-postgres`. After `pnpm infra:up`, those identity rows were still there. `docker port` showed `5432/tcp -> 127.0.0.1:5432`. `pnpm infra:reset` was not executed. The runtime test asserts that only that command passes `--volumes`.
 
 `pnpm dev` reached Nest "successfully started" and Next "Ready". `GET /api/v1/health` returned `{"status":"ok"}`. `GET /api/v1/context` returned Local User and Local Organization. Both artifact lists were empty. `http://localhost:3000/` and `http://127.0.0.1:3000/` returned 200. After restart, `ss` showed `127.0.0.1:3000`, `127.0.0.1:3001`, and `127.0.0.1:5432` only. Ctrl+C stopped the API and the web app. The web process environment contained `NEXT_PUBLIC_API_URL` and did not contain `DATABASE_URL`, `S3_*`, or `AWS_*`. The API loads those from `apps/api/.env` after start.
 
@@ -92,12 +92,22 @@ List semantics were checked by inserting a second user and four artifact rows in
 
 ### Not run
 
+Task 08 owns these checks.
+
 - Upload of `./fixtures/hello.html` through the CLI to the configured AWS bucket, the viewer URL from that response, and a refresh that shows the uploaded HTML.
 - An org_shared upload appearing in both library tabs.
 - Sandbox and CSP headers on a real content response, and inline script behavior inside the iframe. The web browser tests still cover the sandboxed iframe against a local content stub.
 - Restart proof that AWS object bytes remain.
-- A macOS execution of this setup. The image pin includes linux/arm64 for Apple Silicon and linux/amd64 for Intel Macs.
+- `storage.integration` and `content.s3.integration` with `S3_INTEGRATION=1`.
+- A macOS execution of this setup. The image pin includes linux/arm64 for Apple Silicon and linux/amd64 for Intel Macs. On macOS, `localhost` may resolve to `::1` while the API and web bind `127.0.0.1`. Task 08 confirms the browser and a Node fetch to `http://localhost:3001` still reach the API.
 - The web library's unavailable-backend state against a stopped API. The web tests cover that state.
+
+### Review follow-up, October 18, 2026
+
+- `pnpm dev` treats SIGHUP like SIGTERM, stops the other app when one exits, and signals remaining child process groups on exit.
+- On that exit it restores `apps/web/next-env.d.ts` if Next.js rewrote the committed file.
+- `pnpm infra:reset` asks for `yes` in a terminal and refuses otherwise unless `--yes` is passed. The volume delete still does not remove S3 objects.
+- The CLI no longer reads `INIT_CWD`. The launcher still applies it as the child working directory.
 
 No product decision is blocking. Postgres 17.11, the local database password `factrove`, and binding the Next dev server to `127.0.0.1` are local runtime choices.
 

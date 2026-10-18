@@ -136,7 +136,7 @@ pnpm dev
 
 `pnpm infra:up` starts PostgreSQL and waits until it accepts connections. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the local user `local-user` (Local User) and organization `local-org` (Local Organization). Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup.
 
-`pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C stops both. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change.
+`pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C, SIGTERM, and closing the terminal stop both. If one app exits, the command stops the other. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change. While it is running, Next.js may rewrite `apps/web/next-env.d.ts`. The command restores the committed copy when it exits.
 
 In a second terminal, from the repository root:
 
@@ -147,9 +147,9 @@ pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
 pnpm factrove upload --help
 ```
 
-Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the directory where you ran `pnpm`.
+Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
-`pnpm infra:down` stops PostgreSQL and keeps the data volume. `pnpm infra:reset` stops it and deletes that volume. Reset is the only command that drops local metadata.
+`pnpm infra:down` stops PostgreSQL and keeps the data volume. `pnpm infra:reset` stops it and deletes that volume. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. Reset is the only command that drops local metadata. It does not delete S3 objects: bytes for the removed artifact rows stay in the bucket.
 
 Workspace checks:
 
