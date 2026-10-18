@@ -94,40 +94,89 @@ Object storage is another backend-local module. Its S3 implementation uses the c
 
 Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation and delivery policy.
 
-## Development
+## Local setup
 
-Runtime versions are pinned in [.nvmrc](.nvmrc), [.node-version](.node-version), and [pnpm-workspace.yaml](pnpm-workspace.yaml). The package-manager version and workspace commands are recorded in [package.json](package.json).
+This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to an existing AWS S3 bucket. The web app and CLI receive HTTP origins. Database and storage credentials stay in the API environment.
 
-With the pinned Node and pnpm versions available:
+`private` and `org_shared` choose which library list an artifact appears in. This build is unauthenticated: those labels are list classifications, and opening an artifact URL does not check membership. Login, API keys, and managed hosting are later work described in the [MVP end state](docs/MVP_END_STATE.md).
+
+### Prerequisites
+
+- Node.js 24.16.0, pinned in [.nvmrc](.nvmrc) and [.node-version](.node-version).
+- pnpm 11.25.0, pinned by `packageManager` in [package.json](package.json).
+- Docker Desktop on Apple Silicon or Intel Mac, or another runtime that provides Docker Compose v2 (`docker compose`). OrbStack and Colima qualify when they provide that command. Start the runtime before `pnpm infra:up`.
+
+The Postgres image is pinned to the official `postgres:17.11` multi-arch index, so the Mac's architecture selects its own build. Host port `5432` is bound to `127.0.0.1`.
+
+### Environment
+
+```sh
+cp apps/api/.env.example apps/api/.env
+cp .env.example .env
+```
+
+Edit `apps/api/.env` before uploading:
+
+- `DATABASE_URL` already matches the Compose database `factrove` on `127.0.0.1:5432`, user `factrove`, password `factrove`.
+- Set `S3_BUCKET` and `S3_REGION` to the existing bucket. Factrove does not create the bucket and does not run an S3 service.
+- Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` together, with `AWS_SESSION_TOKEN` when the key is temporary. Leave those unset to use `AWS_PROFILE` or the default AWS credential chain.
+- The API calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
+
+The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command.
+
+### Start, stop, and upload
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm infra:up
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+`pnpm infra:up` starts PostgreSQL and waits until it accepts connections. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the local user `local-user` (Local User) and organization `local-org` (Local Organization). Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup.
+
+`pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C stops both. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change.
+
+In a second terminal, from the repository root:
+
+```sh
+pnpm factrove upload ./fixtures/hello.html
+pnpm factrove upload ./fixtures/hello.html --access org_shared --json
+pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
+pnpm factrove upload --help
+```
+
+Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the directory where you ran `pnpm`.
+
+`pnpm infra:down` stops PostgreSQL and keeps the data volume. `pnpm infra:reset` stops it and deletes that volume. Reset is the only command that drops local metadata.
+
+Workspace checks:
+
+```sh
 pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
 ```
 
-The build follows workspace dependency order. Shared packages expose compiled modules and declarations from `dist/`.
+`pnpm --filter @factrove/web dev` and `pnpm --filter @factrove/api dev` still start one app at a time. `pnpm dev` is the command that runs them together.
 
-After building, application-level commands are:
+## Troubleshooting
 
-```sh
-pnpm --filter @factrove/web dev
-pnpm --filter @factrove/api dev
-pnpm factrove upload ./fixtures/hello.html
-```
+- **Container runtime unavailable.** `pnpm infra:up` exits when `docker` is missing or the daemon is stopped. Start Docker Desktop and run `pnpm infra:up` again.
+- **Port 5432 is taken.** Another PostgreSQL is listening on `127.0.0.1:5432`. Stop it, or change the host port in [compose.yaml](compose.yaml) and `DATABASE_URL` together.
+- **Port 3000 or 3001 is taken.** Stop the other process and run `pnpm dev` again. The web origin is `http://localhost:3000` and the API origin is `http://localhost:3001`.
+- **The API stops and asks for a seed.** `LOCAL_USER_ID` or `LOCAL_ORGANIZATION_ID` has no matching row. Run `pnpm db:seed`, then `pnpm dev`.
+- **Upload returns `STORAGE_UNAVAILABLE`.** The bucket name, region, or credentials cannot write the object. Check `S3_BUCKET`, `S3_REGION`, and the AWS credential chain in `apps/api/.env`. A failed upload leaves no artifact row. `S3_BUCKET=your-bucket` is the placeholder from the example file.
+- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`.
+- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in the root `.env` or the environment, then restart `pnpm dev`.
 
-The web development command uses Next.js dev mode. The API development command currently compiles once and starts Node. `pnpm factrove` runs the upload CLI against the HTTP API. The CLI only needs the API origin.
+## Development
 
-```sh
-pnpm factrove upload ./fixtures/hello.html
-pnpm factrove upload ./report.html --access org_shared --json
-pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
-pnpm factrove upload --help
-```
+Runtime versions are pinned in [.nvmrc](.nvmrc), [.node-version](.node-version), and [pnpm-workspace.yaml](pnpm-workspace.yaml). The package-manager version and workspace commands are recorded in [package.json](package.json).
 
-The API origin comes from `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`. `FACTROVE_API_URL` is documented in [apps/cli/.env.example](apps/cli/.env.example). The CLI reads that variable from the process environment. Access defaults to `private`. A relative path is resolved from the directory where you ran `pnpm`, so `./fixtures/hello.html` works from the repository root. Plain success prints only the viewer URL. `--json` prints the `{ artifact }` response envelope on one line. Failures go to stderr and the process exits nonzero. If `apps/cli/dist` has not been built, the command says to run `pnpm --filter @factrove/cli build`. pnpm prints the script command it runs to stderr; the CLI leaves stdout free of Nest startup logs. Application feature coverage and local-stack setup progress are tracked in the PRDs.
+The build follows workspace dependency order. Shared packages expose compiled modules and declarations from `dist/`. `pnpm factrove` runs the compiled CLI. When `apps/cli/dist` is missing it tells you to run `pnpm --filter @factrove/cli build`. `pnpm dev` performs that build before starting the servers.
 
 ## Database changes
 

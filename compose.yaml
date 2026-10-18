@@ -1,0 +1,27 @@
+# Local Factrove infrastructure.
+# PostgreSQL only. Artifact bytes stay in the configured AWS bucket.
+# The digest is the official multi-arch image index (linux/amd64 and linux/arm64),
+# so Apple Silicon and Intel Macs each pull their own build.
+
+name: factrove
+
+services:
+  postgres:
+    image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: factrove
+      POSTGRES_PASSWORD: factrove
+      POSTGRES_DB: factrove
+    volumes:
+      - factrove-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factrove -d factrove"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  factrove-postgres:

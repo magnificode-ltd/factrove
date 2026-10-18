@@ -200,6 +200,23 @@ describe("factrove upload", () => {
     });
   });
 
+  it("runs the launcher with the caller directory as the CLI working directory", async () => {
+    const elsewhere = await makeTemp();
+    const stub = await startStub(() => accepted(1));
+    const result = await runCommand(
+      process.execPath,
+      [launcherPath, "upload", "./fixtures/hello.html", "--api-url", stub.url],
+      elsewhere,
+      { INIT_CWD: repoRoot },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
+    expect(result.stderr).toBe("");
+    const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
+    expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
+  });
+
   it("runs from the repository root through pnpm factrove", async () => {
     const stub = await startStub(() => accepted(1, "org_shared"));
     const result = await runCommand(
