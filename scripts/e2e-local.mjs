@@ -104,7 +104,11 @@ async function main() {
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
 
-  const { chromium } = await import(pathToFileURL(join(repoRoot, "apps/web/node_modules/playwright/index.js")).href);
+  const playwright = await import(pathToFileURL(join(repoRoot, "apps/web/node_modules/playwright/index.mjs")).href);
+  const chromium = playwright.chromium;
+  if (!chromium) {
+    throw new Error("Playwright did not export chromium.");
+  }
   browser = await chromium.launch({ headless: true });
   await checkLibrary(plainId, jsonArtifact.id, sharedId);
   await checkViewer(plainViewer, fixture);
@@ -147,8 +151,9 @@ async function main() {
   const s3 = await must("pnpm", ["--filter", "@factrove/api", "exec", "vitest", "run", "test/storage.integration.test.ts", "test/content.s3.integration.test.ts"], {
     S3_INTEGRATION: "1",
   });
-  if (!s3.stdout.includes("Test Files") && !s3.stdout.includes("passed")) {
-    throw new Error("S3 integration tests did not report a pass.");
+  const s3Report = `${s3.stdout}\n${s3.stderr}`;
+  if (!/Tests\s+4 passed/.test(s3Report)) {
+    throw new Error(`S3 integration tests did not report 4 passes.\n${s3Report}`);
   }
   process.stdout.write("Local end-to-end checks passed. macOS was not run.\n");
 }

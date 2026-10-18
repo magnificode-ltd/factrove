@@ -4,7 +4,7 @@
 
 Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the live upload loop on the local S3 stand-in, the S3-gated integration tests, and the macOS run. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS run in task 08, which was not executed. Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 
@@ -19,7 +19,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 | 05 | [Frontend](mvp/done/mvp_build_frontend.md) | Done | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
 | 06 | [CLI](mvp/done/mvp_build_cli.md) | Done — stub-verified | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
 | 07 | [Local runtime and integration](mvp/done/mvp_integrate_local.md) | Done — runtime verified; AWS live loop not run | compose.yaml, .env.example, setup docs/scripts, integration checks, shared lockfile reconciliation | 01 to start; 02–06 to finish |
-| 08 | [End-to-end local acceptance](mvp/mvp_verify_end_to_end.md) | In progress | Local Garage stand-in, live CLI upload, viewer and list refresh, content CSP, bytes after restart, macOS setup, S3-gated integration tests | 07 |
+| 08 | [End-to-end local acceptance](mvp/done/mvp_verify_end_to_end.md) | Done — local stack verified; macOS not run | Local Garage stand-in, live CLI upload, viewer and list refresh, content CSP, bytes after restart, macOS setup, S3-gated integration tests | 07 |
 
 ## Parallel execution
 
@@ -43,21 +43,23 @@ Use Artifact as the custom product table alongside the schema required by Better
 ## Final acceptance checklist
 
 - [ ] A fresh clone has a verified macOS setup path using pinned Node/pnpm versions and a documented container runtime prerequisite.
-- [ ] PostgreSQL starts with a persistent volume. Artifact bytes use the configured S3 bucket. Local setup uses Garage. AWS remains available when `S3_ENDPOINT` is unset.
+- [x] PostgreSQL starts with a persistent volume. Artifact bytes use the configured S3 bucket. Local setup uses Garage. AWS remains available when `S3_ENDPOINT` is unset.
 - [x] Committed migrations apply to an empty database; explicit seed runs twice without duplicates or destructive resets.
 - [x] One command starts FE/BE; the CLI runs from another terminal without database/storage credentials.
-- [ ] Private upload returns a viewer URL; refreshing My artifacts shows it; it is absent from Organization artifacts.
-- [ ] Organization-shared upload appears in both My artifacts and Organization artifacts for the local actor.
-- [ ] Clicking either artifact renders the uploaded HTML in an isolated iframe.
+- [x] Private upload returns a viewer URL; refreshing My artifacts shows it; it is absent from Organization artifacts.
+- [x] Organization-shared upload appears in both My artifacts and Organization artifacts for the local actor.
+- [x] Clicking either artifact renders the uploaded HTML in an isolated iframe.
 - [x] A second user's seeded organization-shared artifact appears in Organization artifacts but not My artifacts; their private artifact appears in neither list.
-- [ ] Missing files, unsupported inputs, oversized uploads, unknown IDs, and an unavailable backend produce useful errors.
+- [x] Missing files, unsupported inputs, oversized uploads, unknown IDs, and an unavailable backend produce useful errors.
 - [x] The CLI exits cleanly and JSON output contains no framework startup logs.
-- [ ] Restarting FE/BE, PostgreSQL, and local object storage without deleting the data volumes preserves metadata and object bytes. AWS objects stay in AWS when that configuration is used.
-- [ ] No raw HTML is injected into the Next.js application DOM; iframe/CSP isolation is checked.
+- [x] Restarting FE/BE, PostgreSQL, and local object storage without deleting the data volumes preserves metadata and object bytes. AWS objects stay in AWS when that configuration is used.
+- [x] No raw HTML is injected into the Next.js application DOM; iframe/CSP isolation is checked.
 - [x] Root build, typecheck, and the default test suites pass.
-- [ ] S3-gated integration tests pass (`storage.integration` and `content.s3.integration`, enabled with `S3_INTEGRATION=1`).
+- [x] S3-gated integration tests pass (`storage.integration` and `content.s3.integration`, enabled with `S3_INTEGRATION=1`).
 - [x] Setup instructions distinguish unauthenticated list classifications from actual access control.
 
-Checked items were observed on October 18, 2026 against local PostgreSQL. The second-user list check used rows inserted into that database, then the real API and library UI. Unchecked items that still need the upload loop, a content response, a Mac run, or `S3_INTEGRATION=1` are owned by task 08. PostgreSQL restart preserved metadata; object bytes were not checked. CLI errors for a missing file, a non-HTML file, an oversized file, an unknown id, and `STORAGE_UNAVAILABLE` were checked; the web unavailable-backend screen was not rechecked live. Root build, typecheck, and the default test suites passed. `storage.integration` and `content.s3.integration` were skipped.
+Checked items were observed on October 18, 2026. The upload loop, library refresh, sandboxed viewer, content headers, restart, and `S3_INTEGRATION=1` tests ran on Linux against local PostgreSQL and Garage. Headless Chromium showed the fixture's inline script inside the iframe and showed that the frame could not read the parent document or call `https://example.com/`. The parent page did not contain the uploaded HTML. After `pnpm infra:down` and `pnpm infra:up`, the same artifact bytes were still served. `storage.integration` and `content.s3.integration` passed (4 tests). The default `pnpm test` still skips those 4 unless `S3_INTEGRATION=1`. Root lint, typecheck, test, and build passed: api-client 6, web 17, cli 24, api 44 passed and 4 skipped, plus 12 runtime script tests.
 
-Tasks 01–06 are complete. Task 06 is stub-verified. Task 07's local runtime is verified. Task 08 owns the live upload loop on Garage, the S3-gated integration tests, and the macOS run.
+The macOS item is unchecked. This run was Linux x86_64, Node 24.16.0, pnpm 11.25.0, Docker Engine 29.1.3, and Compose 2.40.3. A real AWS bucket was not called. A unit test checks that an unset `S3_ENDPOINT` still targets the regional AWS host. The second-user list check remains the earlier database insert plus the real API and library UI. The oversized-file CLI error remains the earlier check; missing file, non-HTML, unknown id, and the web unavailable-backend screen were checked again.
+
+Tasks 01–07 are complete. Task 06 is stub-verified. Task 08's local stack is verified. Its macOS run is not.
