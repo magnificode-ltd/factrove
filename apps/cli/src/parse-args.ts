@@ -30,6 +30,7 @@ Examples:
   pnpm factrove upload ./report.html --access org_shared --json
   pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
 
+Relative paths resolve from the directory where you ran pnpm.
 Plain success prints only the viewer URL and a newline.
 JSON success prints the artifact response envelope on one line.
 Errors go to stderr and the process exits nonzero.

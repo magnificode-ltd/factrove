@@ -20,20 +20,22 @@ compose.yaml, .env.example, local infrastructure initialization, setup scripts/d
 - Keep migrations and local seed explicit before startup. An API restart must not reset data.
 - Make infra:down preserve volumes; any destructive reset must be separately named/documented and never part of normal setup.
 - Ensure only the API receives database/storage secrets. Web/CLI receive HTTP origins.
+- Put `FACTROVE_API_URL=http://localhost:3001` in the root `.env.example`. The CLI already documents that key in `apps/cli/.env.example` and reads it only from the process environment. `--api-url` overrides it.
+- Keep `pnpm factrove` on `node scripts/factrove.mjs`, which runs `node apps/cli/dist/main.js` in the caller's directory. Relative upload paths resolve from `INIT_CWD`. Do not point the script back at `pnpm --filter @factrove/cli start`.
 - Integrate the independently developed tasks and reconcile shared dependencies/lockfile.
 - Update root README to distinguish implemented behavior from future plans and include commands verified on the actual checkout.
 - Provide a short troubleshooting path for unavailable containers, missing seed, missing or unauthorized S3 bucket, port conflicts, and backend URL errors.
 
 ## End-to-end acceptance
 
-Run against the real local stack, not mocks:
+Run against the real local stack, not mocks. Task 06 verified the CLI with an HTTP stub only. Items 3–6 below are that task's live acceptance and are not done until they pass here.
 
 1. Install from the committed lockfile, start infrastructure, apply migrations to an empty database, seed twice.
 2. Start FE/BE. Verify the seeded context and initially empty library.
-3. Upload fixtures/hello.html via CLI --json. Parse stdout as JSON and assert the viewer URL uses the configured web origin.
-4. Refresh My artifacts and open the new artifact. Verify visible source content and inline script behavior.
+3. From the repository root, run `pnpm factrove upload ./fixtures/hello.html --json` against the real API, local PostgreSQL, and the configured AWS S3 bucket. Parse stdout as JSON and assert the viewer URL uses the configured web origin.
+4. Follow that viewer link. Refresh My artifacts and open the new artifact. Verify visible source content and inline script behavior.
 5. Confirm the private artifact is absent from Organization artifacts.
-6. Upload a second file with --access org_shared. Confirm it appears in both tabs.
+6. From the repository root, run `pnpm factrove upload ./fixtures/hello.html --access org_shared`. Confirm that artifact appears in both My artifacts and Organization artifacts after refresh, and follow its viewer link.
 7. Using isolated test fixtures, create another user's org_shared/private artifacts. Confirm the list semantics without adding a user switcher.
 8. Verify the raw content endpoint sends sandbox/CSP headers and the iframe cannot access the parent DOM or make external requests.
 9. Stop and restart applications and PostgreSQL without deleting the database volume. Confirm metadata remains and the AWS object bytes remain viewable.

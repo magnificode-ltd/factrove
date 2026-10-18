@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { helpText } from "../src/parse-args.js";
 
 const cliPath = fileURLToPath(new URL("../dist/main.js", import.meta.url));
+const launcherPath = fileURLToPath(new URL("../../../scripts/factrove.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const fixturePath = join(repoRoot, "fixtures", "hello.html");
 
@@ -97,12 +98,20 @@ describe("factrove upload", () => {
     expect(selected.requests).toHaveLength(2);
   });
 
-  it("uses http://localhost:3001 when neither flag nor environment sets an origin", async () => {
-    const stub = await startStub(() => accepted(1), 3001);
-    const result = await runCli(["upload", fixturePath]);
+  it("resolves a relative path from INIT_CWD when the process directory is elsewhere", async () => {
+    const elsewhere = await makeTemp();
+    const stub = await startStub(() => accepted(1));
+    const result = await runCli(["upload", "./fixtures/hello.html", "--api-url", stub.url], {
+      cwd: elsewhere,
+      env: { INIT_CWD: repoRoot },
+    });
+
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
-    expect(stub.requests).toHaveLength(1);
+    const request = stub.requests[0];
+    const parts = multipartParts(request?.contentType ?? "", request?.body ?? Buffer.alloc(0));
+    expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
+    expect(request?.body.includes(Buffer.from("fixtures/hello.html"))).toBe(false);
   });
 
   it("prints help and exits without an error", async () => {
@@ -124,9 +133,9 @@ describe("factrove upload", () => {
     const port = await closedPort();
     const apiUrl = `http://127.0.0.1:${port}`;
 
-    const missing = await runCli(["upload", join(directory, "missing.html"), "--api-url", apiUrl]);
+    const missing = await runCli(["upload", "missing.html", "--api-url", apiUrl], { cwd: directory });
     expect(missing).toMatchObject({ code: 1, stdout: "", signal: null });
-    expect(missing.stderr).toBe(`FILE_NOT_FOUND: No such file: ${join(directory, "missing.html")}\n`);
+    expect(missing.stderr).toBe(`FILE_NOT_FOUND: No such file: ${resolve(directory, "missing.html")}\n`);
 
     const jsonMissing = await runCli(["upload", join(directory, "missing.html"), "--json", "--api-url", apiUrl]);
     expect(jsonMissing.code).toBe(1);
@@ -195,7 +204,7 @@ describe("factrove upload", () => {
     const stub = await startStub(() => accepted(1, "org_shared"));
     const result = await runCommand(
       "pnpm",
-      ["factrove", "upload", fixturePath, "--access", "org_shared", "--api-url", stub.url, "--json"],
+      ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared", "--api-url", stub.url, "--json"],
       repoRoot,
     );
     expect(result.code).toBe(0);
@@ -205,6 +214,20 @@ describe("factrove upload", () => {
     const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
     expect(parts.find((part) => part.name === "accessType")?.data.toString("utf8")).toBe("org_shared");
     expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
+    expect(stub.requests[0]?.body.includes(Buffer.from("fixtures/hello.html"))).toBe(false);
+  });
+
+  it("explains how to build the CLI when dist is missing", async () => {
+    const hidden = `${cliPath}.hidden-for-test`;
+    await rename(cliPath, hidden);
+    try {
+      const result = await runCommand(process.execPath, [launcherPath, "upload", "./fixtures/hello.html"], repoRoot);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("The CLI is not built. From the repository root, run: pnpm --filter @factrove/cli build\n");
+    } finally {
+      await rename(hidden, cliPath);
+    }
   });
 });
 
@@ -233,7 +256,6 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
 
 async function startStub(
   respond: (request: CapturedRequest) => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>,
-  port = 0,
 ): Promise<Stub> {
   const requests: CapturedRequest[] = [];
   const server = createServer((message, response) => {
@@ -249,14 +271,13 @@ async function startStub(
       }
     });
   });
-  await listen(server, port);
+  await listen(server);
   const address = server.address();
   if (address === null || typeof address === "string") {
     throw new Error("HTTP stub did not bind a TCP port");
   }
-  const host = port === 3001 ? "localhost" : "127.0.0.1";
   const stub: Stub = {
-    url: `http://${host}:${address.port}`,
+    url: `http://127.0.0.1:${address.port}`,
     requests,
     close: () => closeServer(server),
   };
@@ -264,7 +285,7 @@ async function startStub(
   return stub;
 }
 
-function listen(server: Server, port: number): Promise<void> {
+function listen(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error): void => {
       server.off("listening", onListening);
@@ -276,11 +297,7 @@ function listen(server: Server, port: number): Promise<void> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    if (port === 0) {
-      server.listen(0, "127.0.0.1");
-      return;
-    }
-    server.listen(port);
+    server.listen(0, "127.0.0.1");
   });
 }
 
@@ -317,7 +334,7 @@ function readRequest(message: IncomingMessage): Promise<CapturedRequest> {
 
 async function closedPort(): Promise<number> {
   const server = createServer();
-  await listen(server, 0);
+  await listen(server);
   const address = server.address();
   if (address === null || typeof address === "string") {
     throw new Error("Could not reserve a closed port");
@@ -340,6 +357,7 @@ function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEn
 function runCommand(command: string, args: string[], cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {
   const env = { ...process.env };
   delete env.FACTROVE_API_URL;
+  delete env.INIT_CWD;
   Object.assign(env, envOverrides);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });

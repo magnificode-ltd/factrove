@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, isAbsolute, resolve } from "node:path";
 import { Injectable } from "@nestjs/common";
 import { CliError } from "./cli-error.js";
 
@@ -20,22 +20,40 @@ export class UploadFileService {
   }
 }
 
-export async function readUploadFile(filePath: string): Promise<UploadFile> {
+export function resolveUploadPath(
+  filePath: string,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  if (isAbsolute(filePath)) {
+    return filePath;
+  }
+  const invocationDirectory = env.INIT_CWD?.trim();
+  const base = invocationDirectory ? resolve(cwd, invocationDirectory) : cwd;
+  return resolve(base, filePath);
+}
+
+export async function readUploadFile(
+  filePath: string,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): Promise<UploadFile> {
+  const resolvedPath = resolveUploadPath(filePath, env, cwd);
   let info: Awaited<ReturnType<typeof stat>>;
   try {
-    info = await stat(filePath);
+    info = await stat(resolvedPath);
   } catch (error) {
-    throw mapFsError(error, filePath);
+    throw mapFsError(error, resolvedPath);
   }
 
   if (info.isDirectory()) {
-    throw new CliError("INVALID_INPUT", `Path is a directory: ${filePath}`);
+    throw new CliError("INVALID_INPUT", `Path is a directory: ${resolvedPath}`);
   }
   if (!info.isFile()) {
-    throw new CliError("INVALID_INPUT", `Path is not a regular file: ${filePath}`);
+    throw new CliError("INVALID_INPUT", `Path is not a regular file: ${resolvedPath}`);
   }
 
-  const filename = basename(filePath);
+  const filename = basename(resolvedPath);
   if (!HTML_EXTENSION.test(filename)) {
     throw new CliError("INVALID_INPUT", "Only .html and .htm files are supported.");
   }
@@ -48,9 +66,9 @@ export async function readUploadFile(filePath: string): Promise<UploadFile> {
 
   let buffer: Buffer;
   try {
-    buffer = await readFile(filePath);
+    buffer = await readFile(resolvedPath);
   } catch (error) {
-    throw mapFsError(error, filePath);
+    throw mapFsError(error, resolvedPath);
   }
 
   const copy = new ArrayBuffer(buffer.byteLength);

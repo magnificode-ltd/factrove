@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_HTML_BYTES, readUploadFile } from "../src/upload-file.service.js";
 
@@ -59,8 +59,9 @@ describe("upload file validation", () => {
     await writeFile(empty, "");
     await writeFile(text, "<p>nope</p>");
 
-    await expect(readUploadFile(join(directory, "missing.html"))).rejects.toMatchObject({
+    await expect(readUploadFile(join(directory, "missing.html"), {}, directory)).rejects.toMatchObject({
       code: "FILE_NOT_FOUND",
+      message: `No such file: ${resolve(directory, "missing.html")}`,
     });
     await expect(readUploadFile(directory)).rejects.toMatchObject({
       code: "INVALID_INPUT",
@@ -73,6 +74,21 @@ describe("upload file validation", () => {
     await expect(readUploadFile(text)).rejects.toMatchObject({
       code: "INVALID_INPUT",
       message: "Only .html and .htm files are supported.",
+    });
+  });
+
+  it("resolves a relative path from INIT_CWD and reports the absolute path", async () => {
+    const directory = await makeTemp();
+    const other = await makeTemp();
+    await writeFile(join(directory, "note.html"), "<p>here</p>");
+
+    const upload = await readUploadFile("./note.html", { INIT_CWD: directory }, other);
+    expect(upload.filename).toBe("note.html");
+    expect(Buffer.from(upload.bytes).toString("utf8")).toBe("<p>here</p>");
+
+    await expect(readUploadFile("missing.html", { INIT_CWD: directory }, other)).rejects.toMatchObject({
+      code: "FILE_NOT_FOUND",
+      message: `No such file: ${resolve(directory, "missing.html")}`,
     });
   });
 });

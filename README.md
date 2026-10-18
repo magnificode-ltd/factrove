@@ -127,7 +127,7 @@ pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
 pnpm factrove upload --help
 ```
 
-The API origin comes from `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`. Access defaults to `private`. Plain success prints only the viewer URL. `--json` prints the `{ artifact }` response envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script command it runs to stderr; the CLI leaves stdout free of Nest startup logs. Application feature coverage and local-stack setup progress are tracked in the PRDs.
+The API origin comes from `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`. `FACTROVE_API_URL` is documented in [apps/cli/.env.example](apps/cli/.env.example). The CLI reads that variable from the process environment. Access defaults to `private`. A relative path is resolved from the directory where you ran `pnpm`, so `./fixtures/hello.html` works from the repository root. Plain success prints only the viewer URL. `--json` prints the `{ artifact }` response envelope on one line. Failures go to stderr and the process exits nonzero. If `apps/cli/dist` has not been built, the command says to run `pnpm --filter @factrove/cli build`. pnpm prints the script command it runs to stderr; the CLI leaves stdout free of Nest startup logs. Application feature coverage and local-stack setup progress are tracked in the PRDs.
 
 ## Database changes
 

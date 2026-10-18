@@ -6,8 +6,6 @@ import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { UploadCommand } from "./upload.command.js";
 import { UploadFileService } from "./upload-file.service.js";
 
-export { FACTROVE_CLIENT };
-
 @Module({
   providers: [
     CliConfigService,
@@ -19,7 +17,6 @@ export { FACTROVE_CLIENT };
       useFactory: (config: CliConfigService): FactroveClient => lazyClient(config),
     },
   ],
-  exports: [FACTROVE_CLIENT],
 })
 export class CliModule {}
 

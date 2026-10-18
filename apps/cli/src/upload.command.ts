@@ -22,7 +22,7 @@ export class UploadCommand {
     }
 
     const upload = await this.files.read(invocation.path);
-    const file = new Blob([bytesAsArrayBuffer(upload.bytes)], { type: "text/html" });
+    const file = new Blob([arrayBufferOf(upload.bytes)], { type: "text/html" });
     let envelope;
     try {
       // One request only. Retrying POST /artifacts would create another artifact.
@@ -49,7 +49,11 @@ export class UploadCommand {
   }
 }
 
-function bytesAsArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function arrayBufferOf(bytes: Uint8Array): ArrayBuffer {
+  const buffer = bytes.buffer;
+  if (buffer instanceof ArrayBuffer && bytes.byteOffset === 0 && bytes.byteLength === buffer.byteLength) {
+    return buffer;
+  }
   const copy = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(copy).set(bytes);
   return copy;
