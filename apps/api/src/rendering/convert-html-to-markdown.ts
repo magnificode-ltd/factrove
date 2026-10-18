@@ -12,11 +12,70 @@ type WorkerResponse =
   | { ok: true; markdown: string }
   | { ok: false; message: string; limit?: HtmlConversionLimit };
 
+const DEFAULT_CONCURRENCY = 2;
+const DEFAULT_QUEUE = 2;
+
+let activeConversions = 0;
+const conversionWaiters: Array<() => void> = [];
+
 export function convertHtmlToMarkdown(html: string): Promise<string> {
   if (Buffer.byteLength(html) > MAX_MARKDOWN_INPUT_BYTES) {
     return Promise.reject(new HtmlConversionError("HTML exceeds the Markdown conversion limit.", { limit: "input" }));
   }
+  return withMarkdownConversionSlot(() => convertHtmlInWorker(html));
+}
 
+export function withMarkdownConversionSlot<T>(job: () => Promise<T>): Promise<T> {
+  return acquireMarkdownConversionSlot().then(() =>
+    Promise.resolve()
+      .then(job)
+      .finally(releaseMarkdownConversionSlot),
+  );
+}
+
+function acquireMarkdownConversionSlot(): Promise<void> {
+  const limits = readPoolLimits();
+  if (activeConversions < limits.concurrency) {
+    activeConversions += 1;
+    return Promise.resolve();
+  }
+  if (conversionWaiters.length >= limits.queue) {
+    return Promise.reject(new HtmlConversionError("Markdown conversion is busy. Try again.", { limit: "busy" }));
+  }
+  return new Promise((resolve) => {
+    conversionWaiters.push(resolve);
+  });
+}
+
+function releaseMarkdownConversionSlot(): void {
+  const next = conversionWaiters.shift();
+  if (next) {
+    next();
+    return;
+  }
+  activeConversions -= 1;
+}
+
+function readPoolLimits(): { concurrency: number; queue: number } {
+  return {
+    concurrency: readBoundedInt("MARKDOWN_CONVERSION_CONCURRENCY", DEFAULT_CONCURRENCY, 1, 4),
+    queue: readBoundedInt("MARKDOWN_CONVERSION_QUEUE", DEFAULT_QUEUE, 0, 8),
+  };
+}
+
+function readBoundedInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function convertHtmlInWorker(html: string): Promise<string> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const target = workerTarget();

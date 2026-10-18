@@ -77,14 +77,9 @@ const BLOCK_TAGS = new Set([
 
 const IGNORABLE = /[\u0000-\u0020\u007f\u200b-\u200d\ufeff]+/g;
 const LANGUAGE_HINT = /(?:^|\s)(?:language-|lang-)([A-Za-z0-9_+-]+)/;
-const TEXT_ESCAPES: Record<string, string> = {
-  "\\": "\\\\",
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-};
+const INLINE_MARKDOWN = new Set(["\\", "`", "*", "_", "[", "]", "(", ")", "!", "|", "~"]);
 
-export type HtmlConversionLimit = "input" | "output" | "time" | "memory" | "complex";
+export type HtmlConversionLimit = "input" | "output" | "time" | "memory" | "complex" | "busy";
 
 export class HtmlConversionError extends Error {
   readonly limit?: HtmlConversionLimit;
@@ -100,12 +95,16 @@ type Budget = {
   bytes: number;
 };
 
+type LineState = {
+  atStart: boolean;
+};
+
 type InlineContext = {
   budget: Budget;
   inLink: boolean;
-  label: boolean;
   inTable: boolean;
   inlineDepth: number;
+  line: LineState;
 };
 
 export function htmlToMarkdown(html: string): string {
@@ -124,9 +123,9 @@ export function htmlToMarkdown(html: string): string {
   const context: InlineContext = {
     budget,
     inLink: false,
-    label: false,
     inTable: false,
     inlineDepth: 0,
+    line: { atStart: true },
   };
   let blocks: string[];
   try {
@@ -181,6 +180,7 @@ function isComplexityError(error: unknown): boolean {
 
 function renderNodes(nodes: readonly ChildNode[], depth: number, context: InlineContext): string[] {
   if (depth > MAX_MARKDOWN_DEPTH) {
+    beginLine(context);
     const text = trimInline(collectVisibleText(nodes, context));
     return text.length === 0 ? [] : [text];
   }
@@ -191,6 +191,7 @@ function renderNodes(nodes: readonly ChildNode[], depth: number, context: Inline
     if (inline.length === 0) {
       return;
     }
+    beginLine(context);
     const text = trimInline(inline.map((node) => renderInline(node, context)).join(""));
     inline.length = 0;
     if (text.length > 0) {
@@ -220,6 +221,7 @@ function renderElement(element: Element, depth: number, context: InlineContext):
     return [];
   }
   if (depth > MAX_MARKDOWN_DEPTH) {
+    beginLine(context);
     const text = trimInline(collectVisibleText(element.childNodes, context));
     return text.length === 0 ? [] : [text];
   }
@@ -258,6 +260,7 @@ function renderElement(element: Element, depth: number, context: InlineContext):
 }
 
 function heading(element: Element, level: number, context: InlineContext): string[] {
+  beginLine(context);
   const text = renderInlineChildren(element, context).replace(/\s+/g, " ").trim();
   if (text.length === 0) {
     return [];
@@ -266,6 +269,7 @@ function heading(element: Element, level: number, context: InlineContext): strin
 }
 
 function paragraph(element: Element, context: InlineContext): string[] {
+  beginLine(context);
   const text = trimInline(renderInlineChildren(element, context));
   return text.length === 0 ? [] : [text];
 }
@@ -328,11 +332,11 @@ function renderCell(cell: Element | undefined, context: InlineContext): string {
   const text = renderInlineChildren(cell, {
     ...context,
     inLink: false,
-    label: false,
     inTable: true,
     inlineDepth: 0,
+    line: { atStart: true },
   });
-  return text.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function collectRows(element: Element): Array<Array<Element | undefined>> {
@@ -395,7 +399,11 @@ function renderInline(node: ChildNode, context: InlineContext): string {
   const nested: InlineContext = { ...context, inlineDepth: context.inlineDepth + 1 };
   switch (tag) {
     case "br":
-      return context.inTable ? " " : "  \n";
+      if (context.inTable) {
+        return " ";
+      }
+      context.line.atStart = true;
+      return "  \n";
     case "strong":
     case "b":
       return wrap(renderInlineChildren(node, nested), "**");
@@ -403,6 +411,7 @@ function renderInline(node: ChildNode, context: InlineContext): string {
     case "i":
       return wrap(renderInlineChildren(node, nested), "_");
     case "code":
+      context.line.atStart = false;
       return inlineCode(rawText(node), context.budget);
     case "a":
       return renderAnchor(node, context);
@@ -433,7 +442,7 @@ function renderAnchor(element: Element, context: InlineContext): string {
   if (!destination) {
     return renderInlineChildren(element, childContext);
   }
-  const label = trimInline(renderInlineChildren(element, { ...childContext, inLink: true, label: true }));
+  const label = trimInline(renderInlineChildren(element, { ...childContext, inLink: true }));
   if (label.length === 0) {
     return "";
   }
@@ -441,7 +450,7 @@ function renderAnchor(element: Element, context: InlineContext): string {
   // marked treats an image nested in a link label as a new destination, so a hostile alt can
   // become a javascript: image URL. Keep the image outside the link.
   if (label.includes("![")) {
-    const prose = trimInline(collectVisibleText(element.childNodes, { ...childContext, label: true }));
+    const prose = trimInline(collectVisibleText(element.childNodes, { ...childContext, line: { atStart: true } }));
     const linkLabel = prose.length > 0 ? prose : "image";
     return `${label} [${linkLabel}](${encoded})`;
   }
@@ -452,15 +461,17 @@ function renderImage(element: Element, context: InlineContext): string {
   const alt = collapseWhitespace(attribute(element, "alt") ?? "");
   const destination = safeDestination(attribute(element, "src"));
   if (!destination) {
-    return escapeText(alt, context.label, context.budget);
+    return emitText(alt, context.line.atStart, context);
   }
-  const image = `![${escapeLabel(alt)}](<${encodeDestination(destination)}>${formatTitle(attribute(element, "title"))})`;
+  const image = `![${escapeInline(alt, false)}](<${encodeDestination(destination)}>${formatTitle(attribute(element, "title"))})`;
   charge(context.budget, image);
+  context.line.atStart = false;
   return image;
 }
 
 function renderText(node: TextNode, context: InlineContext): string {
-  return escapeText(collapseWhitespace(node.value), context.label, context.budget);
+  const normalized = collapseWhitespace(node.value);
+  return emitText(normalized, context.line.atStart, context);
 }
 
 function collectVisibleText(nodes: readonly ChildNode[], context: InlineContext): string {
@@ -676,14 +687,55 @@ function collapseWhitespace(value: string): string {
   return value.replace(/[\t\n\r\f\v ]+/g, " ");
 }
 
-function escapeText(value: string, label: boolean, budget: Budget): string {
-  const escaped = label ? escapeLabel(value) : value.replace(/[\\&<>]/g, (char) => TEXT_ESCAPES[char] ?? char);
-  charge(budget, escaped);
+function beginLine(context: InlineContext): void {
+  context.line.atStart = true;
+}
+
+function emitText(value: string, lineStart: boolean, context: InlineContext): string {
+  const escaped = escapeInline(value, lineStart);
+  charge(context.budget, escaped);
+  if (value.trim().length > 0) {
+    context.line.atStart = false;
+  }
   return escaped;
 }
 
-function escapeLabel(value: string): string {
-  return value.replace(/[\\&<>]/g, (char) => TEXT_ESCAPES[char] ?? char).replace(/[[\]]/g, (char) => `\\${char}`);
+function escapeInline(value: string, lineStart: boolean): string {
+  let out = "";
+  for (const char of value) {
+    // Entities, not backslashes: \&lt; would emit a raw < that an HTML-enabled renderer can treat as a tag.
+    // &gt; also cannot open a blockquote.
+    if (char === "&") {
+      out += "&amp;";
+    } else if (char === "<") {
+      out += "&lt;";
+    } else if (char === ">") {
+      out += "&gt;";
+    } else if (INLINE_MARKDOWN.has(char)) {
+      out += `\\${char}`;
+    } else {
+      out += char;
+    }
+  }
+  return lineStart ? escapeLineStart(out) : out;
+}
+
+function escapeLineStart(value: string): string {
+  const leading = /^ {0,3}/.exec(value)?.[0].length ?? 0;
+  const rest = value.slice(leading);
+  if (
+    /^#{1,6}(?: |$)/.test(rest) ||
+    /^(?:[-+])(?: |$)/.test(rest) ||
+    /^(?:-{3,}|={1,})[ \t]*$/.test(rest) ||
+    rest.startsWith("=")
+  ) {
+    return `${value.slice(0, leading)}\\${rest}`;
+  }
+  const ordered = /^(\d{1,9})([.)])(?= |$)/.exec(rest);
+  if (!ordered) {
+    return value;
+  }
+  return `${value.slice(0, leading)}${ordered[1]}\\${ordered[2]}${rest.slice(ordered[0].length)}`;
 }
 
 function formatTitle(title: string | undefined): string {

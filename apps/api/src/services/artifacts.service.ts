@@ -218,6 +218,9 @@ function markdownConversionError(error: unknown): ApiErrorException | undefined 
   if (error.limit === "output") {
     return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "Markdown output exceeds the conversion limit.");
   }
+  if (error.limit === "busy") {
+    return new ApiErrorException(503, "CONVERSION_UNAVAILABLE", "Markdown conversion is busy. Try again.");
+  }
   return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML is too complex to convert to Markdown.");
 }
 

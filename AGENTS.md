@@ -26,7 +26,7 @@ Documentation follows these roles: README.md provides long-term codebase documen
 
 ## CLI
 
-When the CLI interface is in doubt, follow the AWS S3 CLI (`aws s3`): command names, argument order, flag names, and output style. The current commands are `upload` and `get`. `get <id>` writes the artifact to stdout, in the same role as `aws s3 cp s3://bucket/key -`.
+When in doubt, follow aws s3 conventions. Command names, flags, and follow-ups are described in [README.md](README.md) and [prd/mvp_contract.md](prd/mvp_contract.md).
 
 ## Tooling
 

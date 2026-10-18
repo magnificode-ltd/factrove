@@ -5,7 +5,7 @@ import MarkdownIt from "markdown-it";
 import { marked } from "marked";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { describe, expect, it } from "vitest";
-import { convertHtmlToMarkdown } from "../src/rendering/convert-html-to-markdown.js";
+import { convertHtmlToMarkdown, withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
 import {
   HtmlConversionError,
   MAX_MARKDOWN_OUTPUT_BYTES,
@@ -107,6 +107,18 @@ describe("HTML to Markdown", () => {
       '<a href="javascript:alert(1)">label</a>',
       '<img alt="&lt;img onerror=alert(4)&gt;" src="https://ok.example/i.png">',
       '<a href="https://x.com/a b" title="t&quot;q">x</a>',
+      "<p>[click](javascript:alert(1))</p>",
+      "<p>![x](javascript:alert(1))</p>",
+      "<p>[click]</p><p>[click]: javascript:alert(1)</p>",
+      "<p><em>[click](javascript:alert(1))</em></p>",
+      "<table><tr><td>[click](javascript:alert(1))</td></tr></table>",
+      '<a href="https://ok.example/docs">[y](javascript:alert(1))</a>',
+      "<p>[x](vbscript:msgbox(1))</p>",
+      "<p>[y](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)</p>",
+      "<p># not a heading</p>",
+      "<p>1. not a list</p>",
+      "<p>- not a bullet</p>",
+      "<p>&gt; not a quote</p>",
     ];
     for (const html of samples) {
       const markdown = htmlToMarkdown(html);
@@ -120,6 +132,60 @@ describe("HTML to Markdown", () => {
     const fenced = htmlToMarkdown("<pre><code>```\n&lt;img src=x onerror=alert(1)&gt;</code></pre>");
     expect(fenced.startsWith("````")).toBe(true);
     expect(fenced).toContain("<img src=x onerror=alert(1)>");
+  });
+
+  it("keeps Markdown punctuation in ordinary text from becoming structure or links", () => {
+    const plain = [
+      ["<p># not a heading</p>", "\\# not a heading\n"],
+      ["<p>1. not a list</p>", "1\\. not a list\n"],
+      ["<p>1) not a list</p>", "1\\) not a list\n"],
+      ["<p>- not a bullet</p>", "\\- not a bullet\n"],
+      ["<p>+ not a bullet</p>", "\\+ not a bullet\n"],
+      ["<p>*not emphasis*</p>", "\\*not emphasis\\*\n"],
+      ["<p>_not emphasis_</p>", "\\_not emphasis\\_\n"],
+      ["<p>~~not struck~~</p>", "\\~\\~not struck\\~\\~\n"],
+      ["<p>```not code```</p>", "\\`\\`\\`not code\\`\\`\\`\n"],
+      ["<p>&gt; not a quote</p>", "&gt; not a quote\n"],
+      ["<p>---</p>", "\\---\n"],
+      ["<p>===</p>", "\\===\n"],
+      ["<p>a | b</p>", "a \\| b\n"],
+      ["<p>[click](javascript:alert(1))</p>", "\\[click\\]\\(javascript:alert\\(1\\)\\)\n"],
+      ["<p>![x](javascript:alert(1))</p>", "\\!\\[x\\]\\(javascript:alert\\(1\\)\\)\n"],
+      ["<p>[x](vbscript:msgbox(1))</p>", "\\[x\\]\\(vbscript:msgbox\\(1\\)\\)\n"],
+      [
+        "<p>[y](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)</p>",
+        "\\[y\\]\\(data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\\)\n",
+      ],
+    ] as const;
+    for (const [html, expected] of plain) {
+      const markdown = htmlToMarkdown(html);
+      expect(markdown).toBe(expected);
+      assertInert(markdown);
+      for (const rendered of renderMarkdown(markdown)) {
+        expect(rendered).not.toMatch(/<h[1-6]\b/i);
+        expect(rendered).not.toMatch(/<(?:ul|ol|li|blockquote|hr|em|strong|a|img|pre|code)\b/i);
+      }
+    }
+
+    const reference = htmlToMarkdown("<p>[click]</p><p>[click]: javascript:alert(1)</p>");
+    expect(reference).toBe("\\[click\\]\n\n\\[click\\]: javascript:alert\\(1\\)\n");
+    assertInert(reference);
+
+    const emphasis = htmlToMarkdown("<p><em>[click](javascript:alert(1))</em></p>");
+    expect(emphasis).toBe("_\\[click\\]\\(javascript:alert\\(1\\)\\)_\n");
+    assertInert(emphasis);
+
+    const cell = htmlToMarkdown("<table><tr><td>[click](javascript:alert(1))</td></tr></table>");
+    expect(cell).toContain("\\[click\\]\\(javascript:alert\\(1\\)\\)");
+    assertInert(cell);
+
+    const linkText = htmlToMarkdown('<p><a href="https://ok.example/docs">[y](javascript:alert(1))</a></p>');
+    expect(linkText).toBe("[\\[y\\]\\(javascript:alert\\(1\\)\\)](<https://ok.example/docs>)\n");
+    assertInert(linkText);
+
+    const spaced = htmlToMarkdown("<p> <span># hi</span></p>");
+    expect(spaced).toBe("\\# hi\n");
+    assertInert(spaced);
   });
 
   it("keeps meaningful text from malformed fragments", () => {
@@ -207,10 +273,76 @@ describe("HTML to Markdown", () => {
   it("returns empty markdown when the document has no visible content", () => {
     expect(htmlToMarkdown("<script>SECRETTOKEN</script><style>.x{}</style>")).toBe("");
   });
+
+  it("fails fast when the conversion pool is saturated", async () => {
+    const previous = {
+      concurrency: process.env.MARKDOWN_CONVERSION_CONCURRENCY,
+      queue: process.env.MARKDOWN_CONVERSION_QUEUE,
+    };
+    process.env.MARKDOWN_CONVERSION_CONCURRENCY = "1";
+    process.env.MARKDOWN_CONVERSION_QUEUE = "0";
+    let releaseHeld = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    const held = withMarkdownConversionSlot(() => gate.then(() => "held"));
+    try {
+      const started = performance.now();
+      await expect(withMarkdownConversionSlot(() => Promise.resolve("next"))).rejects.toMatchObject({
+        limit: "busy",
+        message: "Markdown conversion is busy. Try again.",
+      });
+      expect(performance.now() - started).toBeLessThan(50);
+    } finally {
+      releaseHeld();
+      await held;
+    }
+
+    process.env.MARKDOWN_CONVERSION_QUEUE = "1";
+    let releaseQueued = (): void => {};
+    const queuedGate = new Promise<void>((resolve) => {
+      releaseQueued = resolve;
+    });
+    const queuedHeld = withMarkdownConversionSlot(() => queuedGate.then(() => "held"));
+    let secondStarted = false;
+    const second = withMarkdownConversionSlot(() => {
+      secondStarted = true;
+      return Promise.resolve("second");
+    });
+    await Promise.resolve();
+    try {
+      expect(secondStarted).toBe(false);
+      const started = performance.now();
+      await expect(withMarkdownConversionSlot(() => Promise.resolve("third"))).rejects.toMatchObject({
+        limit: "busy",
+      });
+      expect(performance.now() - started).toBeLessThan(50);
+      expect(secondStarted).toBe(false);
+    } finally {
+      releaseQueued();
+      await queuedHeld;
+      await second;
+      if (previous.concurrency === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_CONCURRENCY;
+      } else {
+        process.env.MARKDOWN_CONVERSION_CONCURRENCY = previous.concurrency;
+      }
+      if (previous.queue === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_QUEUE;
+      } else {
+        process.env.MARKDOWN_CONVERSION_QUEUE = previous.queue;
+      }
+    }
+    expect(secondStarted).toBe(true);
+  });
 });
 
+function renderMarkdown(markdown: string): string[] {
+  return [marked.parse(markdown, { async: false }) as string, markdownIt.render(markdown)];
+}
+
 function assertInert(markdown: string): void {
-  const rendered = [marked.parse(markdown, { async: false }) as string, markdownIt.render(markdown)];
+  const rendered = renderMarkdown(markdown);
   for (const html of rendered) {
     const stack: DefaultTreeAdapterMap["childNode"][] = [...parse(html).childNodes];
     while (stack.length > 0) {

@@ -64,7 +64,7 @@ apps/api/
 │       ├── html-policy.ts            # HTML validation/delivery policy
 │       ├── html-to-markdown.ts       # Linear HTML to Markdown conversion
 │       ├── html-to-markdown.worker.ts
-│       └── convert-html-to-markdown.ts # Worker time and memory limits
+│       └── convert-html-to-markdown.ts # Bounded worker pool for Markdown conversion
 └── test/
     └── database.integration.test.ts
 ```
@@ -164,7 +164,7 @@ Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and
 
 `pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
 
-When a CLI choice is unclear, follow the AWS S3 CLI (`aws s3`): command names, argument order, flag names, and output style. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
+When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get <id>` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 
 `pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops the dev Compose project and deletes its PostgreSQL and Garage volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. That removes local metadata and local object bytes for the dev project. Objects in a real AWS bucket are outside these volumes and stay there. `pnpm e2e` deletes volumes only for its own Compose project, `factrove-e2e`.
 

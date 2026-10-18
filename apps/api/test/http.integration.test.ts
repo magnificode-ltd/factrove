@@ -24,6 +24,7 @@ import { ArtifactsRepository } from "../src/database/repositories/artifacts.repo
 import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "../src/database/seed/seed-local-identities.js";
 import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
+import { withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
 import { markdownContentSecurityPolicy, MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
@@ -562,6 +563,44 @@ describe("HTTP API", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     const health = await fetch(`${baseUrl}/api/v1/health`);
     expect(health.status).toBe(200);
+  });
+
+  it("returns CONVERSION_UNAVAILABLE when the Markdown worker pool is full", async () => {
+    const previous = {
+      concurrency: process.env.MARKDOWN_CONVERSION_CONCURRENCY,
+      queue: process.env.MARKDOWN_CONVERSION_QUEUE,
+    };
+    process.env.MARKDOWN_CONVERSION_CONCURRENCY = "1";
+    process.env.MARKDOWN_CONVERSION_QUEUE = "0";
+    let releaseHeld = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    const held = withMarkdownConversionSlot(() => gate.then(() => "held"));
+    try {
+      const artifact = await upload(baseUrl, "busy.html", new TextEncoder().encode("<p>Busy</p>"));
+      const started = Date.now();
+      const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+      expect(response.status).toBe(503);
+      expect(await errorOf(response)).toEqual({
+        code: "CONVERSION_UNAVAILABLE",
+        message: "Markdown conversion is busy. Try again.",
+      });
+      expect(Date.now() - started).toBeLessThan(1_000);
+    } finally {
+      releaseHeld();
+      await held;
+      if (previous.concurrency === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_CONCURRENCY;
+      } else {
+        process.env.MARKDOWN_CONVERSION_CONCURRENCY = previous.concurrency;
+      }
+      if (previous.queue === undefined) {
+        delete process.env.MARKDOWN_CONVERSION_QUEUE;
+      } else {
+        process.env.MARKDOWN_CONVERSION_QUEUE = previous.queue;
+      }
+    }
   });
 
   it("rejects an unknown content format and keeps markdown failures as JSON", async () => {
