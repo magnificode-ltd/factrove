@@ -1,10 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { AppBar } from "@/components/chrome";
+import { Suspense, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { authClient } from "@/auth/client";
+import { authPageHref, safeNextPath } from "@/auth/return-path";
+import { AppBar } from "@/components/chrome";
 
 export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupForm />
+    </Suspense>
+  );
+}
+
+function SignupForm() {
+  const next = safeNextPath(useSearchParams().get("next"));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -22,7 +33,7 @@ export default function SignupPage() {
       setError(result.error.message ?? "Could not create the account.");
       return;
     }
-    window.location.assign("/");
+    window.location.assign(next);
   }
 
   return (
@@ -53,7 +64,7 @@ export default function SignupPage() {
           </button>
         </form>
         <p className="mode">
-          <a href="/login">Sign in</a>
+          <a href={authPageHref("login", next)}>Sign in</a>
         </p>
       </main>
     </div>

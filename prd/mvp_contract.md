@@ -11,6 +11,7 @@ This contract translates [the agreed MVP end state](../docs/MVP_END_STATE.md) in
 - NestJS API owns database and S3 credentials. Web/CLI only know HTTP origins.
 - `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies and content grants. The committed example is a placeholder, not a credential to reuse outside local development.
 - Explicit, idempotent local seed creates user `local-user` (Local User, `local@example.invalid`) and organization `local-org` (Local Organization, slug `local`) in the Better Auth-generated identity tables. That user has no password and cannot sign in. Seed does not create a membership.
+- `pnpm db:claim-local-artifacts -- --email you@example.com` reassigns artifacts whose creator is `local-user` to an account that can already sign in. Artifact ids stay the same. It adds a membership for each organization those artifacts reference when the account is not already a member. It refuses `local-user`, does nothing on a second run, and does not print secrets.
 - The API does not impersonate a configured local user. Collection routes require a session or an API key. `GET /api/v1/health` stays public.
 - Requests do not accept creator IDs or organization IDs. The API derives them from the signed-in user or the API-key owner.
 - Better Auth core + organization-plugin schema, including required supporting tables, is generated from `auth-schema.config.ts`. Runtime auth is a separate email/password configuration. It does not mount organization-plugin HTTP routes. Membership is enforced by reading the `member` table. There is no one-org uniqueness rule.
@@ -212,7 +213,7 @@ pnpm factrove get <artifact-id> --api-url http://localhost:3001
 - When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 - API origin precedence: --api-url, FACTROVE_API_URL, the selected profile's `api_url`, then http://localhost:3001. `upload` and `get` share it.
 - API key precedence: FACTROVE_API_KEY, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`.
-- `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
+- `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
 - Access defaults to private. `--access` is only valid for `upload`.
 - `--format html|markdown` is only valid for `get` and defaults to `html`.
 - Plain upload success prints only viewerUrl plus newline to stdout.
@@ -233,6 +234,7 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 | pnpm infra:up | Start local PostgreSQL and the Garage S3 stand-in |
 | pnpm db:migrate | Apply committed migrations |
 | pnpm db:seed | Create/update local fixture rows idempotently |
+| pnpm db:claim-local-artifacts -- --email … | Attach existing `local-user` artifacts to a signed-up account |
 | pnpm dev | Run FE and BE together |
 | pnpm factrove configure | Save an API key and API URL for a profile |
 | pnpm factrove upload ... | Run Nest CLI upload |

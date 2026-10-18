@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CliError } from "./cli-error.js";
 
 const KEY_FIELD = "factrove_api_key";
@@ -141,10 +141,30 @@ async function writeIniKey(path: string, section: string, key: string, value: st
   const bucket = existing.get(section) ?? new Map<string, string>();
   bucket.set(key, value);
   existing.set(section, bucket);
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const directory = dirname(path);
+  const created = await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeFile(path, serializeIni(existing), { mode: 0o600 });
   await chmod(path, 0o600);
-  await chmod(dirname(path), 0o700);
+  if (typeof created === "string" && created.length > 0) {
+    await restrictCreatedDirectories(created, directory);
+  }
+}
+
+async function restrictCreatedDirectories(firstCreated: string, leaf: string): Promise<void> {
+  const fromCreated = relative(firstCreated, leaf);
+  if (fromCreated === "..") {
+    return;
+  }
+  if (fromCreated.startsWith(`..${sep}`) || fromCreated.startsWith(sep) || isAbsolute(fromCreated)) {
+    return;
+  }
+  const segments = fromCreated.length === 0 ? [] : fromCreated.split(sep).filter((segment) => segment.length > 0 && segment !== ".");
+  let current = firstCreated;
+  await chmod(current, 0o700);
+  for (const segment of segments) {
+    current = join(current, segment);
+    await chmod(current, 0o700);
+  }
 }
 
 function serializeIni(sections: Map<string, Map<string, string>>): string {

@@ -11,7 +11,8 @@
     "test": "prisma generate && vitest run",
     "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "pnpm build && node dist/database/seed/seed.js"
+    "db:seed": "pnpm build && node dist/database/seed/seed.js",
+    "db:claim-local-artifacts": "pnpm build && node dist/database/seed/claim.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1149.0",

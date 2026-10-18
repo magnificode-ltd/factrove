@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FactroveApiError } from "@factrove/api-client";
 import type { ArtifactDto } from "@factrove/contracts";
+import { artifactReturnPath, authPageHref } from "../src/auth/return-path";
 import Loading from "../src/app/loading";
 import LoadingArtifact from "../src/app/artifacts/[id]/loading";
 import LibraryError from "../src/app/error";
@@ -95,5 +96,19 @@ describe("artifact page", () => {
     const unavailable = renderToStaticMarkup(await ArtifactPage({ params: Promise.resolve({ id: artifact.id }) }));
     expect(unavailable).toContain("The Factrove API is unavailable");
     expect(unavailable).not.toContain("<iframe");
+  });
+
+  it("offers sign-in when a logged-out read of an existing artifact is hidden", async () => {
+    api.getContext.mockRejectedValue(
+      new FactroveApiError("Sign in to continue.", { status: 401, code: "UNAUTHENTICATED" })
+    );
+    api.getArtifact.mockRejectedValue(
+      new FactroveApiError("Artifact was not found.", { status: 404, code: "ARTIFACT_NOT_FOUND" })
+    );
+    const html = renderToStaticMarkup(await ArtifactPage({ params: Promise.resolve({ id: artifact.id }) }));
+    expect(html).toContain("Sign in to continue.");
+    expect(html).toContain(`href="${authPageHref("login", artifactReturnPath(artifact.id))}"`);
+    expect(html).not.toContain("Artifact not found");
+    expect(html).not.toContain("<iframe");
   });
 });

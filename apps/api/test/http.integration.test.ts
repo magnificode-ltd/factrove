@@ -21,6 +21,7 @@ import { configureHttpApp } from "../src/configure-http-app.js";
 import { AppModule } from "../src/app.module.js";
 import { PrismaService } from "../src/database/prisma.service.js";
 import { ArtifactsRepository } from "../src/database/repositories/artifacts.repository.js";
+import { claimLocalArtifacts } from "../src/database/seed/claim-local-artifacts.js";
 import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "../src/database/seed/seed-local-identities.js";
 import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
@@ -283,6 +284,121 @@ describe("HTTP API", () => {
     expect(content.status).toBe(404);
     expect(await errorOf(detail)).toEqual(await errorOf(unknown));
     expect(detail.headers.get("www-authenticate")).toBeNull();
+  });
+
+  it("assigns pre-existing local artifacts to a signed-up account without changing their ids", async () => {
+    const legacyPrivateId = "123e4567-e89b-42d3-a456-426614174098";
+    const legacySharedId = "123e4567-e89b-42d3-a456-426614174099";
+    await prisma.artifact.create({
+      data: {
+        id: legacyPrivateId,
+        creatorUserId: localUserFixture.id,
+        organizationId: localOrganizationFixture.id,
+        accessType: "private",
+        mimeType: "text/html",
+        sizeBytes: 5,
+        createdAt: new Date("2026-01-02T00:00:00.000Z"),
+        uploadedAt: new Date("2026-01-02T00:00:00.000Z"),
+      },
+    });
+    await prisma.artifact.create({
+      data: {
+        id: legacySharedId,
+        creatorUserId: localUserFixture.id,
+        organizationId: localOrganizationFixture.id,
+        accessType: "org_shared",
+        mimeType: "text/html",
+        sizeBytes: 6,
+        createdAt: new Date("2026-01-03T00:00:00.000Z"),
+        uploadedAt: new Date("2026-01-03T00:00:00.000Z"),
+      },
+    });
+    const kept = await upload(baseUrl, "kept.html", new TextEncoder().encode("<p>kept</p>"));
+
+    const heir = await signUpWithApiKey(baseUrl, {
+      email: "heir@example.invalid",
+      password: "heir-password-1",
+      name: "Heir",
+      keyName: "upgrade",
+    });
+    const heirHeaders = { authorization: `Bearer ${heir.apiKey}` };
+
+    const beforeMine = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, { headers: heirHeaders })).json(),
+    );
+    const beforeOrg = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts?view=org`, { headers: heirHeaders })).json(),
+    );
+    const beforeDetail = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${legacyPrivateId}`, { headers: heirHeaders });
+    expect(beforeMine.items).toEqual([]);
+    expect(beforeOrg.items).toEqual([]);
+    expect(beforeDetail.status).toBe(404);
+    expect(await errorOf(beforeDetail)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    const localSignIn = await globalThis.fetch(`${baseUrl}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+      body: JSON.stringify({ email: localUserFixture.email, password: "local-password-1" }),
+    });
+    const localSignUp = await globalThis.fetch(`${baseUrl}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+      body: JSON.stringify({
+        email: localUserFixture.email,
+        password: "local-password-1",
+        name: "Local User",
+      }),
+    });
+    expect(localSignIn.status).toBe(401);
+    expect(localSignUp.status).toBe(422);
+    await expect(claimLocalArtifacts(prisma, localUserFixture.email)).rejects.toThrow(
+      "The seeded local user has no password.",
+    );
+    await expect(claimLocalArtifacts(prisma, "missing@example.invalid")).rejects.toThrow(
+      "No account exists for missing@example.invalid.",
+    );
+
+    const claimed = await claimLocalArtifacts(prisma, heir.email);
+    expect(claimed).toMatchObject({
+      userId: heir.userId,
+      email: heir.email,
+      artifactsClaimed: 2,
+      membershipsAdded: 1,
+    });
+
+    const afterMine = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, { headers: heirHeaders })).json(),
+    );
+    const afterOrg = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts?view=org`, { headers: heirHeaders })).json(),
+    );
+    expect(afterMine.items.map((item) => item.id)).toEqual([legacySharedId, legacyPrivateId]);
+    expect(afterOrg.items.map((item) => item.id)).toEqual([legacySharedId]);
+
+    const detail = artifactEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${legacyPrivateId}`, { headers: heirHeaders })).json(),
+    );
+    expect(detail.artifact.id).toBe(legacyPrivateId);
+    expect(detail.artifact.creatorUserId).toBe(heir.userId);
+    expect(detail.artifact.viewerUrl).toBe(`http://localhost:3000/artifacts/${legacyPrivateId}`);
+    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: legacyPrivateId } });
+    expect(stored.creatorUserId).toBe(heir.userId);
+    expect(stored.organizationId).toBe(localOrganizationFixture.id);
+
+    const ownerList = artifactListEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts`)).json());
+    expect(ownerList.items.map((item) => item.id)).toEqual([kept.id]);
+    const anonymous = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${legacyPrivateId}`);
+    expect(anonymous.status).toBe(404);
+
+    const again = await claimLocalArtifacts(prisma, heir.email);
+    expect(again.artifactsClaimed).toBe(0);
+    expect(again.membershipsAdded).toBe(0);
+    const still = await prisma.artifact.findUniqueOrThrow({ where: { id: legacySharedId } });
+    expect(still.creatorUserId).toBe(heir.userId);
+    expect(still.id).toBe(legacySharedId);
   });
 
   it("lists mine and org artifacts with the shared filters", async () => {

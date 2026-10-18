@@ -169,6 +169,7 @@ async function main() {
   await checkLibrary(plainId, jsonArtifact.id, sharedId);
   await checkViewer(plainViewer, fixture);
   await checkViewer(sharedViewer, fixture);
+  await checkSignedOutReturn(plainViewer, owner.email, owner.password);
   await expectOwnerOnly(plainId);
   await expectKeyHash(owner.secret);
 
@@ -508,7 +509,7 @@ async function signUpAndCreateKey() {
     if ((await page.content()).includes(secret)) {
       throw new Error("The API key remained on the page after reload.");
     }
-    return { secret };
+    return { secret, email, password };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Browser sign-up or API key creation failed. ${detail}`);
@@ -724,6 +725,41 @@ async function checkLibrary(plainId, jsonId, sharedId) {
     await page.waitForURL(`${webOrigin}/artifacts/${sharedId}`);
   } finally {
     await page.close();
+  }
+}
+
+async function checkSignedOutReturn(viewer, email, password) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  const artifactPath = new URL(viewer).pathname;
+  try {
+    await page.goto(viewer);
+    const loggedOut = await page.content();
+    if (loggedOut.includes("Artifact not found")) {
+      throw new Error("A logged-out viewer treated an existing artifact as missing.");
+    }
+    const signIn = page.getByRole("link", { name: "Sign in" });
+    await signIn.waitFor();
+    const href = await signIn.getAttribute("href");
+    const next = new URL(href ?? "", webOrigin).searchParams.get("next");
+    if (next !== artifactPath) {
+      throw new Error(`Sign-in link returned to ${next}.`);
+    }
+    await signIn.click();
+    await page.waitForURL((url) => url.pathname === "/login" && url.searchParams.get("next") === artifactPath);
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(viewer);
+    await page.locator("iframe").waitFor({ timeout: 20000 });
+    if ((await page.content()).includes("Artifact not found")) {
+      throw new Error("Login did not return to the requested artifact.");
+    }
+  } finally {
+    await page.close();
+    await context.close();
   }
 }
 

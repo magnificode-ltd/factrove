@@ -1,10 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { AppBar } from "@/components/chrome";
+import { Suspense, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { authClient } from "@/auth/client";
+import { authPageHref, safeNextPath } from "@/auth/return-path";
+import { AppBar } from "@/components/chrome";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
+  const next = safeNextPath(useSearchParams().get("next"));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -21,7 +32,7 @@ export default function LoginPage() {
       setError(result.error.message ?? "Could not sign in.");
       return;
     }
-    window.location.assign("/");
+    window.location.assign(next);
   }
 
   return (
@@ -48,7 +59,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="mode">
-          <a href="/signup">Create an account</a>
+          <a href={authPageHref("signup", next)}>Create an account</a>
         </p>
       </main>
     </div>

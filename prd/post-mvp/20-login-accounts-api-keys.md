@@ -21,13 +21,14 @@ The schema generator uses `plugins: [organization(), factroveApiKey()]`. Runtime
 - `org_shared` without a current organization is `400 ORGANIZATION_REQUIRED`.
 - API keys are the Better Auth plugin `@better-auth/api-key` 1.7.7. They use the prefix `ftrv_`, are stored as unpadded base64url SHA-256 hashes, and are shown once in `key`. Create, list, and delete use `/api/auth/api-key/*` and require a browser session. A request with `Authorization` cannot manage keys, even when a session cookie is also present. Delete is `POST /api/auth/api-key/delete`. Another user's id is `404`.
 - The sandboxed iframe still uses `allow-scripts` without `allow-same-origin`, and the content preflight omits credentials. `contentUrl` includes an HMAC `access` grant for that request. The grant is not an API key and is ignored when `Authorization` is present.
-- `factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` for a profile. `FACTROVE_API_KEY` overrides the file. `--profile` overrides `FACTROVE_PROFILE`. The command does not print the key.
+- `factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` for a profile. Credential files are mode 0600. Directories created for those files are mode 0700, and an existing parent directory keeps its mode. `FACTROVE_API_KEY` overrides the file. `--profile` overrides `FACTROVE_PROFILE`. The command does not print the key.
+- Artifacts created before sign-in stay owned by seeded `local-user`. `pnpm db:claim-local-artifacts -- --email you@example.com` assigns those artifacts to an account that can already sign in, keeps their ids, and adds memberships for the organizations they reference. The seeded user still has no password. A logged-out viewer link checks `GET /api/v1/context` before treating an artifact `404` as missing, and sign-in returns to that artifact path. Anonymous artifact reads stay `404`.
 
 ## Verification
 
-API integration tests sign up an owner, store a membership, and call the existing upload, list, content, and Markdown cases with that API key. They also check anonymous `404`, a second account's `404`, hashed storage, revocation, and the content grant.
+API integration tests sign up an owner, store a membership, and call the existing upload, list, content, and Markdown cases with that API key. They also check anonymous `404`, a second account's `404`, hashed storage, revocation, and the content grant. An upgrade case inserts artifacts owned by `local-user`, shows that a new account cannot read them, then claims them and reads the same ids.
 
-`pnpm e2e` signs up and signs in in the browser, creates a key, configures a profile from stdin, uploads with that profile, checks owner-only reads, and checks that revoking the key makes the next upload fail. Garage storage and content tests stay in that run. Real AWS is not called.
+`pnpm e2e` signs up and signs in in the browser, creates a key, configures a profile from stdin, uploads with that profile, checks owner-only reads, opens an existing artifact while logged out, returns to it after sign-in, and checks that revoking the key makes the next upload fail. Garage storage and content tests stay in that run. Real AWS is not called.
 
 ## Exclusions
 

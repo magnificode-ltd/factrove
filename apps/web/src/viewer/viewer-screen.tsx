@@ -1,3 +1,4 @@
+import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { accessLabel, formatBytes, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
@@ -25,7 +26,7 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
             </p>
             {state.status === "signed-out" ? (
               <p className="banner">
-                <a href="/login">Sign in</a>
+                <a href={authPageHref("login", state.returnTo)}>Sign in</a>
               </p>
             ) : null}
           </>

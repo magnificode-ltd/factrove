@@ -150,6 +150,14 @@ pnpm dev
 
 `pnpm infra:up` starts PostgreSQL and Garage and waits until both are healthy. Garage creates the `factrove` bucket when it starts. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the fixture user `local-user` (Local User) and organization `local-org` (Local Organization). That user has no password. Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup. Set `BETTER_AUTH_SECRET` in `apps/api/.env` before `pnpm dev`. Use at least 32 characters. The example value is a local placeholder.
 
+An installation that already has artifacts owned by `local-user` keeps those rows and their ids through migrate. Sign up in the web app, then attach them to that account:
+
+```sh
+pnpm db:claim-local-artifacts -- --email you@example.com
+```
+
+The command changes the creator of those artifacts to the account and adds a membership for each organization they already reference. Viewer links stay `/artifacts/{id}`. Running it again changes nothing. It does not create a password for `local-user`.
+
 `pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C, SIGTERM, and closing the terminal stop both. If one app exits, the command stops the other. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change. While it is running, Next.js may rewrite `apps/web/next-env.d.ts`. The command restores the committed copy when it exits.
 
 In a second terminal, from the repository root:
