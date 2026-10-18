@@ -105,6 +105,13 @@ This checkout runs the local upload, library, and viewer loop. PostgreSQL runs i
 - Node.js 24.16.0, pinned in [.nvmrc](.nvmrc) and [.node-version](.node-version).
 - pnpm 11.25.0, pinned by `packageManager` in [package.json](package.json).
 - Docker Desktop on Apple Silicon or Intel Mac, or another runtime that provides Docker Compose v2 (`docker compose`). OrbStack and Colima qualify when they provide that command. Start the runtime before `pnpm infra:up`.
+- Playwright's Chromium build, for `pnpm e2e`:
+
+```sh
+pnpm --filter @factrove/web exec playwright install chromium
+```
+
+On Linux, Chromium also needs its system libraries. `pnpm --filter @factrove/web exec playwright install-deps chromium` installs them and may need root.
 
 The Postgres image is pinned to the official `postgres:17.11` multi-arch index, so the Mac's architecture selects its own build. Host port `5432` is bound to `127.0.0.1`. Garage `v2.3.0` is pinned the same way. Its S3 API is bound to `127.0.0.1:3900`, and it creates the `factrove` bucket on startup.
 
@@ -118,7 +125,7 @@ cp .env.example .env
 Edit `apps/api/.env` before uploading:
 
 - `DATABASE_URL` already matches the Compose database `factrove` on `127.0.0.1:5432`, user `factrove`, password `factrove`.
-- `S3_BUCKET=factrove`, `S3_REGION=us-east-1`, `S3_ENDPOINT=http://127.0.0.1:3900`, and `S3_FORCE_PATH_STYLE=true` match Garage. The access key `factrove-local` and secret `factrove-local-secret` are local credentials from [compose.yaml](compose.yaml). `pnpm infra:up` creates the bucket.
+- `S3_BUCKET=factrove`, `S3_REGION=us-east-1`, `S3_ENDPOINT=http://127.0.0.1:3900`, and `S3_FORCE_PATH_STYLE=true` match Garage. The access key `factrove-local` and secret `factrove-local-secret` are local credentials from [compose.yaml](compose.yaml). `pnpm infra:up` creates the bucket. A plain `http://` `S3_ENDPOINT` is accepted for `localhost`, `127.0.0.1`, and `::1`. Any other host needs `https://`.
 - For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`, and set `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for a temporary key). Leave that pair unset to use `AWS_PROFILE` or the default credential chain. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
 - AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
 
@@ -149,7 +156,7 @@ pnpm factrove upload --help
 
 Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
-`pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops them and deletes those volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. Reset is the only command that drops local metadata and local object bytes. Objects in a real AWS bucket are outside these volumes and stay there.
+`pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops the dev Compose project and deletes its PostgreSQL and Garage volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. That removes local metadata and local object bytes for the dev project. Objects in a real AWS bucket are outside these volumes and stay there. `pnpm e2e` deletes volumes only for its own Compose project, `factrove-e2e`.
 
 Workspace checks:
 
@@ -161,7 +168,7 @@ pnpm test
 pnpm e2e
 ```
 
-`pnpm e2e` deletes the local PostgreSQL and Garage volumes, then runs the upload, library, viewer, restart, and `S3_INTEGRATION=1` checks against Garage. It refuses to run unless `apps/api/.env` points at `http://127.0.0.1:3900`. It does not call AWS. The default `pnpm test` still skips the S3 integration files unless `S3_INTEGRATION=1`.
+`pnpm e2e` checks that Docker is running and that Playwright Chromium is installed, builds the API and CLI, then starts Compose project `factrove-e2e`. That project has its own volumes. PostgreSQL is published on `127.0.0.1:5433`, Garage on `127.0.0.1:3910`, the web app on `127.0.0.1:3100`, and the API on `127.0.0.1:3101`. The dev project from `pnpm infra:up` keeps its volumes and ports. The script sets the Garage endpoint and credentials for the API and the S3 integration tests, removes `AWS_*` and `S3_*` overrides from those processes, and requires the effective endpoint to be loopback HTTP before any S3 call. `S3_INTEGRATION=1` does the same inside the integration tests. The default `pnpm test` still skips those files unless `S3_INTEGRATION=1`. When `pnpm e2e` exits, it restores `apps/web/next-env.d.ts` if Next.js rewrote it and removes the `factrove-e2e` project.
 
 `pnpm --filter @factrove/web dev` and `pnpm --filter @factrove/api dev` still start one app at a time. `pnpm dev` is the command that runs them together.
 
@@ -171,6 +178,7 @@ pnpm e2e
 - **Port 5432 is taken.** Another PostgreSQL is listening on `127.0.0.1:5432`. Stop it, or change the host port in [compose.yaml](compose.yaml) and `DATABASE_URL` together.
 - **Port 3900 is taken.** Another process is listening on `127.0.0.1:3900`. Stop it, or change the Garage host port in [compose.yaml](compose.yaml) and `S3_ENDPOINT` together.
 - **Port 3000 or 3001 is taken.** Stop the other process and run `pnpm dev` again. The web origin is `http://localhost:3000` and the API origin is `http://localhost:3001`.
+- **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API. Stop the other process and run `pnpm e2e` again. The dev ports 5432, 3900, 3000, and 3001 stay with `pnpm infra:up` and `pnpm dev`.
 - **The API stops and asks for a seed.** `LOCAL_USER_ID` or `LOCAL_ORGANIZATION_ID` has no matching row. Run `pnpm db:seed`, then `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
 - **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`.

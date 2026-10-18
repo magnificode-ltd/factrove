@@ -1,6 +1,9 @@
 # Local Factrove infrastructure.
 # PostgreSQL stores metadata. Garage stores artifact bytes for local development.
 # Leave S3_ENDPOINT unset to use real AWS S3 instead of this Garage service.
+# Host ports default to 5432 and 3900. pnpm e2e sets FACTROVE_POSTGRES_PORT and
+# FACTROVE_GARAGE_PORT and selects Compose project factrove-e2e, so its volumes
+# stay separate from this project.
 # The digests are official multi-arch image indexes (linux/amd64 and linux/arm64),
 # so Apple Silicon and Intel Macs each pull their own build.
 
@@ -10,7 +13,7 @@ services:
   postgres:
     image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${FACTROVE_POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: factrove
       POSTGRES_PASSWORD: factrove
@@ -28,8 +31,9 @@ services:
     image: dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     ports:
-      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:${FACTROVE_GARAGE_PORT:-3900}:3900"
     environment:
+      # Local only. Do not reuse these Garage credentials outside this Compose file.
       GARAGE_RPC_SECRET: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
       GARAGE_DEFAULT_ACCESS_KEY: factrove-local
       GARAGE_DEFAULT_SECRET_KEY: factrove-local-secret

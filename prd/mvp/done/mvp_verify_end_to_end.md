@@ -34,13 +34,13 @@ The acceptance items below. Do not mark one complete until it has been run.
 ### What landed
 
 - `compose.yaml` adds Garage `v2.3.0`, pinned by the multi-arch index `sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690` (linux/amd64 and linux/arm64, plus 386 and arm). Host port `3900` is bound to `127.0.0.1`. Volumes `factrove-garage-meta` and `factrove-garage-data` hold objects. `infra/garage.toml` has no credentials. The RPC secret and the local access key live in Compose, matching `apps/api/.env.example`.
-- `pnpm infra:up` waits until PostgreSQL and Garage are healthy. Garage creates the `factrove` bucket on startup. `pnpm infra:down` keeps the Postgres and Garage volumes. `pnpm infra:reset` is still the only command that deletes volumes. It removes local metadata and local object bytes. Objects in a real AWS bucket are not in those volumes.
-- The S3 client reads optional `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`. A set endpoint defaults to path-style addressing. An unset endpoint keeps virtual-hosted AWS and ignores `AWS_ENDPOINT_URL` and `AWS_ENDPOINT_URL_S3`. The API does not create a bucket.
-- `pnpm e2e` resets the local volumes, migrates, seeds twice, uploads, checks the library and the sandboxed viewer, restarts the stack, and runs the S3 integration tests. It refuses to run unless `apps/api/.env` points at `http://127.0.0.1:3900`.
+- `pnpm infra:up` waits until PostgreSQL and Garage are healthy. Garage creates the `factrove` bucket on startup. `pnpm infra:down` keeps the dev project's Postgres and Garage volumes. `pnpm infra:reset` deletes those dev volumes after confirmation. `pnpm e2e` deletes volumes only in Compose project `factrove-e2e`. Objects in a real AWS bucket are outside both projects.
+- The S3 client reads optional `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`. A set endpoint defaults to path-style addressing. Plain `http://` is accepted only for `localhost`, `127.0.0.1`, and `::1`. An unset endpoint keeps virtual-hosted AWS and ignores `AWS_ENDPOINT_URL` and `AWS_ENDPOINT_URL_S3`. The API does not create a bucket.
+- `pnpm e2e` checks Docker and Playwright Chromium before it changes containers. It uses Compose project `factrove-e2e` on host ports 5433, 3910, 3100, and 3101, migrates, seeds twice, uploads, checks the library and the sandboxed viewer, restarts that project without dropping its volumes, and runs the S3 integration tests. The API and those tests set the Garage endpoint and credentials, strip `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before any S3 call. The dev project from `pnpm infra:up` is left in place.
 
 ### Commands run on October 18, 2026
 
-The run was Linux x86_64 with Docker Engine 29.1.3 and Compose 2.40.3, Node 24.16.0, and pnpm 11.25.0. It was not a Mac.
+The run was Linux x86_64 with Docker Engine 29.1.3 and Compose 2.40.3, Node 24.16.0, and pnpm 11.25.0. It was not a Mac. The first `pnpm e2e` on that date reset the dev Compose project. The current script uses `factrove-e2e` instead, as described above.
 
 ```sh
 pnpm install --frozen-lockfile

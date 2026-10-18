@@ -10,7 +10,11 @@ import {
   cliLaunch,
   composeArgs,
   composeFile,
+  e2eComposeArgs,
+  e2eProjectName,
   infraFailureHint,
+  localGarageEnv,
+  prepareLocalGarageEnv,
   invocationCwd,
   missingApiSettings,
   repoRoot,
@@ -121,23 +125,36 @@ describe("local runtime", () => {
     assert.equal(reset.filter((arg) => arg === "--volumes").length, 1);
     assert.equal(down[0], "compose");
     assert.ok(down.includes(composeFile));
+    assert.equal(down.includes(e2eProjectName), false);
+    assert.equal(reset.includes(e2eProjectName), false);
     assert.throws(() => composeArgs("drop"), /Unknown infra action/);
+
+    const e2eReset = e2eComposeArgs("reset");
+    const e2eDown = e2eComposeArgs("down");
+    assert.equal(e2eReset.includes("--volumes"), true);
+    assert.equal(e2eDown.includes("--volumes"), false);
+    assert.equal(e2eReset.includes("-p"), true);
+    assert.ok(e2eReset.includes(e2eProjectName));
+    assert.equal(e2eProjectName, "factrove-e2e");
   });
 
   it("explains a stopped daemon and a taken Postgres port", () => {
     assert.match(infraFailureHint("Cannot connect to the Docker daemon at unix:///var/run/docker.sock"), /Start Docker Desktop/);
     assert.match(infraFailureHint("Bind for 127.0.0.1:5432 failed: port is already allocated"), /5432/);
     assert.match(infraFailureHint("Bind for 127.0.0.1:3900 failed: port is already allocated"), /3900/);
+    assert.match(infraFailureHint("Bind for 127.0.0.1:5433 failed: port is already allocated"), /5433/);
+    assert.match(infraFailureHint("Bind for 127.0.0.1:3910 failed: port is already allocated"), /3910/);
     assert.match(infraFailureHint("failed to resolve reference"), /pinned container image/);
     assert.equal(infraFailureHint("network factrove_default removed"), "");
   });
 
   it("pins loopback Postgres and the local Garage S3 stand-in", () => {
     const compose = readFileSync(composeFile, "utf8");
-    assert.match(compose, /127\.0\.0\.1:5432:5432/);
+    assert.match(compose, /127\.0\.0\.1:\$\{FACTROVE_POSTGRES_PORT:-5432\}:5432/);
     assert.match(compose, /postgres:17\.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3/);
     assert.match(compose, /factrove-postgres:/);
-    assert.match(compose, /127\.0\.0\.1:3900:3900/);
+    assert.match(compose, /127\.0\.0\.1:\$\{FACTROVE_GARAGE_PORT:-3900\}:3900/);
+    assert.match(compose, /Local only\. Do not reuse these Garage credentials/);
     assert.match(compose, /dxflrs\/garage:v2\.3\.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690/);
     assert.match(compose, /--default-bucket/);
     assert.match(compose, /factrove-garage-meta:/);
@@ -159,6 +176,59 @@ describe("local runtime", () => {
     assert.match(apiExample, /^S3_FORCE_PATH_STYLE=true$/m);
     assert.match(apiExample, /^AWS_ACCESS_KEY_ID=factrove-local$/m);
     assert.match(apiExample, /^AWS_SECRET_ACCESS_KEY=factrove-local-secret$/m);
+    assert.match(apiExample, /Plain http:\/\/ is accepted only for localhost, 127\.0\.0\.1, and ::1/);
+  });
+
+  it("replaces shell S3 and AWS overrides with the local Garage endpoint", () => {
+    const parent = {
+      S3_ENDPOINT: "",
+      S3_BUCKET: "real-bucket",
+      S3_REGION: "eu-central-1",
+      AWS_ACCESS_KEY_ID: "AKIAREALKEY",
+      AWS_SECRET_ACCESS_KEY: "real-secret-value",
+      AWS_SESSION_TOKEN: "real-session",
+      AWS_PROFILE: "prod",
+      AWS_ENDPOINT_URL: "https://s3.us-east-1.amazonaws.com",
+      AWS_ENDPOINT_URL_S3: "https://s3.us-east-1.amazonaws.com",
+      S3_INTEGRATION: "1",
+      PATH: "/usr/bin",
+      DATABASE_URL: "postgresql://factrove:factrove@127.0.0.1:5432/factrove",
+    };
+    const env = localGarageEnv(parent, { garagePort: "3910" });
+
+    assert.equal(env.S3_ENDPOINT, "http://127.0.0.1:3910");
+    assert.equal(env.S3_BUCKET, "factrove");
+    assert.equal(env.S3_REGION, "us-east-1");
+    assert.equal(env.S3_FORCE_PATH_STYLE, "true");
+    assert.equal(env.AWS_ACCESS_KEY_ID, "factrove-local");
+    assert.equal(env.AWS_SECRET_ACCESS_KEY, "factrove-local-secret");
+    assert.equal(env.AWS_SESSION_TOKEN, undefined);
+    assert.equal(env.AWS_PROFILE, undefined);
+    assert.equal(env.AWS_ENDPOINT_URL, undefined);
+    assert.equal(env.AWS_ENDPOINT_URL_S3, undefined);
+    assert.equal(env.S3_INTEGRATION, "1");
+    assert.equal(env.PATH, "/usr/bin");
+    assert.equal(env.DATABASE_URL, parent.DATABASE_URL);
+    assert.equal(parent.AWS_ACCESS_KEY_ID, "AKIAREALKEY");
+    assert.throws(() => prepareLocalGarageEnv({}, { garagePort: "nope" }), /Garage port/);
+    assert.throws(() => localGarageEnv({}, { garagePort: "0" }), /Garage port/);
+  });
+
+  it("keeps end-to-end checks on an isolated Compose project", () => {
+    const source = readFileSync(join(repoRoot, "scripts/e2e-local.mjs"), "utf8");
+    assert.equal(source.includes("infra:reset"), false);
+    assert.equal(source.includes("infra:up"), false);
+    assert.equal(source.includes("infra:down"), false);
+    assert.match(source, /factrove-e2e/);
+    assert.match(source, /requireChromium/);
+    assert.match(source, /requireDocker/);
+    assert.match(source, /restoreFileSnapshot/);
+    assert.match(source, /localGarageEnv/);
+    assert.match(source, /assertLoopbackHttpEndpoint/);
+    const chromiumCheck = source.indexOf("requireChromium");
+    const projectStart = source.indexOf("e2eProjectStarted = true");
+    assert.ok(chromiumCheck > 0);
+    assert.ok(projectStart > chromiumCheck);
   });
 
   it("restores a snapshotted file and leaves a missing snapshot untouched", async () => {

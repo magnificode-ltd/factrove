@@ -167,7 +167,15 @@ function readEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   if (url.pathname !== "/" || url.search.length > 0 || url.hash.length > 0) {
     throw new BlobStoreUnavailableError("S3_ENDPOINT must be an origin without a path, query, or hash");
   }
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    throw new BlobStoreUnavailableError("S3_ENDPOINT must use https, or http on a loopback host");
+  }
   return url.origin;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 function readForcePathStyle(env: NodeJS.ProcessEnv, endpointSet: boolean): boolean {

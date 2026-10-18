@@ -7,6 +7,7 @@ import {
   S3BlobStore,
   StorageModule,
 } from "../src/storage/index.js";
+import { prepareLocalGarageEnv } from "../../../scripts/local-runtime.mjs";
 import { createS3Client, readS3StorageConfig, toBlobStoreError } from "../src/storage/providers/s3.provider.js";
 
 const objectKey = "11111111-1111-4111-8111-111111111111.html";
@@ -122,6 +123,80 @@ describe("S3 storage configuration", () => {
       "S3_FORCE_PATH_STYLE must be true or false",
       "yes",
     );
+    for (const endpoint of ["http://example.com", "http://203.0.113.5:3900", "http://192.168.1.10:3900"]) {
+      expectUnavailable(
+        () =>
+          readS3StorageConfig({
+            S3_BUCKET: "factrove",
+            S3_REGION: "us-east-1",
+            S3_ENDPOINT: endpoint,
+          }),
+        "S3_ENDPOINT must use https, or http on a loopback host",
+        endpoint,
+      );
+    }
+  });
+
+  it("accepts loopback http and https endpoints", () => {
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://localhost:3900",
+      }).endpoint,
+    ).toBe("http://localhost:3900");
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://[::1]:3900",
+      }).endpoint,
+    ).toBe("http://[::1]:3900");
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "https://s3.example.com",
+      }).endpoint,
+    ).toBe("https://s3.example.com");
+  });
+
+  it("forces local Garage settings over an empty endpoint and real AWS credentials", () => {
+    const env: NodeJS.ProcessEnv = {
+      S3_ENDPOINT: "",
+      S3_BUCKET: "real-bucket",
+      S3_REGION: "us-east-1",
+      AWS_ACCESS_KEY_ID: "AKIAREALKEY",
+      AWS_SECRET_ACCESS_KEY: "real-secret-value",
+      AWS_SESSION_TOKEN: "real-session",
+      AWS_PROFILE: "prod",
+      AWS_ENDPOINT_URL: "https://s3.us-east-1.amazonaws.com",
+      AWS_ENDPOINT_URL_S3: "https://s3.us-east-1.amazonaws.com",
+      FACTROVE_GARAGE_PORT: "3910",
+      S3_INTEGRATION: "1",
+      PATH: "/usr/bin",
+    };
+
+    const endpoint = prepareLocalGarageEnv(env, { garagePort: env.FACTROVE_GARAGE_PORT });
+    const config = readS3StorageConfig(env);
+
+    expect(endpoint).toBe("http://127.0.0.1:3910");
+    expect(config.endpoint).toBe("http://127.0.0.1:3910");
+    expect(config.bucket).toBe("factrove");
+    expect(config.forcePathStyle).toBe(true);
+    expect(config.credentials).toEqual({
+      accessKeyId: "factrove-local",
+      secretAccessKey: "factrove-local-secret",
+    });
+    expect(env.AWS_PROFILE).toBeUndefined();
+    expect(env.AWS_SESSION_TOKEN).toBeUndefined();
+    expect(env.AWS_ENDPOINT_URL).toBeUndefined();
+    expect(env.AWS_ENDPOINT_URL_S3).toBeUndefined();
+    expect(env.S3_INTEGRATION).toBe("1");
+    expect(env.PATH).toBe("/usr/bin");
+    expect(JSON.stringify(config)).not.toContain("AKIAREALKEY");
+    expect(JSON.stringify(config)).not.toContain("real-secret-value");
+    expect(JSON.stringify(config)).not.toContain("s3.us-east-1.amazonaws.com");
   });
 
   it("calls regional AWS even when AWS endpoint URL variables are set", async () => {

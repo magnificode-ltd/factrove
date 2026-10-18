@@ -1,26 +1,44 @@
+// Uses Compose project factrove-e2e, with its own volumes and host ports.
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import {
-  apiEnvFile,
-  composeFile,
+  apiEntry,
+  assertLoopbackHttpEndpoint,
+  e2eApiPort,
+  e2eComposeArgs,
+  e2eComposeBase,
+  e2eGaragePort,
+  e2eInfraEnv,
+  e2ePostgresPort,
+  e2eProjectName,
+  e2eWebPort,
+  infraFailureHint,
+  localGarageEnv,
   readDotEnv,
   repoRoot,
+  restoreFileSnapshot,
   rootEnvFile,
+  snapshotFile,
   webAppDir,
-  webDevArgs,
   webDevBin,
   webLaunchEnv,
+  workspaceBuildArgs,
 } from "./local-runtime.mjs";
 
-const webOrigin = "http://localhost:3000";
-const apiOrigin = "http://127.0.0.1:3001";
-const localEndpoint = "http://127.0.0.1:3900";
+const webOrigin = `http://127.0.0.1:${e2eWebPort}`;
+const apiOrigin = `http://127.0.0.1:${e2eApiPort}`;
+const garageEndpoint = `http://127.0.0.1:${e2eGaragePort}`;
+const databaseUrl = `postgresql://factrove:factrove@127.0.0.1:${e2ePostgresPort}/factrove`;
 const fixturePath = join(repoRoot, "fixtures/hello.html");
+const nextEnvPath = join(webAppDir, "next-env.d.ts");
+const nextEnvSnapshot = snapshotFile(nextEnvPath);
 const children = [];
 let browser;
+let chromium;
+let e2eProjectStarted = false;
 
 const env = { ...process.env };
 delete env.INIT_CWD;
@@ -33,28 +51,42 @@ try {
 } finally {
   await closeBrowser();
   await stopChildren();
+  restoreFileSnapshot(nextEnvPath, nextEnvSnapshot);
+  if (e2eProjectStarted) {
+    await removeE2eProject();
+  }
 }
 
 async function main() {
-  ensureLocalEnv();
+  await requireDocker();
+  await requireChromium();
+  const apiEnv = apiChildEnv();
+  assertLoopbackHttpEndpoint(apiEnv.S3_ENDPOINT);
+  if (apiEnv.S3_ENDPOINT !== garageEndpoint) {
+    throw new Error("The effective S3 endpoint must be an http loopback origin.");
+  }
+
+  await must("pnpm", workspaceBuildArgs);
   const fixture = readFileSync(fixturePath);
 
-  await must("pnpm", ["infra:reset", "--", "--yes"]);
-  await must("pnpm", ["infra:up"]);
-  const migrated = await must("pnpm", ["db:migrate"]);
+  e2eProjectStarted = true;
+  await compose("reset");
+  await compose("up");
+  const migrated = await must("pnpm", ["db:migrate"], databaseChildEnv());
   if (!`${migrated.stdout}\n${migrated.stderr}`.includes("20261011120000_add_identity_and_artifact")) {
     throw new Error("The first migrate did not apply the committed migration.");
   }
-  await must("pnpm", ["db:seed"]);
-  await must("pnpm", ["db:seed"]);
-  const again = await must("pnpm", ["db:migrate"]);
+  await must("pnpm", ["db:seed"], databaseChildEnv());
+  await must("pnpm", ["db:seed"], databaseChildEnv());
+  const again = await must("pnpm", ["db:migrate"], databaseChildEnv());
   if (!`${again.stdout}\n${again.stderr}`.includes("No pending migrations")) {
     throw new Error("A second migrate was not a no-op.");
   }
   await expectSql('select count(*) from "user"', "1");
   await expectSql('select count(*) from organization', "1");
 
-  startLogged(process.execPath, [join(repoRoot, "scripts/dev.mjs")], repoRoot, env);
+  startApi(apiEnv);
+  startWeb();
   await waitForJson(`${apiOrigin}/api/v1/health`, (body) => body.status === "ok");
   await waitForText(`${webOrigin}/`, "My artifacts");
   const context = await getJson(`${apiOrigin}/api/v1/context`);
@@ -64,9 +96,9 @@ async function main() {
   await expectItems("mine", []);
   await expectItems("org", []);
 
-  const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html"]);
+  const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html"], cliChildEnv());
   const plainViewer = plain.stdout.trim();
-  if (!/^http:\/\/localhost:3000\/artifacts\/[0-9a-f-]{36}$/.test(plainViewer)) {
+  if (!viewerUrl(plainViewer)) {
     throw new Error(`Plain upload did not print a viewer URL.\n${plain.stdout}`);
   }
   if (plain.stdout.includes("Nest") || plain.stdout.includes("successfully started")) {
@@ -74,7 +106,7 @@ async function main() {
   }
   const plainId = plainViewer.slice(plainViewer.lastIndexOf("/") + 1);
 
-  const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json"]);
+  const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json"], cliChildEnv());
   const jsonArtifact = JSON.parse(jsonUpload.stdout).artifact;
   if (jsonArtifact.viewerUrl !== `${webOrigin}/artifacts/${jsonArtifact.id}`) {
     throw new Error(`JSON viewer URL did not use the web origin: ${jsonArtifact.viewerUrl}`);
@@ -83,10 +115,10 @@ async function main() {
     throw new Error(`JSON upload was ${jsonArtifact.accessType}`);
   }
 
-  const shared = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared"]);
+  const shared = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared"], cliChildEnv());
   const sharedViewer = shared.stdout.trim();
   const sharedId = sharedViewer.slice(sharedViewer.lastIndexOf("/") + 1);
-  if (!/^http:\/\/localhost:3000\/artifacts\/[0-9a-f-]{36}$/.test(sharedViewer)) {
+  if (!viewerUrl(sharedViewer)) {
     throw new Error(`org_shared upload did not print a viewer URL.\n${shared.stdout}`);
   }
 
@@ -104,21 +136,16 @@ async function main() {
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
 
-  const playwright = await import(pathToFileURL(join(repoRoot, "apps/web/node_modules/playwright/index.mjs")).href);
-  const chromium = playwright.chromium;
-  if (!chromium) {
-    throw new Error("Playwright did not export chromium.");
-  }
   browser = await chromium.launch({ headless: true });
   await checkLibrary(plainId, jsonArtifact.id, sharedId);
   await checkViewer(plainViewer, fixture);
   await checkViewer(sharedViewer, fixture);
 
-  const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json"]);
+  const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json"], cliChildEnv());
   if (missing.code === 0 || !missing.stderr.includes("FILE_NOT_FOUND")) {
     throw new Error(`Missing file did not fail usefully.\n${missing.stderr}`);
   }
-  const unsupported = await run("pnpm", ["factrove", "upload", "./README.md", "--json"]);
+  const unsupported = await run("pnpm", ["factrove", "upload", "./README.md", "--json"], cliChildEnv());
   if (unsupported.code === 0 || !unsupported.stderr.includes("INVALID_INPUT")) {
     throw new Error(`Non-HTML upload did not fail usefully.\n${unsupported.stderr}`);
   }
@@ -133,24 +160,30 @@ async function main() {
 
   await stopChildren();
   await waitUntilDown(apiOrigin);
-  const webOnly = startLogged(webDevBin, webDevArgs, webAppDir, webLaunchEnv(env, readDotEnv(rootEnvFile)));
+  const webOnly = startWeb();
   await waitForText(`${webOrigin}/`, "The Factrove API is unavailable. Start the backend and refresh.");
   await stopChild(webOnly);
 
-  await must("pnpm", ["infra:down"]);
-  await must("pnpm", ["infra:up"]);
-  const restarted = startLogged(process.execPath, [join(repoRoot, "scripts/dev.mjs")], repoRoot, env);
+  await compose("down");
+  await compose("up");
+  const restartedApi = startApi(apiEnv);
+  startWeb();
   await waitForJson(`${apiOrigin}/api/v1/health`, (body) => body.status === "ok");
   await expectItems("mine", [plainId, jsonArtifact.id, sharedId]);
   await expectItems("org", [sharedId]);
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
   await expectSql('select count(*) from "user"', "1");
-  await stopChild(restarted);
+  await stopChild(restartedApi);
+  await stopChildren();
 
-  const s3 = await must("pnpm", ["--filter", "@factrove/api", "exec", "vitest", "run", "test/storage.integration.test.ts", "test/content.s3.integration.test.ts"], {
-    S3_INTEGRATION: "1",
-  });
+  const s3Env = integrationChildEnv();
+  assertLoopbackHttpEndpoint(s3Env.S3_ENDPOINT);
+  const s3 = await must(
+    "pnpm",
+    ["--filter", "@factrove/api", "exec", "vitest", "run", "test/storage.integration.test.ts", "test/content.s3.integration.test.ts"],
+    s3Env,
+  );
   const s3Report = `${s3.stdout}\n${s3.stderr}`;
   if (!/Tests\s+4 passed/.test(s3Report)) {
     throw new Error(`S3 integration tests did not report 4 passes.\n${s3Report}`);
@@ -158,18 +191,89 @@ async function main() {
   process.stdout.write("Local end-to-end checks passed. macOS was not run.\n");
 }
 
-function ensureLocalEnv() {
-  if (!existsSync(apiEnvFile)) {
-    copyFileSync(join(repoRoot, "apps/api/.env.example"), apiEnvFile);
+function databaseChildEnv() {
+  const child = localGarageEnv(env, { garagePort: e2eGaragePort });
+  delete child.INIT_CWD;
+  delete child.S3_INTEGRATION;
+  child.DATABASE_URL = databaseUrl;
+  child.BASE_URL = apiOrigin;
+  child.FACTROVE_GARAGE_PORT = e2eGaragePort;
+  return child;
+}
+
+function apiChildEnv() {
+  const child = databaseChildEnv();
+  child.HOST = "127.0.0.1";
+  child.PORT = e2eApiPort;
+  child.WEB_ORIGIN = webOrigin;
+  child.API_PUBLIC_ORIGIN = apiOrigin;
+  child.LOCAL_USER_ID = "local-user";
+  child.LOCAL_ORGANIZATION_ID = "local-org";
+  return child;
+}
+
+function cliChildEnv() {
+  return { ...env, FACTROVE_API_URL: apiOrigin };
+}
+
+function webChildEnv() {
+  const child = webLaunchEnv(env, readDotEnv(rootEnvFile));
+  child.NEXT_PUBLIC_API_URL = apiOrigin;
+  delete child.INIT_CWD;
+  return child;
+}
+
+function integrationChildEnv() {
+  const child = apiChildEnv();
+  child.S3_INTEGRATION = "1";
+  return child;
+}
+
+function viewerUrl(value) {
+  return new RegExp(`^http://127\\.0\\.0\\.1:${e2eWebPort}/artifacts/[0-9a-f-]{36}$`).test(value);
+}
+
+async function requireDocker() {
+  const info = await run("docker", ["info"]);
+  if (info.code !== 0) {
+    throw new Error("The container runtime is not running. Start Docker, then run pnpm e2e again.");
   }
-  if (!existsSync(rootEnvFile)) {
-    copyFileSync(join(repoRoot, ".env.example"), rootEnvFile);
+}
+
+async function requireChromium() {
+  const playwright = await import(pathToFileURL(join(repoRoot, "apps/web/node_modules/playwright/index.mjs")).href);
+  chromium = playwright.chromium;
+  if (!chromium) {
+    throw new Error("Playwright did not export chromium.");
   }
-  const apiEnv = readDotEnv(apiEnvFile);
-  if (apiEnv.S3_ENDPOINT !== localEndpoint || apiEnv.S3_BUCKET !== "factrove" || apiEnv.S3_FORCE_PATH_STYLE !== "true") {
+  if (!existsSync(chromium.executablePath())) {
     throw new Error(
-      "pnpm e2e requires the local Garage settings in apps/api/.env (S3_ENDPOINT=http://127.0.0.1:3900, S3_BUCKET=factrove, S3_FORCE_PATH_STYLE=true). It will not upload to AWS.",
+      "Playwright Chromium is not installed. From the repository root, run: pnpm --filter @factrove/web exec playwright install chromium",
     );
+  }
+}
+
+function startApi(childEnv) {
+  return startLogged(process.execPath, [apiEntry], repoRoot, childEnv);
+}
+
+function startWeb() {
+  return startLogged(webDevBin, ["dev", "--hostname", "127.0.0.1", "--port", e2eWebPort], webAppDir, webChildEnv());
+}
+
+async function compose(action) {
+  const result = await run("docker", e2eComposeArgs(action), e2eInfraEnv(env));
+  if (result.code !== 0) {
+    const hint = infraFailureHint(result.stderr);
+    throw new Error(`docker ${e2eComposeArgs(action).join(" ")} failed (${result.code}).\n${result.stdout}\n${result.stderr}\n${hint}`);
+  }
+  return result;
+}
+
+async function removeE2eProject() {
+  const result = await run("docker", e2eComposeArgs("reset"), e2eInfraEnv(env));
+  if (result.code !== 0) {
+    process.stderr.write(`Could not remove the ${e2eProjectName} Compose project.\n${result.stderr}\n`);
   }
 }
 
@@ -223,11 +327,11 @@ async function closeBrowser() {
   }
 }
 
-function run(command, args, extraEnv = {}) {
+function run(command, args, childEnv = env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...env, ...extraEnv },
+      env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -247,8 +351,8 @@ function run(command, args, extraEnv = {}) {
   });
 }
 
-async function must(command, args, extraEnv) {
-  const result = await run(command, args, extraEnv);
+async function must(command, args, childEnv) {
+  const result = await run(command, args, childEnv);
   if (result.code !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed (${result.code}).\n${result.stdout}\n${result.stderr}`);
   }
@@ -257,11 +361,7 @@ async function must(command, args, extraEnv) {
 
 async function expectSql(sql, expected) {
   const result = await must("docker", [
-    "compose",
-    "-f",
-    composeFile,
-    "--project-directory",
-    repoRoot,
+    ...e2eComposeBase(),
     "exec",
     "-T",
     "postgres",
@@ -272,7 +372,7 @@ async function expectSql(sql, expected) {
     "factrove",
     "-tAc",
     sql,
-  ]);
+  ], e2eInfraEnv(env));
   if (result.stdout.trim() !== expected) {
     throw new Error(`SQL ${sql} returned ${result.stdout.trim()}, expected ${expected}.`);
   }
@@ -306,7 +406,7 @@ async function assertContent(id, fixture) {
   if (!csp.includes("sandbox allow-scripts") || csp.includes("allow-same-origin") || !csp.includes("connect-src 'none'")) {
     throw new Error(`Content CSP was ${csp}`);
   }
-  if (!csp.includes("frame-ancestors http://localhost:3000")) {
+  if (!csp.includes(`frame-ancestors ${webOrigin}`)) {
     throw new Error(`Content CSP frame-ancestors was ${csp}`);
   }
   for (const [name, value] of [
@@ -363,12 +463,12 @@ async function checkLibrary(plainId, jsonId, sharedId) {
   }
 }
 
-async function checkViewer(viewerUrl, fixture) {
+async function checkViewer(viewer, fixture) {
   const page = await browser.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
-    await page.goto(viewerUrl);
+    await page.goto(viewer);
     const frame = page.locator("iframe");
     await frame.waitFor({ timeout: 20000 });
     const sandbox = await frame.getAttribute("sandbox");

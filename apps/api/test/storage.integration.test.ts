@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { HeadObjectCommand } from "@aws-sdk/client-s3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BlobNotFoundError, BlobStoreUnavailableError, S3BlobStore } from "../src/storage/index.js";
-import { createS3Client, readS3StorageConfig, type S3StorageConfig } from "../src/storage/providers/s3.provider.js";
+import { createS3Client, type S3StorageConfig } from "../src/storage/providers/s3.provider.js";
+import { useLocalGarage } from "./local-garage.js";
 
 const envPath = fileURLToPath(new URL("../.env", import.meta.url));
 const fixturePath = fileURLToPath(new URL("../../../fixtures/hello.html", import.meta.url));
@@ -19,17 +20,16 @@ try {
   }
 }
 
-const liveConfigured =
-  process.env.S3_INTEGRATION === "1" && Boolean(process.env.S3_BUCKET?.trim() && process.env.S3_REGION?.trim());
+const enabled = process.env.S3_INTEGRATION === "1";
 
-describe.skipIf(!liveConfigured)("S3 blob store against the configured bucket", () => {
+describe.skipIf(!enabled)("S3 blob store against local Garage", () => {
   let store: S3BlobStore;
   let config: S3StorageConfig;
   let headClient: ReturnType<typeof createS3Client>;
   const keys: string[] = [];
 
   beforeAll(() => {
-    config = readS3StorageConfig();
+    config = useLocalGarage();
     store = new S3BlobStore(config);
     headClient = createS3Client(config);
   });

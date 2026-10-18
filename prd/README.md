@@ -4,7 +4,7 @@
 
 Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS run in task 08, which was not executed. Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS localhost check, which remains open in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 
@@ -42,7 +42,7 @@ Use Artifact as the custom product table alongside the schema required by Better
 
 ## Final acceptance checklist
 
-- [ ] A fresh clone has a verified macOS setup path using pinned Node/pnpm versions and a documented container runtime prerequisite.
+- [ ] A fresh clone has a verified macOS setup path using pinned Node/pnpm versions and a documented container runtime prerequisite. The open check is [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md).
 - [x] PostgreSQL starts with a persistent volume. Artifact bytes use the configured S3 bucket. Local setup uses Garage. AWS remains available when `S3_ENDPOINT` is unset.
 - [x] Committed migrations apply to an empty database; explicit seed runs twice without duplicates or destructive resets.
 - [x] One command starts FE/BE; the CLI runs from another terminal without database/storage credentials.
@@ -62,4 +62,4 @@ Checked items were observed on October 18, 2026. The upload loop, library refres
 
 The macOS item is unchecked. This run was Linux x86_64, Node 24.16.0, pnpm 11.25.0, Docker Engine 29.1.3, and Compose 2.40.3. A real AWS bucket was not called. A unit test checks that an unset `S3_ENDPOINT` still targets the regional AWS host. The second-user list check remains the earlier database insert plus the real API and library UI. The oversized-file CLI error remains the earlier check; missing file, non-HTML, unknown id, and the web unavailable-backend screen were checked again.
 
-Tasks 01–07 are complete. Task 06 is stub-verified. Task 08's local stack is verified. Its macOS run is not.
+Tasks 01–08 are complete except the macOS localhost check in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Task 08's local stack is verified.
