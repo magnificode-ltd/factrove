@@ -12,11 +12,6 @@ type HeaderResponse = {
 export function configureHttpApp(app: INestApplication): void {
   const config = app.get<ApiConfig>(API_CONFIG);
   const auth = app.get(AuthService);
-  // Mount before init so this runs ahead of the Nest router. The handler is
-  // resolved per request because Better Auth is created in onModuleInit.
-  app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
-    void toNodeHandler(auth.handler())(request, response);
-  });
   app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin(requestOrigin: string | undefined, callback: (error: Error | null, allow?: boolean | string) => void) {
@@ -29,6 +24,11 @@ export function configureHttpApp(app: INestApplication): void {
     credentials: true,
     methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept", "Authorization"],
+  });
+  // Registered after CORS so the browser can call /api/auth from the web origin.
+  // The handler is resolved per request because Better Auth is created in onModuleInit.
+  app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
+    void toNodeHandler(auth.handler())(request, response);
   });
   app.useGlobalFilters(new ApiExceptionFilter());
   app.use((_request: unknown, response: HeaderResponse, next: () => void) => {

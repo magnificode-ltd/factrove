@@ -40,6 +40,7 @@ const nextEnvPath = join(webAppDir, "next-env.d.ts");
 const nextEnvSnapshot = snapshotFile(nextEnvPath);
 const children = [];
 let browser;
+let ownerContext;
 let chromium;
 let e2eProjectStarted = false;
 let ownerKey = "";
@@ -103,6 +104,7 @@ async function main() {
   }
 
   browser = await chromium.launch({ headless: true });
+  ownerContext = await browser.newContext();
   const owner = await signUpAndCreateKey();
   ownerKey = owner.secret;
   const configDir = await mkdtemp(join(tmpdir(), "factrove-e2e-"));
@@ -475,7 +477,7 @@ async function assertContent(id, fixture) {
 async function signUpAndCreateKey() {
   const email = "e2e-owner@example.invalid";
   const password = "e2e-owner-password";
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
@@ -650,7 +652,7 @@ async function expectKeyHash(secret) {
 }
 
 async function revokeKey() {
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
@@ -688,7 +690,7 @@ function runInput(command, args, input, childEnv = env) {
 }
 
 async function checkLibrary(plainId, jsonId, sharedId) {
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
@@ -726,7 +728,7 @@ async function checkLibrary(plainId, jsonId, sharedId) {
 }
 
 async function checkViewer(viewer, fixture) {
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {

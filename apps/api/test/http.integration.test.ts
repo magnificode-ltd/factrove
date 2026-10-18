@@ -691,6 +691,17 @@ describe("HTTP API", () => {
     expect(preflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
     expect(preflight.headers.get("access-control-allow-origin")).not.toBe("*");
 
+    const authPreflight = await globalThis.fetch(`${baseUrl}/api/auth/sign-up/email`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    expect(authPreflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(authPreflight.headers.get("access-control-allow-credentials")).toBe("true");
+
     const nullPreflight = await ownerFetch(`${baseUrl}/api/v1/artifacts`, {
       method: "OPTIONS",
       headers: {
