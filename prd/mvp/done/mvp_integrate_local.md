@@ -108,6 +108,7 @@ Task 08 owns these checks.
 - On that exit it restores `apps/web/next-env.d.ts` if Next.js rewrote the committed file. A Next.js dev process on port 3011 rewrote the file to `.next/dev/types`, and SIGHUP restored the committed text.
 - `pnpm infra:reset` asks for `yes` in a terminal and refuses otherwise unless `--yes` is passed. The volume delete still does not remove S3 objects.
 - The CLI no longer reads `INIT_CWD`. The launcher still applies it as the child working directory.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed again. `pnpm test` reported api-client 6, web 17, cli 24, api 41 passed and 4 skipped (`storage.integration` and `content.s3.integration`), plus 12 runtime script tests.
 
 No product decision is blocking. Postgres 17.11, the local database password `factrove`, and binding the Next dev server to `127.0.0.1` are local runtime choices.
 
