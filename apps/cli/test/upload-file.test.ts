@@ -59,7 +59,7 @@ describe("upload file validation", () => {
     await writeFile(empty, "");
     await writeFile(text, "<p>nope</p>");
 
-    await expect(readUploadFile(join(directory, "missing.html"), {}, directory)).rejects.toMatchObject({
+    await expect(readUploadFile(join(directory, "missing.html"))).rejects.toMatchObject({
       code: "FILE_NOT_FOUND",
       message: `No such file: ${resolve(directory, "missing.html")}`,
     });
@@ -77,19 +77,32 @@ describe("upload file validation", () => {
     });
   });
 
-  it("resolves a relative path from INIT_CWD and reports the absolute path", async () => {
+  it("resolves a relative path from the process directory and ignores INIT_CWD", async () => {
     const directory = await makeTemp();
     const other = await makeTemp();
     await writeFile(join(directory, "note.html"), "<p>here</p>");
+    const previous = process.env.INIT_CWD;
+    process.env.INIT_CWD = directory;
+    try {
+      const upload = await readUploadFile("./note.html", directory);
+      expect(upload.filename).toBe("note.html");
+      expect(Buffer.from(upload.bytes).toString("utf8")).toBe("<p>here</p>");
 
-    const upload = await readUploadFile("./note.html", { INIT_CWD: directory }, other);
-    expect(upload.filename).toBe("note.html");
-    expect(Buffer.from(upload.bytes).toString("utf8")).toBe("<p>here</p>");
-
-    await expect(readUploadFile("missing.html", { INIT_CWD: directory }, other)).rejects.toMatchObject({
-      code: "FILE_NOT_FOUND",
-      message: `No such file: ${resolve(directory, "missing.html")}`,
-    });
+      await expect(readUploadFile("missing.html", directory)).rejects.toMatchObject({
+        code: "FILE_NOT_FOUND",
+        message: `No such file: ${resolve(directory, "missing.html")}`,
+      });
+      await expect(readUploadFile("./note.html", other)).rejects.toMatchObject({
+        code: "FILE_NOT_FOUND",
+        message: `No such file: ${resolve(other, "note.html")}`,
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = previous;
+      }
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { Injectable } from "@nestjs/common";
 import { CliError } from "./cli-error.js";
 
@@ -20,25 +20,12 @@ export class UploadFileService {
   }
 }
 
-export function resolveUploadPath(
-  filePath: string,
-  env: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd(),
-): string {
-  if (isAbsolute(filePath)) {
-    return filePath;
-  }
-  const invocationDirectory = env.INIT_CWD?.trim();
-  const base = invocationDirectory ? resolve(cwd, invocationDirectory) : cwd;
-  return resolve(base, filePath);
+export function resolveUploadPath(filePath: string, cwd: string = process.cwd()): string {
+  return resolve(cwd, filePath);
 }
 
-export async function readUploadFile(
-  filePath: string,
-  env: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd(),
-): Promise<UploadFile> {
-  const resolvedPath = resolveUploadPath(filePath, env, cwd);
+export async function readUploadFile(filePath: string, cwd: string = process.cwd()): Promise<UploadFile> {
+  const resolvedPath = resolveUploadPath(filePath, cwd);
   let info: Awaited<ReturnType<typeof stat>>;
   try {
     info = await stat(resolvedPath);

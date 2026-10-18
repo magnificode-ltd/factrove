@@ -98,20 +98,27 @@ describe("factrove upload", () => {
     expect(selected.requests).toHaveLength(2);
   });
 
-  it("resolves a relative path from INIT_CWD when the process directory is elsewhere", async () => {
-    const elsewhere = await makeTemp();
+  it("resolves a relative path from the process directory and ignores INIT_CWD", async () => {
+    const directory = await makeTemp();
+    await writeFile(join(directory, "note.html"), "<p>here</p>");
     const stub = await startStub(() => accepted(1));
-    const result = await runCli(["upload", "./fixtures/hello.html", "--api-url", stub.url], {
-      cwd: elsewhere,
+    const result = await runCli(["upload", "./note.html", "--api-url", stub.url], {
+      cwd: directory,
       env: { INIT_CWD: repoRoot },
     });
 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
-    const request = stub.requests[0];
-    const parts = multipartParts(request?.contentType ?? "", request?.body ?? Buffer.alloc(0));
-    expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
-    expect(request?.body.includes(Buffer.from("fixtures/hello.html"))).toBe(false);
+    const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
+    expect(parts.find((part) => part.name === "file")?.filename).toBe("note.html");
+
+    const ignored = await runCli(["upload", "./fixtures/hello.html", "--api-url", stub.url], {
+      cwd: directory,
+      env: { INIT_CWD: repoRoot },
+    });
+    expect(ignored.code).toBe(1);
+    expect(ignored.stderr).toBe(`FILE_NOT_FOUND: No such file: ${resolve(directory, "fixtures/hello.html")}\n`);
+    expect(stub.requests).toHaveLength(1);
   });
 
   it("prints help and exits without an error", async () => {
@@ -198,6 +205,23 @@ describe("factrove upload", () => {
         message: `Could not reach the Factrove API at http://127.0.0.1:${port}.`,
       },
     });
+  });
+
+  it("runs the launcher with the caller directory as the CLI working directory", async () => {
+    const elsewhere = await makeTemp();
+    const stub = await startStub(() => accepted(1));
+    const result = await runCommand(
+      process.execPath,
+      [launcherPath, "upload", "./fixtures/hello.html", "--api-url", stub.url],
+      elsewhere,
+      { INIT_CWD: repoRoot },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
+    expect(result.stderr).toBe("");
+    const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
+    expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
   });
 
   it("runs from the repository root through pnpm factrove", async () => {
