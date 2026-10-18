@@ -14,7 +14,7 @@
     "infra:down": "node scripts/pending.mjs 'local services (Task 07)'",
     "db:migrate": "pnpm --filter @factrove/api db:migrate",
     "db:seed": "pnpm --filter @factrove/api db:seed",
-    "factrove": "pnpm --filter @factrove/cli start"
+    "factrove": "node scripts/factrove.mjs"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
