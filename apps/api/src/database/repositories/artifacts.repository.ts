@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { Artifact } from "@prisma/client";
 import type {
   ArtifactRecord,
@@ -24,7 +24,7 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
 
 @Injectable()
 export class ArtifactsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async create(input: CreateArtifactInput): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.create({

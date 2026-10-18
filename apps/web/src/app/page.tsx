@@ -1,13 +1,15 @@
-"use client";
+import { createWebClient } from "@/api/client";
+import { libraryViewFromParam, loadLibrary } from "@/library/load-library";
+import { LibraryScreen } from "@/library/library-screen";
 
-import { createFactroveClient } from "@factrove/api-client";
+export const dynamic = "force-dynamic";
 
-const apiClient = createFactroveClient({
-  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"
-});
-
-export default function HomePage() {
-  // Keep the scaffold's browser bundle wired to the shared client without making a request.
-  void apiClient;
-  return <main><h1>Factrove</h1><p>The local artifact library scaffold is ready.</p></main>;
+export default async function HomePage({
+  searchParams
+}: {
+  searchParams: Promise<{ view?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const state = await loadLibrary(createWebClient(), libraryViewFromParam(params.view));
+  return <LibraryScreen state={state} />;
 }
