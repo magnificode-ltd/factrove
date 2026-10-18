@@ -74,7 +74,11 @@ The API builds absolute URLs from configuration, never an untrusted Host header.
 
 `contentUrl` stays the HTML content URL with no format query, so the viewer iframe keeps loading the stored document. Clients that want Markdown add `?format=markdown`. An invalid `format` is `400 INVALID_REQUEST`. `Accept` is not used to choose the format: a request with no `format` returns the original HTML bytes and the existing HTML headers, including when the caller sends `Accept: text/markdown`.
 
-HTML responses are unchanged: `text/html; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and the sandbox CSP. Markdown responses use `text/markdown; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and a CSP with `sandbox` and no script or style sources. Markdown is produced in the API process from the stored HTML. It is not written to PostgreSQL or object storage. A conversion failure, including HTML that is too large or too deeply nested to convert safely, is `500 INTERNAL_ERROR` and does not change the stored artifact.
+HTML responses are unchanged: `text/html; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and the sandbox CSP. Markdown responses use `text/markdown; charset=utf-8`, `no-store`, `nosniff`, `no-referrer`, and a CSP with `sandbox` and no script or style sources. Markdown is produced from the stored HTML on a worker thread. It is not written to PostgreSQL or object storage. A conversion failure does not change the stored artifact.
+
+The converter walks the parsed document once. It escapes `&`, `<`, and `>` in text, and also escapes `[`, `]`, and `\` in link text and image alt text. Code fences are longer than any backtick run in the code. Link and image destinations allow `http`, `https`, `mailto`, and relative URLs, written as `<destination>` with spaces, `<`, `>`, `\`, and control characters percent-encoded. `javascript:`, `vbscript:`, `data:`, and any other scheme are dropped. An `<img src="https://…">` stays a Markdown image, so a renderer that loads remote images will request that URL.
+
+Input larger than the 10 MiB stored-HTML limit is `413 CONTENT_TOO_LARGE` with message `HTML exceeds the Markdown conversion limit.` Output larger than 16 MiB is `422 CONTENT_TOO_COMPLEX` with message `Markdown output exceeds the conversion limit.` A conversion that exceeds 5 seconds is `422 CONTENT_TOO_COMPLEX` with message `HTML took too long to convert to Markdown.` A worker that runs out of memory is `422 CONTENT_TOO_COMPLEX` with message `HTML used too much memory to convert to Markdown.` Nesting deeper than 100 levels is flattened. HTML that still cannot be converted within those limits is `422 CONTENT_TOO_COMPLEX` with message `HTML is too complex to convert to Markdown.` Invalid UTF-8 discovered while decoding stored HTML for Markdown is `400 INVALID_REQUEST`. An unexpected converter failure is `500 INTERNAL_ERROR`.
 
 ### Upload behavior
 
@@ -97,6 +101,8 @@ Return the common JSON envelope without stack traces or secrets:
 | 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/format/ID, invalid UTF-8 |
 | 400 | ORGANIZATION_REQUIRED | org_shared without local organization |
 | 413 | FILE_TOO_LARGE | Above 10 MiB |
+| 413 | CONTENT_TOO_LARGE | Stored HTML exceeds the Markdown conversion limit |
+| 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact |
 | 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
@@ -117,7 +123,7 @@ client.getArtifact(id)
 client.getArtifactContent(id, { format?: "html" | "markdown" })
 ```
 
-`getArtifactContent` returns `{ format, mediaType, content }`. `format` defaults to `html`. `mediaType` is `text/html` or `text/markdown`. `content` is the response body as text. HTML requests omit the format query. Markdown requests use `?format=markdown`. The HTTP success body stays raw text; this object is the client result, not a second JSON envelope from the API.
+`getArtifactContent` returns `{ format, mediaType, content }`. `format` defaults to `html`. `mediaType` is `text/html` or `text/markdown`. `content` is the response body as text, including a leading UTF-8 BOM when the stored HTML has one. HTML requests omit the format query. Markdown requests use `?format=markdown`. The HTTP success body stays raw text; this object is the client result, not a second JSON envelope from the API.
 
 baseUrl is the API origin, without /api/v1. The client appends route paths, uses multipart FormData, maps the documented envelopes, and exposes errors with status/code/message. Do not manually set a multipart boundary. Allow fetch injection for contract tests. No credentials or auth plugin are needed.
 
@@ -187,6 +193,7 @@ pnpm factrove get <artifact-id> --format markdown --json
 pnpm factrove get <artifact-id> --api-url http://localhost:3001
 ```
 
+- When a CLI choice is unclear, follow the AWS S3 CLI (`aws s3`): command names, argument order, flag names, and output style. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout. `upload` and `get` stay under those names.
 - API origin precedence: --api-url, FACTROVE_API_URL, default http://localhost:3001. `upload` and `get` share it.
 - Access defaults to private. `--access` is only valid for `upload`.
 - `--format html|markdown` is only valid for `get` and defaults to `html`.

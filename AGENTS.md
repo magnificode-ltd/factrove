@@ -24,6 +24,10 @@ Documentation follows these roles: README.md provides long-term codebase documen
 - [prd/mvp_contract.md](prd/mvp_contract.md) defines the shared HTTP and package contracts.
 - [prd/mvp/done/](prd/mvp/done/) contains completed task briefs and handoff notes.
 
+## CLI
+
+When the CLI interface is in doubt, follow the AWS S3 CLI (`aws s3`): command names, argument order, flag names, and output style. The current commands are `upload` and `get`. `get <id>` writes the artifact to stdout, in the same role as `aws s3 cp s3://bucket/key -`.
+
 ## Tooling
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-workspace.yaml`. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.

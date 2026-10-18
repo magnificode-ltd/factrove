@@ -259,6 +259,18 @@ describe("factrove get", () => {
   const html = "<h1>Hi</h1>";
   const markdown = "# Hi\n";
 
+  it("prints a leading HTML byte order mark", async () => {
+    const html = "\uFEFF<p>Hi</p>";
+    const stub = await startStub(() => ({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: html,
+    }));
+    const stdout = await runCliBytes(["get", artifactId, "--api-url", stub.url]);
+    expect(stdout.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    expect(stdout.subarray(3).toString("utf8")).toBe("<p>Hi</p>");
+  });
+
   it("prints stored HTML exactly and does not add a trailing newline", async () => {
     const stub = await startStub((request) => {
       expect(request.method).toBe("GET");
@@ -496,6 +508,39 @@ type CliResult = {
 
 function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<CliResult> {
   return runCommand(process.execPath, [cliPath, ...args], options?.cwd ?? repoRoot, options?.env);
+}
+
+function runCliBytes(args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.FACTROVE_API_URL;
+    delete env.INIT_CWD;
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Command timed out"));
+    }, 20_000);
+    child.stdout.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`CLI exited ${code}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+  });
 }
 
 function runCommand(command: string, args: string[], cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {

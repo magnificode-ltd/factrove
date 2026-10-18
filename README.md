@@ -62,7 +62,9 @@ apps/api/
 │   │       └── s3.provider.ts
 │   └── rendering/
 │       ├── html-policy.ts            # HTML validation/delivery policy
-│       └── html-to-markdown.ts       # On-request HTML to Markdown conversion
+│       ├── html-to-markdown.ts       # Linear HTML to Markdown conversion
+│       ├── html-to-markdown.worker.ts
+│       └── convert-html-to-markdown.ts # Worker time and memory limits
 └── test/
     └── database.integration.test.ts
 ```
@@ -71,7 +73,7 @@ Backend code is grouped by responsibility, with concrete persistence classes und
 
 `AppModule` imports `DatabaseModule` once. Its `@Global()` declaration and exported `PrismaService` and repositories make those providers injectable throughout the backend. `ApiModule` registers controllers and imports `ServicesModule`; `ServicesModule` registers application services and imports `StorageModule` for file operations. The schema-generation and seed commands are standalone entry points with their own client lifecycle.
 
-Storage implementations belong in `storage/providers/` behind the backend-local `BlobStore` interface. Additional cloud providers can follow that convention. Database repositories use PostgreSQL directly through Prisma, without a pluggable database-provider layer. `rendering/` holds browser-content validation and delivery policy; the browser renders the artifact itself.
+Storage implementations belong in `storage/providers/` behind the backend-local `BlobStore` interface. Additional cloud providers can follow that convention. Database repositories use PostgreSQL directly through Prisma, without a pluggable database-provider layer. `rendering/` holds browser-content validation and delivery policy. The browser renders the artifact itself. Markdown conversion runs in a worker thread with time, memory, and output limits.
 
 ## Architecture
 

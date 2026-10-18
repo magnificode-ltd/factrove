@@ -150,6 +150,20 @@ describe("Factrove API client", () => {
     });
   });
 
+  it("keeps a leading byte order mark in HTML content", async () => {
+    const content = "\uFEFF<h1>Hello</h1>";
+    const fetchStub = vi.fn(async () => new Response(content, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" }
+    }));
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+    await expect(client.getArtifactContent(artifact.id)).resolves.toEqual({
+      format: "html",
+      mediaType: "text/html",
+      content
+    });
+  });
+
   it("maps fetch/network failures without inventing an HTTP status", async () => {
     const client = createFactroveClient({
       baseUrl: "http://localhost:3001",

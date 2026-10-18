@@ -9,7 +9,8 @@ import {
   type ContentFormat,
 } from "@factrove/contracts";
 import { ArtifactsRepository, type ArtifactRecord } from "../database/index.js";
-import { htmlToMarkdown, readBoundedHtml } from "../rendering/html-to-markdown.js";
+import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
+import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
@@ -116,7 +117,7 @@ export class ArtifactsService {
 
     try {
       const bytes = await readBoundedHtml(stored.body);
-      const markdown = htmlToMarkdown(decodeUtf8(bytes));
+      const markdown = await convertHtmlToMarkdown(decodeUtf8(bytes));
       return { format: "markdown", body: Buffer.from(markdown, "utf8") };
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
@@ -124,6 +125,10 @@ export class ArtifactsService {
       }
       if (error instanceof BlobStoreUnavailableError || error instanceof ApiErrorException) {
         throw error;
+      }
+      const conversion = markdownConversionError(error);
+      if (conversion) {
+        throw conversion;
       }
       this.logger.error("Could not convert artifact HTML to Markdown");
       this.logger.error(error instanceof Error ? error.message : "Unknown conversion error");
@@ -192,9 +197,28 @@ export type OpenedArtifactContent =
 function decodeUtf8(bytes: Uint8Array): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (error) {
-    throw new Error("Artifact HTML is not valid UTF-8.", { cause: error });
+  } catch {
+    throw new ApiErrorException(400, "INVALID_REQUEST", "Artifact HTML is not valid UTF-8.");
   }
+}
+
+function markdownConversionError(error: unknown): ApiErrorException | undefined {
+  if (!(error instanceof HtmlConversionError) || error.limit === undefined) {
+    return undefined;
+  }
+  if (error.limit === "input") {
+    return new ApiErrorException(413, "CONTENT_TOO_LARGE", "HTML exceeds the Markdown conversion limit.");
+  }
+  if (error.limit === "time") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML took too long to convert to Markdown.");
+  }
+  if (error.limit === "memory") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML used too much memory to convert to Markdown.");
+  }
+  if (error.limit === "output") {
+    return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "Markdown output exceeds the conversion limit.");
+  }
+  return new ApiErrorException(422, "CONTENT_TOO_COMPLEX", "HTML is too complex to convert to Markdown.");
 }
 
 function formFields(body: unknown): Record<string, unknown> {

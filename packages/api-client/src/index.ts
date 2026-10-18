@@ -140,7 +140,8 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       });
     }
     try {
-      return await response.text();
+      const bytes = await response.arrayBuffer();
+      return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
     } catch {
       throw new FactroveApiError("The API returned an invalid content response", {
         status: response.status,

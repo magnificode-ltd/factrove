@@ -525,7 +525,7 @@ describe("HTTP API", () => {
     const markdownBytes = new Uint8Array(await markdown.arrayBuffer());
     const markdownText = new TextDecoder().decode(markdownBytes);
     expect(markdownText).toContain("# Notes");
-    expect(markdownText).toContain("[docs](https://example.com/docs)");
+    expect(markdownText).toContain("[docs](<https://example.com/docs>)");
     expect(markdownText).not.toContain("SECRETTOKEN");
     expect(markdownText).not.toContain("<script");
     expectMarkdownHeaders(markdown.headers, markdownBytes.byteLength);
@@ -538,6 +538,30 @@ describe("HTTP API", () => {
     const upper = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id.toUpperCase()}/content?format=markdown`);
     expect(upper.status).toBe(200);
     expect(await upper.text()).toBe(markdownText);
+  });
+
+  it("returns stored HTML bytes, including a leading BOM, for format=html", async () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("<p>Hi</p>", "utf8")]);
+    const artifact = await upload(baseUrl, "bom.html", bytes);
+    const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=html`);
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    expectHtmlHeaders(response.headers);
+  });
+
+  it("returns CONTENT_TOO_COMPLEX when Markdown output exceeds the conversion limit", async () => {
+    const html = `<p>${"<".repeat(4_500_000)}</p>`;
+    const artifact = await upload(baseUrl, "wide.html", Buffer.from(html, "utf8"));
+    const started = Date.now();
+    const response = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content?format=markdown`);
+    expect(response.status).toBe(422);
+    expect(await errorOf(response)).toEqual({
+      code: "CONTENT_TOO_COMPLEX",
+      message: "Markdown output exceeds the conversion limit.",
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const health = await fetch(`${baseUrl}/api/v1/health`);
+    expect(health.status).toBe(200);
   });
 
   it("rejects an unknown content format and keeps markdown failures as JSON", async () => {

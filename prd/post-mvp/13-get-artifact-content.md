@@ -12,21 +12,23 @@ The content format on `GET /api/v1/artifacts/{id}/content`, the shared contract 
 
 ## Behavior
 
-- Omitted `format`, and `format=html`, return the original HTML bytes and the existing HTML headers. `Accept` does not select a format.
-- `format=markdown` reads the stored HTML, strips scripts, styles, and unsafe URLs, and converts the document with `node-html-markdown` 2.0.0. The response is `text/markdown; charset=utf-8` with a CSP that does not allow scripts.
-- Any other `format` is `400 INVALID_REQUEST`. Unknown ids stay `404 ARTIFACT_NOT_FOUND`. Storage failures stay `503 STORAGE_UNAVAILABLE`. Conversion failures, including documents over 10 MiB or nested deeply enough to overflow the converter, are `500 INTERNAL_ERROR` and leave the stored artifact unchanged.
+- Omitted `format`, and `format=html`, return the original HTML bytes and the existing HTML headers. `Accept` does not select a format. A leading UTF-8 BOM stays in the HTML body. `getArtifactContent` decodes that body with the BOM preserved, and `pnpm factrove get` writes those bytes to stdout.
+- `format=markdown` reads the stored HTML and converts it in a worker thread. The converter parses with `parse5` and emits CommonMark in one pass. `node-html-markdown` is not used: its translator is quadratic and emitted decoded text as raw Markdown, so escaped HTML and `<javascript:…>` became live markup. The response is `text/markdown; charset=utf-8` with a CSP that does not allow scripts.
+- Text is escaped, link text and image alt escape `[`, `]`, and `\`, and code fences are longer than any backtick run in the code. Destinations allow `http`, `https`, `mailto`, and relative URLs. `javascript:`, `vbscript:`, `data:`, and other schemes are removed. Remote `https` images are kept, so another renderer may fetch them.
+- Nesting deeper than 100 levels is flattened. Output is capped at 16 MiB. The worker is limited to 5 seconds and 256 MiB of old-generation heap. A stored object above the 10 MiB HTML limit is `413 CONTENT_TOO_LARGE`. Time, memory, and output limits are `422 CONTENT_TOO_COMPLEX`. Invalid UTF-8 is `400 INVALID_REQUEST`. An unexpected converter failure is `500 INTERNAL_ERROR`. The stored artifact is unchanged.
+- Any other `format` is `400 INVALID_REQUEST`. Unknown ids stay `404 ARTIFACT_NOT_FOUND`. Storage failures stay `503 STORAGE_UNAVAILABLE`.
 - `contentUrl` remains the HTML URL. The viewer iframe is unchanged.
-- The CLI command is `pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>]`. Plain output is the content. `--json` prints `{ format, mediaType, content }` on one line. Origin precedence, stderr errors, and exit behavior match `upload`.
+- The CLI command is `pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>]`. Plain output is the content. `--json` prints `{ format, mediaType, content }` on one line. Origin precedence, stderr errors, and exit behavior match `upload`. CLI shape follows the AWS S3 CLI where a choice is unclear: `get` streams to stdout the way `aws s3 cp s3://bucket/key -` does.
 
 ## Verification
 
-`pnpm --filter @factrove/api exec vitest run test/html-to-markdown.test.ts` covers headings, lists, tables, fenced code, links, the hello fixture, script/style/comment removal, unsafe URLs, malformed fragments, the size limit, and deep nesting.
+`pnpm --filter @factrove/api exec vitest run test/html-to-markdown.test.ts` covers headings, lists, tables, fenced code, links, ordered-list start, multi-paragraph items, the hello fixture, script and unsafe-URL removal, malformed fragments, the size and output limits, deep lists and blockquotes, a large flat document, and worker responsiveness. Safety cases are rendered with `marked` and `markdown-it` (`html: true`) and must not produce a script, an event-handler attribute, an iframe, or a `javascript:`, `vbscript:`, or `data:text` URL.
 
-HTTP coverage is in `apps/api/test/http.integration.test.ts` against PostgreSQL with `BLOB_STORE` overridden. It checks byte-identical HTML, an `Accept: text/markdown` request that still returns HTML, Markdown output and headers, invalid formats, a missing id, and a storage failure. The live S3 content test was not run. This environment has no AWS credential chain, and `S3_INTEGRATION` was unset, so `content.s3.integration.test.ts` stays skipped.
+HTTP coverage is in `apps/api/test/http.integration.test.ts` against PostgreSQL with `BLOB_STORE` overridden. It checks byte-identical HTML, a leading BOM, an `Accept: text/markdown` request that still returns HTML, Markdown output and headers, invalid formats, a missing id, a storage failure, and `422 CONTENT_TOO_COMPLEX` when Markdown output exceeds 16 MiB. The live S3 content test was not run. This environment has no AWS credential chain, and `S3_INTEGRATION` was unset, so `content.s3.integration.test.ts` stays skipped.
 
-`packages/api-client/test/client.test.ts` checks the default HTML URL, the Markdown query, id encoding, error envelopes, and an unexpected content type.
+`packages/api-client/test/client.test.ts` checks the default HTML URL, the Markdown query, id encoding, a preserved BOM, error envelopes, and an unexpected content type.
 
-`pnpm --filter @factrove/cli test` checks argument parsing and the compiled `get` command against a local HTTP stub, including plain and JSON output, origin precedence, API 404s, an unreachable API, a rejected id, and `pnpm factrove get` from the repository root.
+`pnpm --filter @factrove/cli test` checks argument parsing and the compiled `get` command against a local HTTP stub, including plain and JSON output, a leading BOM, origin precedence, API 404s, an unreachable API, a rejected id, and `pnpm factrove get` from the repository root.
 
 The web viewer does not add a Copy as Markdown action. The viewer still embeds `contentUrl` in the sandboxed iframe, and a clipboard action would be a new client interaction. The same content endpoint is available for that later.
 
