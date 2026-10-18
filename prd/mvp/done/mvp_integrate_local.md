@@ -104,8 +104,8 @@ Task 08 owns these checks.
 
 ### Review follow-up, October 18, 2026
 
-- `pnpm dev` treats SIGHUP like SIGTERM, stops the other app when one exits, and signals remaining child process groups on exit.
-- On that exit it restores `apps/web/next-env.d.ts` if Next.js rewrote the committed file.
+- `pnpm dev` treats SIGHUP like SIGTERM, stops the other app when one exits, and signals remaining child process groups on exit. A supervisor test sends SIGHUP and checks that both child processes are gone. Another checks that one child exiting stops the other.
+- On that exit it restores `apps/web/next-env.d.ts` if Next.js rewrote the committed file. A Next.js dev process on port 3011 rewrote the file to `.next/dev/types`, and SIGHUP restored the committed text.
 - `pnpm infra:reset` asks for `yes` in a terminal and refuses otherwise unless `--yes` is passed. The volume delete still does not remove S3 objects.
 - The CLI no longer reads `INIT_CWD`. The launcher still applies it as the child working directory.
 
