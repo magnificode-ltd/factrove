@@ -4,7 +4,7 @@
 
 Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and a configured AWS S3 bucket persists artifact bytes. No Factrove authentication or API keys are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–05 are complete; the remaining briefs are implementation assignments. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–06 are complete; the remaining briefs are implementation assignments. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 
@@ -17,7 +17,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 | 03 | [Storage](mvp/done/mvp_build_storage.md) | Done | API src/storage and storage-focused tests | 01 baseline |
 | 04 | [Backend](mvp/done/mvp_build_backend.md) | Done | API bootstrap, controllers, services, rendering | 01; 02/03 interfaces, implementations for final verification |
 | 05 | [Frontend](mvp/done/mvp_build_frontend.md) | Done | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
-| 06 | [CLI](mvp_build_cli.md) | Not started | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
+| 06 | [CLI](mvp/done/mvp_build_cli.md) | Done | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
 | 07 | [Local runtime and integration](mvp_integrate_local.md) | Not started | compose.yaml, .env.example, setup docs/scripts, integration checks, shared lockfile reconciliation | 01 to start; 02–06 to finish |
 
 ## Parallel execution
@@ -56,4 +56,4 @@ Use Artifact as the custom product table alongside the schema required by Better
 - [ ] Root build/typecheck and the targeted checks documented by each task pass.
 - [ ] Setup instructions distinguish unauthenticated list classifications from actual access control.
 
-Tasks 01–05 are complete. Tasks 06–07 have not been dispatched or marked complete.
+Tasks 01–06 are complete. Task 07 has not been dispatched or marked complete.

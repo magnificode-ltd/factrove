@@ -115,10 +115,19 @@ After building, application-level commands are:
 ```sh
 pnpm --filter @factrove/web dev
 pnpm --filter @factrove/api dev
-pnpm --filter @factrove/cli start
+pnpm factrove upload ./fixtures/hello.html
 ```
 
-The web development command uses Next.js dev mode. The API development command currently compiles once and starts Node. The CLI starts a standalone Nest context and exits when its work is complete. Application feature coverage and local-stack setup progress are tracked in the PRDs.
+The web development command uses Next.js dev mode. The API development command currently compiles once and starts Node. `pnpm factrove` runs the upload CLI against the HTTP API. The CLI only needs the API origin.
+
+```sh
+pnpm factrove upload ./fixtures/hello.html
+pnpm factrove upload ./report.html --access org_shared --json
+pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
+pnpm factrove upload --help
+```
+
+The API origin comes from `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`. Access defaults to `private`. Plain success prints only the viewer URL. `--json` prints the `{ artifact }` response envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script command it runs to stderr; the CLI leaves stdout free of Nest startup logs. Application feature coverage and local-stack setup progress are tracked in the PRDs.
 
 ## Database changes
 
