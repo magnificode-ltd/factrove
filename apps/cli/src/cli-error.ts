@@ -27,5 +27,5 @@ function failurePayload(error: unknown): { code: string; message: string } {
   if (error instanceof Error && error.message.trim().length > 0) {
     return { code: "INTERNAL_ERROR", message: error.message };
   }
-  return { code: "INTERNAL_ERROR", message: "The upload failed." };
+  return { code: "INTERNAL_ERROR", message: "The command failed." };
 }

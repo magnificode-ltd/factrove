@@ -6,10 +6,12 @@ import {
   type AccessType,
   type ArtifactDto,
   type ArtifactView,
+  type ContentFormat,
 } from "@factrove/contracts";
 import { ArtifactsRepository, type ArtifactRecord } from "../database/index.js";
+import { htmlToMarkdown, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
-import { BLOB_STORE, BlobNotFoundError, type BlobStore } from "../storage/index.js";
+import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
 import { LocalActorService } from "./local-actor.service.js";
@@ -97,16 +99,35 @@ export class ArtifactsService {
     return this.toDto(record);
   }
 
-  async openContent(id: string): Promise<{ sizeBytes: number; body: AsyncIterable<Uint8Array> }> {
+  async openContent(id: string, format: ContentFormat): Promise<OpenedArtifactContent> {
     const record = await this.requireRecord(id);
+    let stored: { body: AsyncIterable<Uint8Array> };
     try {
-      const stored = await this.blobs.get(artifactObjectKey(record.id));
-      return { sizeBytes: record.sizeBytes, body: stored.body };
+      stored = await this.blobs.get(artifactObjectKey(record.id));
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
         throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
       }
       throw error;
+    }
+    if (format === "html") {
+      return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+    }
+
+    try {
+      const bytes = await readBoundedHtml(stored.body);
+      const markdown = htmlToMarkdown(decodeUtf8(bytes));
+      return { format: "markdown", body: Buffer.from(markdown, "utf8") };
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) {
+        throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+      }
+      if (error instanceof BlobStoreUnavailableError || error instanceof ApiErrorException) {
+        throw error;
+      }
+      this.logger.error("Could not convert artifact HTML to Markdown");
+      this.logger.error(error instanceof Error ? error.message : "Unknown conversion error");
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
   }
 
@@ -161,6 +182,18 @@ export class ArtifactsService {
       this.logger.error("Could not remove an object after a failed upload");
       this.logger.error(error instanceof Error ? error.message : "Unknown error");
     }
+  }
+}
+
+export type OpenedArtifactContent =
+  | { format: "html"; sizeBytes: number; body: AsyncIterable<Uint8Array> }
+  | { format: "markdown"; body: Buffer };
+
+function decodeUtf8(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw new Error("Artifact HTML is not valid UTF-8.", { cause: error });
   }
 }
 

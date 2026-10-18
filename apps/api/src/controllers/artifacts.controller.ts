@@ -1,8 +1,15 @@
 import { Readable } from "node:stream";
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { artifactDtoSchema, artifactViewSchema, type ArtifactEnvelope, type ArtifactListEnvelope } from "@factrove/contracts";
-import { htmlContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
+import {
+  artifactDtoSchema,
+  artifactViewSchema,
+  contentFormatSchema,
+  type ArtifactEnvelope,
+  type ArtifactListEnvelope,
+  type ContentFormat,
+} from "@factrove/contracts";
+import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
 import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
 import { ApiErrorException, type ApiErrorCode } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
@@ -48,9 +55,17 @@ export class ArtifactsController {
   @Get(":id/content")
   async content(
     @Param("id") id: string,
+    @Query("format") format: unknown,
     @Res({ passthrough: true }) response: HeaderResponse,
   ): Promise<StreamableFile> {
-    const opened = await this.artifacts.openContent(parseArtifactId(id));
+    const requested = parseContentFormat(format);
+    const opened = await this.artifacts.openContent(parseArtifactId(id), requested);
+    if (opened.format === "markdown") {
+      for (const [name, value] of markdownContentHeaders(opened.body.byteLength)) {
+        response.setHeader(name, value);
+      }
+      return new StreamableFile(opened.body);
+    }
     for (const [name, value] of htmlContentHeaders(this.config.webOrigin, opened.sizeBytes)) {
       response.setHeader(name, value);
     }
@@ -82,6 +97,17 @@ export class ArtifactsController {
     const artifact = await this.artifacts.getById(parseArtifactId(id));
     return { artifact };
   }
+}
+
+function parseContentFormat(value: unknown): ContentFormat {
+  if (value === undefined) {
+    return "html";
+  }
+  const parsed = contentFormatSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", "format must be html or markdown.");
+  }
+  return parsed.data;
 }
 
 function parseView(value: unknown): "mine" | "org" {

@@ -1,5 +1,6 @@
 export const MAX_HTML_BYTES = 10_485_760;
 export const HTML_CONTENT_TYPE = "text/html; charset=utf-8";
+export const MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
 const HTML_EXTENSION = /\.(html|htm)$/i;
 
@@ -41,6 +42,34 @@ export function htmlContentHeaders(webOrigin: string, sizeBytes: number): Array<
     ["X-Content-Type-Options", "nosniff"],
     ["Referrer-Policy", "no-referrer"],
     ["Content-Security-Policy", contentSecurityPolicy(webOrigin)],
+  ];
+}
+
+export function markdownContentSecurityPolicy(): string {
+  return [
+    "sandbox",
+    "default-src 'none'",
+    "script-src 'none'",
+    "style-src 'none'",
+    "img-src 'none'",
+    "font-src 'none'",
+    "connect-src 'none'",
+    "form-action 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+export function markdownContentHeaders(sizeBytes: number): Array<[string, string]> {
+  return [
+    ["Content-Type", MARKDOWN_CONTENT_TYPE],
+    ["Content-Length", String(sizeBytes)],
+    ["Cache-Control", "no-store"],
+    ["X-Content-Type-Options", "nosniff"],
+    ["Referrer-Policy", "no-referrer"],
+    ["Content-Security-Policy", markdownContentSecurityPolicy()],
   ];
 }
 

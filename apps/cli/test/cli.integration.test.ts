@@ -255,6 +255,118 @@ describe("factrove upload", () => {
   });
 });
 
+describe("factrove get", () => {
+  const html = "<h1>Hi</h1>";
+  const markdown = "# Hi\n";
+
+  it("prints stored HTML exactly and does not add a trailing newline", async () => {
+    const stub = await startStub((request) => {
+      expect(request.method).toBe("GET");
+      expect(request.url).toBe(`/api/v1/artifacts/${artifactId}/content`);
+      return { status: 200, contentType: "text/html; charset=utf-8", body: html };
+    });
+    const result = await runCli(["get", artifactId, "--api-url", stub.url]);
+
+    expect(result.code).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(html);
+    expect(result.stdout).not.toMatch(/Nest|ERROR|LOG/);
+    expect(stub.requests).toHaveLength(1);
+  });
+
+  it("requests Markdown and prints one JSON line when asked", async () => {
+    const stub = await startStub((request) => {
+      expect(request.url).toBe(`/api/v1/artifacts/${artifactId}/content?format=markdown`);
+      return { status: 200, contentType: "text/markdown; charset=utf-8", body: markdown };
+    });
+    const plain = await runCli(["get", artifactId, "--format", "markdown", "--api-url", stub.url]);
+    expect(plain.code).toBe(0);
+    expect(plain.stderr).toBe("");
+    expect(plain.stdout).toBe(markdown);
+
+    const json = await runCli(["--json", "get", artifactId, "--format=markdown", "--api-url", stub.url]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(json.stdout).toBe(
+      `${JSON.stringify({ format: "markdown", mediaType: "text/markdown", content: markdown })}\n`,
+    );
+    expect(JSON.parse(json.stdout)).toEqual({ format: "markdown", mediaType: "text/markdown", content: markdown });
+    expect(stub.requests).toHaveLength(2);
+  });
+
+  it("prefers --api-url over FACTROVE_API_URL", async () => {
+    const selected = await startStub(() => ({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: html,
+    }));
+    const ignored = await startStub(() => {
+      throw new Error("FACTROVE_API_URL was used instead of --api-url");
+    });
+    const result = await runCli(["get", artifactId, "--api-url", `${selected.url}/api/v1`], {
+      env: { FACTROVE_API_URL: ignored.url },
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(html);
+    expect(selected.requests).toHaveLength(1);
+    expect(ignored.requests).toHaveLength(0);
+  });
+
+  it("passes API errors through and reports an unreachable API", async () => {
+    let calls = 0;
+    const stub = await startStub(() => {
+      calls += 1;
+      return {
+        status: 404,
+        body: { error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } },
+      };
+    });
+    const missing = await runCli(["get", artifactId, "--api-url", stub.url]);
+    expect(missing.code).toBe(1);
+    expect(missing.stdout).toBe("");
+    expect(missing.stderr).toBe("ARTIFACT_NOT_FOUND: Artifact was not found.\n");
+    expect(calls).toBe(1);
+
+    const json = await runCli(["get", artifactId, "--json", "--api-url", stub.url, "--format", "markdown"]);
+    expect(json.stdout).toBe("");
+    expect(JSON.parse(json.stderr)).toEqual({
+      error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." },
+    });
+    expect(calls).toBe(2);
+
+    const port = await closedPort();
+    const offline = await runCli(["get", artifactId, "--api-url", `http://127.0.0.1:${port}`]);
+    expect(offline.stdout).toBe("");
+    expect(offline.stderr).toBe(`NETWORK_ERROR: Could not reach the Factrove API at http://127.0.0.1:${port}.\n`);
+  });
+
+  it("rejects a bad id locally and runs through pnpm factrove", async () => {
+    const port = await closedPort();
+    const invalid = await runCli(["get", "not-a-uuid", "--api-url", `http://127.0.0.1:${port}`, "--json"]);
+    expect(invalid.code).toBe(1);
+    expect(invalid.stdout).toBe("");
+    expect(JSON.parse(invalid.stderr)).toEqual({
+      error: { code: "INVALID_INPUT", message: "Artifact id must be a UUID." },
+    });
+
+    const stub = await startStub(() => ({
+      status: 200,
+      contentType: "text/markdown; charset=utf-8",
+      body: markdown,
+    }));
+    const result = await runCommand(
+      "pnpm",
+      ["factrove", "get", artifactId, "--format", "markdown", "--api-url", stub.url],
+      repoRoot,
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(markdown);
+    expect(result.stderr.split("\n").filter((line) => line.length > 0).every((line) => line.startsWith("$ "))).toBe(true);
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/content?format=markdown`);
+  });
+});
+
 function accepted(sizeBytes: number, accessType: "private" | "org_shared" = "private") {
   return { status: 201, body: created(sizeBytes, accessType) };
 }
@@ -278,8 +390,14 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
   };
 }
 
+type StubResult = {
+  status: number;
+  body: unknown;
+  contentType?: string;
+};
+
 async function startStub(
-  respond: (request: CapturedRequest) => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>,
+  respond: (request: CapturedRequest) => StubResult | Promise<StubResult>,
 ): Promise<Stub> {
   const requests: CapturedRequest[] = [];
   const server = createServer((message, response) => {
@@ -287,8 +405,10 @@ async function startStub(
       requests.push(request);
       try {
         const result = await respond(request);
-        response.writeHead(result.status, { "content-type": "application/json" });
-        response.end(JSON.stringify(result.body));
+        const contentType = result.contentType ?? "application/json";
+        const payload = contentType.startsWith("application/json") ? JSON.stringify(result.body) : String(result.body);
+        response.writeHead(result.status, { "content-type": contentType });
+        response.end(payload);
       } catch (error) {
         response.writeHead(500, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: { code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : "stub failed" } }));

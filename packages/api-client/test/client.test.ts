@@ -87,6 +87,69 @@ describe("Factrove API client", () => {
     await expect(successClient.listArtifacts()).rejects.toMatchObject({ code: "INVALID_RESPONSE", status: 200 });
   });
 
+  it("reads stored HTML by default and Markdown when format is requested", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      const markdown = String(input).includes("format=markdown");
+      return new Response(markdown ? "# Hello\n" : "<h1>Hello</h1>", {
+        status: 200,
+        headers: { "content-type": markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8" }
+      });
+    });
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+
+    await expect(client.getArtifactContent(artifact.id)).resolves.toEqual({
+      format: "html",
+      mediaType: "text/html",
+      content: "<h1>Hello</h1>"
+    });
+    await expect(client.getArtifactContent(artifact.id, { format: "html" })).resolves.toEqual({
+      format: "html",
+      mediaType: "text/html",
+      content: "<h1>Hello</h1>"
+    });
+    await expect(client.getArtifactContent(artifact.id, { format: "markdown" })).resolves.toEqual({
+      format: "markdown",
+      mediaType: "text/markdown",
+      content: "# Hello\n"
+    });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      `http://localhost:3001/api/v1/artifacts/${artifact.id}/content`,
+      `http://localhost:3001/api/v1/artifacts/${artifact.id}/content`,
+      `http://localhost:3001/api/v1/artifacts/${artifact.id}/content?format=markdown`
+    ]);
+    expect(calls.every((call) => call.init?.method === "GET")).toBe(true);
+  });
+
+  it("encodes the artifact id and maps content errors", async () => {
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("missing")) {
+        return jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } }, 404);
+      }
+      return new Response("plain", { status: 200, headers: { "content-type": "text/plain" } });
+    });
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001/api/v1", fetch: fetchStub as typeof fetch });
+
+    await expect(client.getArtifactContent("missing id", { format: "markdown" })).rejects.toMatchObject({
+      name: "FactroveApiError",
+      status: 404,
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found."
+    });
+    expect(fetchStub).toHaveBeenCalledWith(
+      "http://localhost:3001/api/v1/artifacts/missing%20id/content?format=markdown",
+      { method: "GET" }
+    );
+
+    await expect(client.getArtifactContent(artifact.id)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      status: 200,
+      message: "The API returned an unexpected content type"
+    });
+  });
+
   it("maps fetch/network failures without inventing an HTTP status", async () => {
     const client = createFactroveClient({
       baseUrl: "http://localhost:3001",

@@ -3,6 +3,7 @@ import { CliError } from "../src/cli-error.js";
 import { cliWantsJson, DEFAULT_API_URL, parseCliArgs } from "../src/parse-args.js";
 
 const file = "./report.html";
+const artifactId = "123e4567-e89b-42d3-a456-426614174000";
 
 describe("CLI argument parsing", () => {
   it("defaults access to private and the API origin to localhost", () => {
@@ -69,6 +70,52 @@ describe("CLI argument parsing", () => {
     expect(cliWantsJson(["upload", file, "--api-url", "http://127.0.0.1:3001", "--json"])).toBe(true);
     expect(cliWantsJson(["upload", file, "--", "--json"])).toBe(false);
     expect(cliWantsJson(["upload", file])).toBe(false);
+    expect(cliWantsJson(["get", artifactId, "--format", "markdown", "--json"])).toBe(true);
+    expect(cliWantsJson(["get", artifactId, "--format", "markdown"])).toBe(false);
+  });
+});
+
+describe("factrove get arguments", () => {
+  it("defaults format to html and the API origin to localhost", () => {
+    expect(parseCliArgs(["get", artifactId], {})).toEqual({
+      kind: "get",
+      id: artifactId,
+      format: "html",
+      json: false,
+      apiUrl: DEFAULT_API_URL,
+    });
+  });
+
+  it("accepts markdown, json, and the same API origin precedence as upload", () => {
+    expect(parseCliArgs(["--json", "get", "--format", "markdown", artifactId], {})).toMatchObject({
+      kind: "get",
+      id: artifactId,
+      format: "markdown",
+      json: true,
+      apiUrl: DEFAULT_API_URL,
+    });
+    expect(parseCliArgs(["get", artifactId, "--format=html", "--api-url", "http://127.0.0.1:4020"], {
+      FACTROVE_API_URL: "http://127.0.0.1:4010",
+    })).toMatchObject({
+      format: "html",
+      apiUrl: "http://127.0.0.1:4020",
+    });
+    expect(parseCliArgs(["get", artifactId.toUpperCase()], { FACTROVE_API_URL: "http://127.0.0.1:4010" })).toMatchObject({
+      id: artifactId.toUpperCase(),
+      apiUrl: "http://127.0.0.1:4010",
+    });
+  });
+
+  it("rejects incomplete, conflicting, and unknown get invocations", () => {
+    expect(failure(["get"], {}).message).toMatch(/Missing artifact id/);
+    expect(failure(["get", "not-a-uuid"], {}).message).toMatch(/UUID/);
+    expect(failure(["get", artifactId, "extra"], {}).message).toMatch(/extra arguments/);
+    expect(failure(["get", artifactId, "--format"], {}).message).toMatch(/Missing value for --format/);
+    expect(failure(["get", artifactId, "--format", "md"], {}).message).toMatch(/html or markdown/);
+    expect(failure(["get", artifactId, "--format", "markdown", "--format", "html"], {}).message).toMatch(/more than once/);
+    expect(failure(["get", artifactId, "--access", "private"], {}).message).toMatch(/only valid for the upload command/);
+    expect(failure(["upload", file, "--format", "markdown"], {}).message).toMatch(/only valid for the get command/);
+    expect(failure(["--format", "help"], {}).message).toMatch(/html or markdown/);
   });
 });
 

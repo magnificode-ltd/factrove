@@ -61,7 +61,8 @@ apps/api/
 │   │   └── providers/
 │   │       └── s3.provider.ts
 │   └── rendering/
-│       └── html-policy.ts            # HTML validation/delivery policy
+│       ├── html-policy.ts            # HTML validation/delivery policy
+│       └── html-to-markdown.ts       # On-request HTML to Markdown conversion
 └── test/
     └── database.integration.test.ts
 ```
@@ -92,7 +93,7 @@ Better Auth connects to PostgreSQL through its official Prisma adapter: `databas
 
 Object storage is another backend-local module. Its S3 implementation uses the configured bucket and region, and `S3_ENDPOINT` when that variable selects an S3-compatible service. The small provider interface accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
 
-Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation and delivery policy.
+Uploaded HTML is rendered by the browser in an isolated viewer. The backend's rendering responsibility is content validation, delivery policy, and converting stored HTML to Markdown when a client asks for that format. Markdown is not stored.
 
 ## Local setup
 
@@ -152,9 +153,16 @@ pnpm factrove upload ./fixtures/hello.html
 pnpm factrove upload ./fixtures/hello.html --access org_shared --json
 pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
 pnpm factrove upload --help
+pnpm factrove get <artifact-id>
+pnpm factrove get <artifact-id> --format markdown
+pnpm factrove get <artifact-id> --format markdown --json
 ```
 
 Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
+
+`pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
+
+When a CLI choice is unclear, follow the AWS S3 CLI (`aws s3`): command names, argument order, flag names, and output style. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 
 `pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops the dev Compose project and deletes its PostgreSQL and Garage volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. That removes local metadata and local object bytes for the dev project. Objects in a real AWS bucket are outside these volumes and stay there. `pnpm e2e` deletes volumes only for its own Compose project, `factrove-e2e`.
 
