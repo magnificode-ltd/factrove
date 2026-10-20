@@ -18,6 +18,7 @@ export class AuthService implements OnModuleInit {
       baseURL: this.config.apiPublicOrigin,
       secret: this.config.authSecret,
       trustedOrigins: [this.config.webOrigin, this.config.apiPublicOrigin],
+      cookieDomain: this.config.authCookieDomain,
     });
   }
 

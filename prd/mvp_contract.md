@@ -9,13 +9,14 @@ This contract translates [the agreed MVP end state](../docs/MVP_END_STATE.md) in
 - API binds to `127.0.0.1` by default. The local PostgreSQL host port also binds to loopback.
 - One PostgreSQL database and one dedicated S3 bucket per installation.
 - NestJS API owns database and S3 credentials. Web/CLI only know HTTP origins.
-- `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies and content grants. The committed example is a placeholder, not a credential to reuse outside local development.
+- `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies. Content grants use a separate HMAC subkey, `HMAC-SHA256(BETTER_AUTH_SECRET, "factrove:content-grant:v1")`. The committed example is a placeholder, not a credential to reuse outside local development.
 - Explicit, idempotent local seed creates user `local-user` (Local User, `local@example.invalid`) and organization `local-org` (Local Organization, slug `local`) in the Better Auth-generated identity tables. That user has no password and cannot sign in. Seed does not create a membership.
-- `pnpm db:claim-local-artifacts -- --email you@example.com` reassigns artifacts whose creator is `local-user` to an account that can already sign in. Artifact ids stay the same. It adds a membership for each organization those artifacts reference when the account is not already a member. It refuses `local-user`, does nothing on a second run, and does not print secrets.
+- `pnpm db:claim-local-artifacts -- --email you@example.com` reassigns artifacts whose creator is `local-user` to an account that can already sign in. The account must have a credential row with a password. Artifact ids stay the same. It adds a membership for each organization those artifacts reference when the account is not already a member. It refuses `local-user`, an account with no password, and an unknown or ambiguous email. It does nothing on a second run and does not print secrets.
 - The API does not impersonate a configured local user. Collection routes require a session or an API key. `GET /api/v1/health` stays public.
 - Requests do not accept creator IDs or organization IDs. The API derives them from the signed-in user or the API-key owner.
 - Better Auth core + organization-plugin schema, including required supporting tables, is generated from `auth-schema.config.ts`. Runtime auth is a separate email/password configuration. It does not mount organization-plugin HTTP routes. Membership is enforced by reading the `member` table. There is no one-org uniqueness rule.
-- Email/password sign-in does not require email verification. There is no SSO. API keys use the Better Auth API key plugin `@better-auth/api-key` 1.7.7. The secret is shown once, and the plugin stores its SHA-256 digest as unpadded base64url.
+- Email/password sign-in does not require email verification. There is no SSO. Sign-in and sign-up are rate limited in every environment, including when `NODE_ENV` is not `production`: `/sign-in/email` and `/sign-up/email` allow 10 requests per 60 seconds. API keys use the Better Auth API key plugin `@better-auth/api-key` 1.7.7. The secret is shown once, and the plugin stores its SHA-256 digest as unpadded base64url. The API key plugin's own per-key rate limit stays off so a CLI session is not capped at ten requests per day.
+- The session cookie is host-only unless `AUTH_COOKIE_DOMAIN` is set to a parent domain such as `example.com`. Set it when the web app and API are on different hosts of that domain, for example `app.example.com` and `api.example.com`. Better Auth then sets the cookie `Domain` so the browser stores one session for both hosts. Leave it unset on localhost, where a cookie already ignores the port. The web server forwards the browser `Cookie` header to the API.
 
 ## Model reference
 
@@ -54,7 +55,7 @@ type ArtifactDto = {
   updatedAt: string;
   uploadedAt: string; // Set when the row is inserted after the object write succeeds.
   viewerUrl: string;  // WEB_ORIGIN + /artifacts/{id}
-  contentUrl: string; // API_PUBLIC_ORIGIN + /api/v1/artifacts/{id}/content?access=<grant>
+  contentUrl: string; // API_PUBLIC_ORIGIN + /api/v1/artifacts/{id}/content. Session detail appends ?access=<grant>
 };
 type ApiError = {
   error: { code: string; message: string };
@@ -75,13 +76,15 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/auth/api-key/list | Browser session | 200 `{ apiKeys, total }` without `key` |
 | POST /api/auth/api-key/delete | Browser session, JSON `{ keyId }` | 200 `{ success: true }` |
 
-`/api/auth/*` is Better Auth email/password sign-up, sign-in, sign-out, and API key management. It is outside the `/api/v1` prefix. Product routes accept `Authorization: Bearer <key>`. When that header is absent, they also accept `x-api-key`. The CLI sends `Authorization: Bearer`.
+`/api/auth/*` is Better Auth email/password sign-up, sign-in, sign-out, and API key management. It is outside the `/api/v1` prefix and is mounted once. Product routes accept `Authorization: Bearer <key>`. They do not accept `x-api-key` as a credential. A present `Authorization` or `x-api-key` header disables the content grant. The CLI sends `Authorization: Bearer`.
 
 The API builds absolute URLs from configuration, never an untrusted Host header. An unknown id, an unauthenticated read, and a read by someone who is not allowed all return the same `404 ARTIFACT_NOT_FOUND` body. List, upload, and context without credentials return `401 UNAUTHENTICATED`. A present `Authorization` header that is not a valid active key does not fall back to a session cookie.
 
 `private` is readable only by the creator. `org_shared` is readable by the creator and by members of `artifact.organizationId`. `org_shared` upload without a current organization is `400 ORGANIZATION_REQUIRED`.
 
-`contentUrl` is the HTML content URL plus an `access` grant so the sandboxed iframe can load it without cookies or `allow-same-origin`. The grant is an HMAC bound to the artifact id. It is not an API key. It is honored only when the request has no `Authorization` header. Clients that want Markdown add `format=markdown`. An invalid `format` is `400 INVALID_REQUEST`. `Accept` is not used to choose the format: a request with no `format` returns the original HTML bytes and the existing HTML headers, including when the caller sends `Accept: text/markdown`.
+`contentUrl` on list, upload, and API-key responses is the HTML content URL with no query. A session-authenticated `GET /api/v1/artifacts/{id}` appends `?access=<grant>` so the sandboxed iframe can load HTML without cookies or `allow-same-origin`. The grant is an HMAC-SHA256 of `artifactId.exp` under the content-grant subkey. It is not an API key. It lasts at most five minutes. It is honored only for HTML (`format` omitted or `format=html`), only for that artifact id, and only when the request has neither `Authorization` nor `x-api-key`. Markdown ignores it. An expired, missing, or ignored grant falls through to normal authentication and is `404 ARTIFACT_NOT_FOUND` when the caller cannot read the artifact. Clients that want Markdown add `format=markdown` and authenticate with a session or `Authorization: Bearer`. An invalid `format` is `400 INVALID_REQUEST`. `Accept` is not used to choose the format: a request with no `format` returns the original HTML bytes and the existing HTML headers, including when the caller sends `Accept: text/markdown`.
+
+A write that authenticates with a session cookie (`POST`, `PUT`, `PATCH`, `DELETE`, and any other method that is not `GET`, `HEAD`, or `OPTIONS`) requires `Origin` to equal `WEB_ORIGIN`. When `Origin` is absent, the `Referer` origin is used. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` A request that sends `Authorization` is not cookie-authenticated and skips this check. `x-api-key` does not authenticate and does not skip it.
 
 API key creation returns the secret once in `key`. List responses include the name and starting characters, not the secret. Deleting a key makes it fail closed. Managing keys requires a browser session. A request that also sends `Authorization` receives `401` with message `API key management requires a browser session.` and does not use the session cookie. Another user's key id is `404`. Key-management errors use Better Auth's response body.
 
@@ -114,6 +117,7 @@ Return the common JSON envelope without stack traces or secrets:
 | 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/format/ID, invalid UTF-8 |
 | 400 | ORGANIZATION_REQUIRED | org_shared without a current organization membership |
 | 401 | UNAUTHENTICATED | Missing session or API key on a product route |
+| 403 | FORBIDDEN | Cookie-authenticated write whose origin is not WEB_ORIGIN |
 | 413 | FILE_TOO_LARGE | Above 10 MiB |
 | 413 | CONTENT_TOO_LARGE | Stored HTML exceeds the Markdown conversion limit |
 | 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
@@ -212,8 +216,8 @@ pnpm factrove get <artifact-id> --api-url http://localhost:3001
 
 - When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 - API origin precedence: --api-url, FACTROVE_API_URL, the selected profile's `api_url`, then http://localhost:3001. `upload` and `get` share it.
-- API key precedence: FACTROVE_API_KEY, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`.
-- `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
+- API key precedence matches the AWS CLI. An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. Otherwise the key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`.
+- `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
 - Access defaults to private. `--access` is only valid for `upload`.
 - `--format html|markdown` is only valid for `get` and defaults to `html`.
 - Plain upload success prints only viewerUrl plus newline to stdout.

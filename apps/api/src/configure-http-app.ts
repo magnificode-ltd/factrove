@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { toNodeHandler } from "better-auth/node";
 import { AuthService } from "./auth/auth.service.js";
+import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
 
@@ -25,8 +26,17 @@ export function configureHttpApp(app: INestApplication): void {
     methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept", "Authorization"],
   });
-  // Registered after CORS so the browser can call /api/auth from the web origin.
-  // The handler is resolved per request because Better Auth is created in onModuleInit.
+  // Cookie-authenticated writes must come from the web origin. API-key calls send
+  // Authorization and skip this check. This runs before the body parser.
+  app.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
+    if (rejectCookieAuthenticatedWrite(request, response, config.webOrigin)) {
+      return;
+    }
+    next();
+  });
+  // The only Better Auth mount. Registered after CORS so the browser can call
+  // /api/auth from the web origin. The handler is resolved per request because
+  // Better Auth is created in onModuleInit.
   app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
     void toNodeHandler(auth.handler())(request, response);
   });

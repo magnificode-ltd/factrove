@@ -12,7 +12,7 @@ import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../data
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
-import { contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
+import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
@@ -80,7 +80,7 @@ export class ArtifactsService {
         sizeBytes: upload.bytes.byteLength,
         uploadedAt: new Date(),
       });
-      return this.toDto(record);
+      return this.toDto(record, false);
     } catch (error) {
       await this.deleteOrphan(id, objectKey);
       throw error;
@@ -94,16 +94,16 @@ export class ArtifactsService {
       userId: actor.user.id,
       organizationId: actor.organization?.id ?? null,
     });
-    return records.map((record) => this.toDto(record));
+    return records.map((record) => this.toDto(record, false));
   }
 
   async getById(request: HeaderSource, id: string): Promise<ArtifactDto> {
-    const record = await this.requireReadable(request, id, undefined);
-    return this.toDto(record);
+    const record = await this.requireReadable(request, id, undefined, "html");
+    return this.toDto(record, !this.actors.hasCredentialHeader(request));
   }
 
   async openContent(request: HeaderSource, id: string, format: ContentFormat, accessToken: unknown): Promise<OpenedArtifactContent> {
-    const record = await this.requireReadable(request, id, accessToken);
+    const record = await this.requireReadable(request, id, accessToken, format);
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
       stored = await this.blobs.get(artifactObjectKey(record.id));
@@ -138,12 +138,17 @@ export class ArtifactsService {
     }
   }
 
-  private async requireReadable(request: HeaderSource, id: string, accessToken: unknown): Promise<ArtifactRecord> {
+  private async requireReadable(
+    request: HeaderSource,
+    id: string,
+    accessToken: unknown,
+    format: ContentFormat,
+  ): Promise<ArtifactRecord> {
     const record = await this.artifacts.findById(id);
     if (!record) {
       throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
     }
-    if (this.grantAllows(accessToken, record.id) && !this.actors.hasAuthorizationHeader(request)) {
+    if (this.grantCanRead(request, accessToken, record.id, format)) {
       return record;
     }
     const actor = await this.actors.resolve(request);
@@ -151,6 +156,13 @@ export class ArtifactsService {
       throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
     }
     return record;
+  }
+
+  private grantCanRead(request: HeaderSource, accessToken: unknown, artifactId: string, format: ContentFormat): boolean {
+    if (format !== "html" || this.actors.hasCredentialHeader(request)) {
+      return false;
+    }
+    return this.grantAllows(accessToken, artifactId);
   }
 
   private grantAllows(accessToken: unknown, artifactId: string): boolean {
@@ -171,7 +183,7 @@ export class ArtifactsService {
     return membership !== null;
   }
 
-  private toDto(record: ArtifactRecord): ArtifactDto {
+  private toDto(record: ArtifactRecord, includeGrant: boolean): ArtifactDto {
     if (record.uploadedAt === null || record.mimeType !== "text/html") {
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
@@ -192,7 +204,9 @@ export class ArtifactsService {
       updatedAt: record.updatedAt.toISOString(),
       uploadedAt: record.uploadedAt.toISOString(),
       viewerUrl: `${this.config.webOrigin}/artifacts/${record.id}`,
-      contentUrl: grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret),
+      contentUrl: includeGrant
+        ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
+        : artifactContentUrl(this.config.apiPublicOrigin, record.id),
     });
   }
 

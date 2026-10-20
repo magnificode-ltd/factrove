@@ -4,6 +4,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { AppBar } from "@/components/chrome";
 import { SignOutButton } from "@/components/sign-out-button";
 import { authClient } from "@/auth/client";
+import { authPageHref } from "@/auth/return-path";
+
+const loginHref = authPageHref("login", "/account/api-keys");
 
 type ListedKey = {
   id: string;
@@ -21,7 +24,7 @@ export default function ApiKeysPage() {
     const result = await authClient.apiKey.list();
     if (result.error) {
       if (result.error.status === 401) {
-        window.location.assign("/login");
+        window.location.assign(loginHref);
         return;
       }
       setError(result.error.message ?? "API keys could not be loaded.");
@@ -45,7 +48,7 @@ export default function ApiKeysPage() {
     setPending(false);
     if (result.error || !result.data?.key) {
       if (result.error?.status === 401) {
-        window.location.assign("/login");
+        window.location.assign(loginHref);
         return;
       }
       setError(result.error?.message ?? "The API key could not be created.");
@@ -61,7 +64,7 @@ export default function ApiKeysPage() {
     const result = await authClient.apiKey.delete({ keyId: id });
     if (result.error) {
       if (result.error.status === 401) {
-        window.location.assign("/login");
+        window.location.assign(loginHref);
         return;
       }
       setError(result.error.message ?? "The API key could not be revoked.");

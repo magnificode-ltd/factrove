@@ -1,12 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const WINDOW_SECONDS = 300;
-const TTL_SECONDS = 12 * 60 * 60;
+const WINDOW_SECONDS = 60;
+export const CONTENT_GRANT_TTL_SECONDS = 5 * 60;
+const GRANT_DOMAIN = "factrove:content-grant:v1";
 
 export function mintContentGrant(artifactId: string, secret: string, nowMs = Date.now()): string {
-  const exp = Math.floor(nowMs / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS + TTL_SECONDS;
-  const payload = `${artifactId}.${exp}`;
-  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  const exp = Math.floor(nowMs / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS + CONTENT_GRANT_TTL_SECONDS;
+  const signature = signGrant(artifactId, exp, secret);
   return `${exp.toString(36)}.${signature}`;
 }
 
@@ -20,7 +20,7 @@ export function contentGrantAllows(token: string, artifactId: string, secret: st
     return false;
   }
   const given = token.slice(separator + 1);
-  const expected = createHmac("sha256", secret).update(`${artifactId}.${exp}`).digest("base64url");
+  const expected = signGrant(artifactId, exp, secret);
   const expectedBytes = Buffer.from(expected);
   const givenBytes = Buffer.from(given);
   if (expectedBytes.length === 0 || expectedBytes.length !== givenBytes.length) {
@@ -32,7 +32,20 @@ export function contentGrantAllows(token: string, artifactId: string, secret: st
   return exp > Math.floor(nowMs / 1000);
 }
 
+export function artifactContentUrl(origin: string, artifactId: string): string {
+  return `${origin}/api/v1/artifacts/${artifactId}/content`;
+}
+
 export function grantedContentUrl(origin: string, artifactId: string, secret: string, nowMs = Date.now()): string {
   const token = mintContentGrant(artifactId, secret, nowMs);
-  return `${origin}/api/v1/artifacts/${artifactId}/content?access=${encodeURIComponent(token)}`;
+  return `${artifactContentUrl(origin, artifactId)}?access=${encodeURIComponent(token)}`;
+}
+
+function signGrant(artifactId: string, exp: number, secret: string): string {
+  const payload = `${artifactId}.${exp}`;
+  return createHmac("sha256", grantKey(secret)).update(payload).digest("base64url");
+}
+
+function grantKey(secret: string): Buffer {
+  return createHmac("sha256", secret).update(GRANT_DOMAIN).digest();
 }

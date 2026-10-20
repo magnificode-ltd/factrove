@@ -134,8 +134,8 @@ async function main() {
   if (jsonArtifact.accessType !== "private") {
     throw new Error(`JSON upload was ${jsonArtifact.accessType}`);
   }
-  if (!jsonArtifact.contentUrl.includes("access=")) {
-    throw new Error("JSON content URL did not include a content grant.");
+  if (jsonArtifact.contentUrl.includes("access=") || jsonArtifact.contentUrl.includes("?")) {
+    throw new Error("JSON upload included a content grant.");
   }
   if (jsonUpload.stdout.includes(owner.secret)) {
     throw new Error("JSON upload printed the API key.");
@@ -437,6 +437,11 @@ async function getJson(url, headers = {}) {
 async function expectItems(view, ids) {
   const body = await getJson(`${apiOrigin}/api/v1/artifacts?view=${view}`);
   const items = body.items ?? [];
+  for (const item of items) {
+    if (String(item.contentUrl ?? "").includes("access=")) {
+      throw new Error("List content URL included a content grant.");
+    }
+  }
   const actual = items.map((item) => item.id).sort();
   const expected = [...ids].sort();
   if (actual.join(",") !== expected.join(",")) {

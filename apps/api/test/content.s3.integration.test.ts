@@ -64,6 +64,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       webOrigin: "http://localhost:3000",
       apiPublicOrigin: "http://localhost:3001",
       authSecret: TEST_AUTH_SECRET,
+      authCookieDomain: null,
     };
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(API_CONFIG)
@@ -113,9 +114,12 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
     const artifact = artifactEnvelopeSchema.parse(await response.json()).artifact;
     uploadedId = artifact.id;
 
-    const grantedUrl = new URL(artifact.contentUrl);
-    expect(grantedUrl.origin).toBe("http://localhost:3001");
-    const content = await fetch(new URL(`${grantedUrl.pathname}${grantedUrl.search}`, baseUrl));
+    const contentUrl = new URL(artifact.contentUrl);
+    expect(contentUrl.origin).toBe("http://localhost:3001");
+    expect(contentUrl.search).toBe("");
+    const content = await fetch(new URL(contentUrl.pathname, baseUrl), {
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
     expect(content.headers.get("content-security-policy")).toBe(contentSecurityPolicy("http://localhost:3000"));

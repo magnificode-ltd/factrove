@@ -1,19 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Inject, Injectable, type NestMiddleware } from "@nestjs/common";
+import { Injectable, type NestMiddleware } from "@nestjs/common";
 import { json, urlencoded } from "express";
-import { toNodeHandler } from "better-auth/node";
-import { AuthService } from "./auth.service.js";
 
 type NextFunction = (error?: unknown) => void;
 
 @Injectable()
 export class BetterAuthMiddleware implements NestMiddleware {
-  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
-
   use(request: IncomingMessage, response: ServerResponse, next: NextFunction): void {
     const url = "originalUrl" in request && typeof request.originalUrl === "string" ? request.originalUrl : request.url ?? "";
+    // Better Auth is mounted once in configureHttpApp. Leave these bodies unread.
     if (isAuthPath(url)) {
-      void toNodeHandler(this.auth.handler())(request, response);
+      next();
       return;
     }
     json()(request, response, (error?: unknown) => {

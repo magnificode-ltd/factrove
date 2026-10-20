@@ -17,6 +17,7 @@ import {
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { CONTENT_GRANT_TTL_SECONDS, mintContentGrant } from "../src/auth/content-grant.js";
 import { configureHttpApp } from "../src/configure-http-app.js";
 import { AppModule } from "../src/app.module.js";
 import { PrismaService } from "../src/database/prisma.service.js";
@@ -40,6 +41,7 @@ const config: ApiConfig = {
   webOrigin: "http://localhost:3000",
   apiPublicOrigin: "http://localhost:3001",
   authSecret: TEST_AUTH_SECRET,
+  authCookieDomain: null,
 };
 
 let ownerApiKey = "";
@@ -120,6 +122,18 @@ describe("API configuration", () => {
     expect(defaults.webOrigin).toBe("http://localhost:3000");
     expect(defaults.apiPublicOrigin).toBe("http://localhost:3001");
     expect(defaults.authSecret).toBe(TEST_AUTH_SECRET);
+    expect(defaults.authCookieDomain).toBeNull();
+  });
+
+  it("accepts a parent domain for the session cookie", () => {
+    expect(readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      AUTH_COOKIE_DOMAIN: ".Example.com",
+    }).authCookieDomain).toBe("example.com");
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      AUTH_COOKIE_DOMAIN: "https://example.com",
+    })).toThrow(/AUTH_COOKIE_DOMAIN/);
   });
 
   it("rejects a short auth secret", () => {
@@ -225,7 +239,7 @@ describe("HTTP API", () => {
     expect(body.artifact.filename).toBe(`${body.artifact.id}.html`);
     expect(body.artifact.sizeBytes).toBe(bytes.byteLength);
     expect(body.artifact.viewerUrl).toBe(`http://localhost:3000/artifacts/${body.artifact.id}`);
-    expectGrantedContentUrl(body.artifact.contentUrl, body.artifact.id);
+    expectPlainContentUrl(body.artifact.contentUrl, body.artifact.id);
     expect(store.objects.has(`${body.artifact.id}.html`)).toBe(true);
 
     const listed = await ownerFetch(`${baseUrl}/api/v1/artifacts`);
@@ -233,6 +247,7 @@ describe("HTTP API", () => {
     expect(listed.headers.get("cache-control")).toContain("no-store");
     const list = artifactListEnvelopeSchema.parse(await listed.json());
     expect(list.items.map((item) => item.id)).toEqual([body.artifact.id]);
+    expectPlainContentUrl(list.items[0]?.contentUrl ?? "", body.artifact.id);
 
     const detailResponse = await ownerFetch(`${baseUrl}/api/v1/artifacts/${body.artifact.id}`);
     expect(detailResponse.status).toBe(200);
@@ -242,11 +257,51 @@ describe("HTTP API", () => {
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
     expectHtmlHeaders(content.headers);
+  });
 
-    const grantedUrl = new URL(body.artifact.contentUrl);
+  it("mints a short HTML grant only for a session detail read", async () => {
+    const bytes = new TextEncoder().encode("<p>grant</p>");
+    const artifact = await upload(baseUrl, "grant.html", bytes);
+    expectPlainContentUrl(artifact.contentUrl, artifact.id);
+
+    const apiDetail = artifactEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`)).json(),
+    );
+    expect(apiDetail.artifact.contentUrl).toBe(artifact.contentUrl);
+
+    const sessionDetail = artifactEnvelopeSchema.parse(await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { cookie: owner.cookie },
+    })).json());
+    expectGrantedContentUrl(sessionDetail.artifact.contentUrl, artifact.id);
+
+    const grantedUrl = new URL(sessionDetail.artifact.contentUrl);
     const granted = await globalThis.fetch(new URL(`${grantedUrl.pathname}${grantedUrl.search}`, baseUrl));
     expect(granted.status).toBe(200);
     expect(Buffer.from(await granted.arrayBuffer())).toEqual(Buffer.from(bytes));
+
+    const markdownUrl = new URL(grantedUrl);
+    markdownUrl.searchParams.set("format", "markdown");
+    const markdown = await globalThis.fetch(new URL(`${markdownUrl.pathname}${markdownUrl.search}`, baseUrl));
+    expect(markdown.status).toBe(404);
+    expect(await errorOf(markdown)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    const expiredToken = mintContentGrant(
+      artifact.id,
+      TEST_AUTH_SECRET,
+      Date.now() - (CONTENT_GRANT_TTL_SECONDS + 120) * 1000,
+    );
+    const expired = await globalThis.fetch(
+      `${baseUrl}/api/v1/artifacts/${artifact.id}/content?access=${encodeURIComponent(expiredToken)}`,
+    );
+    expect(expired.status).toBe(404);
+
+    const withHeader = await globalThis.fetch(new URL(`${grantedUrl.pathname}${grantedUrl.search}`, baseUrl), {
+      headers: { "x-api-key": owner.apiKey },
+    });
+    expect(withHeader.status).toBe(404);
   });
 
   it("preserves fixture bytes for an htm upload under a html object key", async () => {
@@ -272,7 +327,7 @@ describe("HTTP API", () => {
     expect(detail.status).toBe(200);
     const body = artifactEnvelopeSchema.parse(detail.json);
     expect(body.artifact.viewerUrl).toBe(`http://localhost:3000/artifacts/${artifact.id}`);
-    expectGrantedContentUrl(body.artifact.contentUrl, artifact.id);
+    expectPlainContentUrl(body.artifact.contentUrl, artifact.id);
   });
 
   it("hides a private artifact and its content from anonymous callers", async () => {
@@ -359,6 +414,18 @@ describe("HTTP API", () => {
     );
     await expect(claimLocalArtifacts(prisma, "missing@example.invalid")).rejects.toThrow(
       "No account exists for missing@example.invalid.",
+    );
+    const passwordlessId = randomUUID();
+    await prisma.user.create({
+      data: {
+        id: passwordlessId,
+        name: "No Password",
+        email: "nopass@example.invalid",
+        emailVerified: false,
+      },
+    });
+    await expect(claimLocalArtifacts(prisma, "nopass@example.invalid")).rejects.toThrow(
+      "That account cannot sign in.",
     );
 
     const claimed = await claimLocalArtifacts(prisma, heir.email);
@@ -783,6 +850,64 @@ describe("HTTP API", () => {
     });
   });
 
+  it("rejects a cookie upload whose origin is not the web app", async () => {
+    const bytes = new TextEncoder().encode("<p>csrf</p>");
+    const foreign = await postCookieFile(baseUrl, owner.cookie, "csrf.html", bytes, {
+      origin: "http://evil.localhost:4000",
+    });
+    expect(foreign.status).toBe(403);
+    expect(await errorOf(foreign)).toEqual({
+      code: "FORBIDDEN",
+      message: "This request origin is not allowed.",
+    });
+    expect(await prisma.artifact.count()).toBe(0);
+
+    const foreignReferer = await postCookieFile(baseUrl, owner.cookie, "csrf.html", bytes, {
+      referer: "http://evil.localhost:4000/form",
+    });
+    expect(foreignReferer.status).toBe(403);
+
+    const missingOrigin = await postCookieFile(baseUrl, owner.cookie, "csrf.html", bytes);
+    expect(missingOrigin.status).toBe(403);
+
+    const headerBypass = await postCookieFile(baseUrl, owner.cookie, "csrf.html", bytes, {
+      origin: "http://evil.localhost:4000",
+      "x-api-key": owner.apiKey,
+    });
+    expect(headerBypass.status).toBe(403);
+
+    const fromWeb = await postCookieFile(baseUrl, owner.cookie, "ok.html", bytes, {
+      origin: "http://localhost:3000",
+    });
+    expect(fromWeb.status).toBe(201);
+
+    const fromReferer = await postCookieFile(baseUrl, owner.cookie, "ref.html", bytes, {
+      referer: "http://localhost:3000/library",
+    });
+    expect(fromReferer.status).toBe(201);
+
+    const keyed = await postFile(baseUrl, "key.html", bytes, {}, owner.apiKey);
+    expect(keyed.status).toBe(201);
+
+    const form = new FormData();
+    form.append("file", new Blob([Uint8Array.from(bytes)]), "keyed.html");
+    const keyedForeign = await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      body: form,
+      headers: {
+        authorization: `Bearer ${owner.apiKey}`,
+        origin: "http://evil.localhost:4000",
+      },
+    });
+    expect(keyedForeign.status).toBe(201);
+
+    const anonymous = await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      headers: { origin: "http://evil.localhost:4000" },
+    });
+    expect(anonymous.status).toBe(401);
+  });
+
   it("allows only the configured web origin through CORS", async () => {
     const allowed = await ownerFetch(`${baseUrl}/api/v1/health`, {
       headers: { Origin: "http://localhost:3000" },
@@ -952,7 +1077,7 @@ describe("HTTP API", () => {
     const headerKey = await globalThis.fetch(`${baseUrl}/api/v1/context`, {
       headers: { "x-api-key": owner.apiKey },
     });
-    expect(headerKey.status).toBe(200);
+    expect(headerKey.status).toBe(401);
 
     const fallback = await globalThis.fetch(`${baseUrl}/api/v1/context`, {
       headers: { authorization: "Bearer not-a-real-key", cookie: owner.cookie },
@@ -1100,12 +1225,34 @@ async function readContent(url: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+function postCookieFile(
+  url: string,
+  cookie: string,
+  filename: string,
+  bytes: Uint8Array,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const form = new FormData();
+  form.append("file", new Blob([Uint8Array.from(bytes)]), filename);
+  return globalThis.fetch(`${url}/api/v1/artifacts`, {
+    method: "POST",
+    body: form,
+    headers: { cookie, ...headers },
+  });
+}
+
 function ownerFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (ownerApiKey && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${ownerApiKey}`);
   }
   return globalThis.fetch(input, { ...init, headers });
+}
+
+function expectPlainContentUrl(value: string, id: string): void {
+  const url = new URL(value);
+  expect(`${url.origin}${url.pathname}`).toBe(`http://localhost:3001/api/v1/artifacts/${id}/content`);
+  expect(url.search).toBe("");
 }
 
 function expectGrantedContentUrl(value: string, id: string): void {

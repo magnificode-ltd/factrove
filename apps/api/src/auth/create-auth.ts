@@ -9,6 +9,7 @@ export type CreateAuthInput = {
   baseURL: string;
   secret: string;
   trustedOrigins: string[];
+  cookieDomain: string | null;
 };
 
 export type FactroveAuth = {
@@ -39,6 +40,15 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
       autoSignIn: true,
     },
     telemetry: { enabled: false },
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: 100,
+      customRules: {
+        "/sign-in/email": { window: 60, max: 10 },
+        "/sign-up/email": { window: 60, max: 10 },
+      },
+    },
     advanced: {
       defaultCookieAttributes: {
         sameSite: "lax",
@@ -46,6 +56,9 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
         httpOnly: true,
         path: "/",
       },
+      ...(input.cookieDomain
+        ? { crossSubDomainCookies: { enabled: true, domain: input.cookieDomain } }
+        : {}),
     },
     plugins: [factroveApiKey()],
     hooks: {

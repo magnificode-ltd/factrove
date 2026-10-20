@@ -15,6 +15,7 @@ describe("CLI argument parsing", () => {
       json: false,
       apiUrl: DEFAULT_API_URL,
       profile: "default",
+      profileExplicit: false,
     });
   });
 
@@ -86,6 +87,7 @@ describe("factrove get arguments", () => {
       json: false,
       apiUrl: DEFAULT_API_URL,
       profile: "default",
+      profileExplicit: false,
     });
   });
 
@@ -131,9 +133,13 @@ describe("factrove configure arguments", () => {
     expect(apiKeyForInvocation(configured, isolated)).toBeUndefined();
   });
 
-  it("reads FACTROVE_API_KEY before the profile file", () => {
-    const invocation = upload(["upload", file, "--profile", "dev"]);
-    expect(apiKeyForInvocation(invocation, { ...isolated, FACTROVE_API_KEY: "ftrv_from_env" })).toBe("ftrv_from_env");
+  it("lets an explicit --profile beat FACTROVE_API_KEY", () => {
+    const explicit = upload(["upload", file, "--profile", "dev"]);
+    expect(explicit.profileExplicit).toBe(true);
+    expect(apiKeyForInvocation(explicit, { ...isolated, FACTROVE_API_KEY: "ftrv_from_env" })).toBeUndefined();
+    const fromEnv = upload(["upload", file]);
+    expect(fromEnv.profileExplicit).toBe(false);
+    expect(apiKeyForInvocation(fromEnv, { ...isolated, FACTROVE_API_KEY: "ftrv_from_env" })).toBe("ftrv_from_env");
   });
 });
 

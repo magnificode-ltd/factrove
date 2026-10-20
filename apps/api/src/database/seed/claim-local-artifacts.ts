@@ -43,6 +43,15 @@ export async function claimLocalArtifacts(prisma: PrismaClient, email: string): 
         "The seeded local user has no password. Sign up a real account and pass that email.",
       );
     }
+    const credential = await tx.account.findFirst({
+      where: { userId: user.id, providerId: "credential" },
+      select: { password: true },
+    });
+    if (!credential?.password) {
+      throw new ClaimLocalArtifactsError(
+        "That account cannot sign in. Sign up with email and password, then run this command again.",
+      );
+    }
 
     const artifacts = await tx.artifact.findMany({
       where: { creatorUserId: localUserFixture.id },

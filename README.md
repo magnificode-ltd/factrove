@@ -136,7 +136,9 @@ Edit `apps/api/.env` before uploading:
 - For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`, and set `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for a temporary key). Leave that pair unset to use `AWS_PROFILE` or the default credential chain. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
 - AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
 
-The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command. `FACTROVE_API_KEY` overrides the key saved by `factrove configure`. `--profile` selects a profile, and `FACTROVE_PROFILE` is the fallback.
+The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's saved key instead. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted.
+
+The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to their parent domain, such as `example.com`, so the browser stores one session cookie for both.
 
 ### Start, stop, and upload
 

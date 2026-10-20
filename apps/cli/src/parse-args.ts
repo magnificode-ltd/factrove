@@ -13,6 +13,7 @@ export type UploadInvocation = {
   json: boolean;
   apiUrl: string;
   profile: string;
+  profileExplicit: boolean;
 };
 
 export type GetInvocation = {
@@ -22,6 +23,7 @@ export type GetInvocation = {
   json: boolean;
   apiUrl: string;
   profile: string;
+  profileExplicit: boolean;
 };
 
 export type ConfigureInvocation = {
@@ -56,7 +58,7 @@ Options:
   -h, --help                     Show this help.
 
 The API key is read from FACTROVE_API_KEY, then the selected profile in ~/.factrove/credentials.
-FACTROVE_API_KEY takes precedence over the profile file. The API key is not printed.
+An explicit --profile uses that profile's key and ignores FACTROVE_API_KEY. The API key is not printed.
 
 Examples:
   pnpm factrove configure --profile default
@@ -206,6 +208,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       json,
       apiUrl,
       profile,
+      profileExplicit: profileFlag !== undefined,
     };
   }
   if (command === "get") {
@@ -229,6 +232,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       json,
       apiUrl,
       profile,
+      profileExplicit: profileFlag !== undefined,
     };
   }
   throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: pnpm factrove --help`);
@@ -238,7 +242,7 @@ export function apiKeyForInvocation(invocation: CliInvocation, env: NodeJS.Proce
   if (invocation.kind === "help" || invocation.kind === "configure") {
     return undefined;
   }
-  return resolveApiKey(env, readStoredProfileSync(invocation.profile, env));
+  return resolveApiKey(env, readStoredProfileSync(invocation.profile, env), invocation.profileExplicit);
 }
 
 export function cliWantsJson(argv: readonly string[]): boolean {

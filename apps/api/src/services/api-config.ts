@@ -6,6 +6,7 @@ export type ApiConfig = {
   webOrigin: string;
   apiPublicOrigin: string;
   authSecret: string;
+  authCookieDomain: string | null;
 };
 
 const DEFAULT_WEB_ORIGIN = "http://localhost:3000";
@@ -19,6 +20,7 @@ export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     webOrigin: readOrigin(env.WEB_ORIGIN, DEFAULT_WEB_ORIGIN, "WEB_ORIGIN"),
     apiPublicOrigin: readOrigin(env.API_PUBLIC_ORIGIN, DEFAULT_API_ORIGIN, "API_PUBLIC_ORIGIN"),
     authSecret: readAuthSecret(env.BETTER_AUTH_SECRET),
+    authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN),
   };
 }
 
@@ -60,6 +62,21 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
     throw new Error(`${name} must be an origin without a path, query, or hash`);
   }
   return url.origin;
+}
+
+function readCookieDomain(value: string | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return null;
+  }
+  const domain = (raw.startsWith(".") ? raw.slice(1) : raw).toLowerCase();
+  const labels = domain.split(".");
+  const valid = labels.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+  if (!valid || domain.length > 253) {
+    throw new Error("AUTH_COOKIE_DOMAIN must be a parent domain such as example.com");
+  }
+  return domain;
 }
 
 function readAuthSecret(value: string | undefined): string {

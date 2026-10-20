@@ -40,8 +40,8 @@ export class ActorService {
     return this.fromSession(request);
   }
 
-  hasAuthorizationHeader(request: HeaderSource): boolean {
-    return authorizationHeader(request.headers) !== undefined;
+  hasCredentialHeader(request: HeaderSource): boolean {
+    return authorizationHeader(request.headers) !== undefined || request.headers["x-api-key"] !== undefined;
   }
 
   private async fromSession(request: HeaderSource): Promise<Actor | null> {
@@ -106,15 +106,7 @@ function presentedCredential(headers: IncomingHttpHeaders): { present: boolean; 
   if (authorizationHeader(headers) !== undefined) {
     return { present: true, key: bearerToken(headers) };
   }
-  const header = headers["x-api-key"];
-  if (header === undefined) {
-    return { present: false, key: null };
-  }
-  const value = Array.isArray(header) ? header[0] : header;
-  if (!value || value.length > 512) {
-    return { present: true, key: null };
-  }
-  return { present: true, key: value.trim() };
+  return { present: false, key: null };
 }
 
 function authorizationHeader(headers: IncomingHttpHeaders): string | undefined {

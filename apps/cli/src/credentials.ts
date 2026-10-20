@@ -1,7 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { CliError } from "./cli-error.js";
 
 const KEY_FIELD = "factrove_api_key";
@@ -55,10 +56,16 @@ export function readStoredProfileSync(profile: string, env: NodeJS.ProcessEnv): 
   };
 }
 
-export function resolveApiKey(env: NodeJS.ProcessEnv, stored: StoredProfile): string | undefined {
-  const fromEnv = env.FACTROVE_API_KEY?.trim();
-  if (fromEnv) {
-    return fromEnv;
+export function resolveApiKey(
+  env: NodeJS.ProcessEnv,
+  stored: StoredProfile,
+  explicitProfile = false,
+): string | undefined {
+  if (!explicitProfile) {
+    const fromEnv = env.FACTROVE_API_KEY?.trim();
+    if (fromEnv) {
+      return fromEnv;
+    }
   }
   return stored.apiKey;
 }
@@ -143,8 +150,23 @@ async function writeIniKey(path: string, section: string, key: string, value: st
   existing.set(section, bucket);
   const directory = dirname(path);
   const created = await mkdir(directory, { recursive: true, mode: 0o700 });
-  await writeFile(path, serializeIni(existing), { mode: 0o600 });
-  await chmod(path, 0o600);
+  const temporary = join(directory, `.${basename(path)}.${randomBytes(8).toString("hex")}.tmp`);
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    await handle.writeFile(serializeIni(existing));
+    await handle.chmod(0o600);
+  } catch (error) {
+    await handle.close();
+    await rm(temporary, { force: true });
+    throw error;
+  }
+  await handle.close();
+  try {
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
   if (typeof created === "string" && created.length > 0) {
     await restrictCreatedDirectories(created, directory);
   }

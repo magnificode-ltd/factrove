@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { chmod, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -425,22 +425,44 @@ describe("factrove configure", () => {
     expect((await stat(join(directory, "credentials"))).mode & 0o777).toBe(0o600);
   });
 
-  it("sends the profile key and lets FACTROVE_API_KEY override it", async () => {
+  it("lets an explicit --profile beat FACTROVE_API_KEY", async () => {
     const directory = await makeTemp();
-    await writeFile(join(directory, "credentials"), "[dev]\nfactrove_api_key = ftrv_from_profile\n");
+    await writeFile(
+      join(directory, "credentials"),
+      "[dev]\nfactrove_api_key = ftrv_from_profile\n\n[default]\nfactrove_api_key = ftrv_from_default\n",
+    );
     const stub = await startStub(() => accepted(1));
     const fromProfile = await runCli(["upload", fixturePath, "--profile", "dev", "--api-url", stub.url], {
-      env: { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "" },
+      env: { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "ftrv_from_env" },
     });
     expect(fromProfile.code).toBe(0);
     expect(stub.requests[0]?.authorization).toBe("Bearer ftrv_from_profile");
+    expect(fromProfile.stdout).not.toContain("ftrv_from_env");
 
-    const fromEnv = await runCli(["upload", fixturePath, "--profile", "dev", "--api-url", stub.url], {
+    const fromEnv = await runCli(["upload", fixturePath, "--api-url", stub.url], {
       env: { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "ftrv_from_env" },
     });
     expect(fromEnv.code).toBe(0);
     expect(stub.requests[1]?.authorization).toBe("Bearer ftrv_from_env");
-    expect(fromEnv.stdout).not.toContain("ftrv_from_env");
+  });
+
+  it("replaces an existing credentials file through a private temporary file", async () => {
+    const directory = await makeTemp();
+    const credentials = join(directory, "credentials");
+    await writeFile(credentials, "[default]\nfactrove_api_key = ftrv_old\n", { mode: 0o644 });
+    await chmod(credentials, 0o644);
+    const key = "ftrv_replaced_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    const text = await readFile(credentials, "utf8");
+    expect(text).toContain(key);
+    expect(text).not.toContain("ftrv_old");
+    expect((await stat(credentials)).mode & 0o777).toBe(0o600);
+    const names = await readdir(directory);
+    expect(names.filter((name) => name.includes(".tmp"))).toEqual([]);
   });
 
   it("keeps the mode of an existing directory that holds a custom credentials file", async () => {
