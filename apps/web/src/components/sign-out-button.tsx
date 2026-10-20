@@ -7,7 +7,7 @@ export function SignOutButton() {
   return (
     <Button
       variant="outline"
-      className="h-10"
+      className="h-10 bg-white"
       type="button"
       onClick={() => {
         void authClient.signOut().then(() => {

@@ -1,9 +1,11 @@
 import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
+import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
-import { accessLabel, formatBytes, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
+import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
+import type { ArtifactDto } from "@factrove/contracts";
 
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const title =
@@ -16,7 +18,11 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
           : "Artifact unavailable";
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
-      <ViewerBar title={title} meta={state.status === "ready" ? <ViewerFacts state={state} /> : null} />
+      <ViewerBar
+        title={title}
+        meta={state.status === "ready" ? <ViewerFacts state={state} /> : null}
+        tools={state.status === "ready" ? <ViewerTools artifact={state.artifact} /> : null}
+      />
       <main className="min-h-0 flex-1 bg-white">
         {state.status === "ready" ? <ReadyArtifact state={state} /> : <ViewerNotice state={state} />}
       </main>
@@ -26,12 +32,33 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
 
 function ViewerFacts({ state }: { state: Extract<ViewerModel, { status: "ready" }> }) {
   const { artifact } = state;
+  const uploaded = formatUploadedAt(artifact.uploadedAt);
   return (
-    <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+      <code className="font-mono text-[13px] text-ink">{artifact.id}</code>
       <span>{accessLabel(artifact.accessType)}</span>
-      <time dateTime={artifact.uploadedAt}>{formatUploadedAt(artifact.uploadedAt)}</time>
+      <time dateTime={artifact.uploadedAt} title={uploaded}>
+        <span className="sr-only">{uploaded}</span>
+        <span aria-hidden="true">{formatRelativeTime(artifact.uploadedAt)}</span>
+      </time>
       <span>{formatBytes(artifact.sizeBytes)}</span>
     </p>
+  );
+}
+
+function ViewerTools({ artifact }: { artifact: ArtifactDto }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={artifact.viewerUrl} />
+      <CopyButton label="Copy ID" copiedLabel="Copied" message="Artifact ID copied" value={artifact.id} />
+      {isEmbeddableContentUrl(artifact.contentUrl) ? (
+        <Button asChild variant="outline" className="h-10">
+          <a href={artifact.contentUrl} target="_blank" rel="noreferrer">
+            Open raw
+          </a>
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

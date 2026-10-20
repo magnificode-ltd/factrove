@@ -97,8 +97,8 @@ export default function ApiKeysPage() {
         </div>
       </AppBar>
       <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-        <p className="text-sm font-semibold tracking-[0.14em] text-[#5c63c9] uppercase">Account</p>
-        <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight sm:text-5xl">API keys</h1>
+        <p className="text-sm font-semibold tracking-[0.16em] text-peri-d uppercase">Account</p>
+        <h1 className="ft-title mt-2 text-4xl sm:text-5xl">API keys</h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
           A new key is shown once. Factrove stores only a hash of the key.
         </p>
@@ -115,9 +115,9 @@ export default function ApiKeysPage() {
           </Card>
           <div className="grid gap-4">
             {secret ? (
-              <div role="status" className="ft-pop rounded-2xl bg-secondary p-5 shadow-sm">
+              <div role="status" className="ft-pop ft-key rounded-[14px] border border-line bg-lilac p-5">
                 <p className="text-sm font-medium">Copy this key now. It will not be shown again.</p>
-                <code className="mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
+                <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
                   {secret}
                 </code>
                 <div className="mt-4">
@@ -149,7 +149,7 @@ export default function ApiKeysPage() {
                     className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-5 py-4 shadow-sm ring-1 ring-foreground/10"
                   >
                     <span className="font-medium">
-                      {item.name ?? "API key"} · {item.start ?? ""}
+                      {item.name ?? "API key"} · <span className="font-mono text-sm">{item.start ?? ""}</span>
                     </span>
                     <Button variant="destructive" type="button" className="h-10" onClick={() => void onRevoke(item.id)}>
                       Revoke

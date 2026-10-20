@@ -1,42 +1,42 @@
 import type { ReactNode } from "react";
-import { FactroveLogo } from "@/components/factrove-logo";
+import { Wordmark } from "@/components/wordmark";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
+import type { LibraryView } from "@/library/load-library";
 
-export function AppBar({ children }: { children?: ReactNode }) {
+export function AppBar({ children, clear = false }: { children?: ReactNode; clear?: boolean }) {
   return (
-    <header className="sticky top-0 z-30 border-b border-border/80 bg-[#F5F6FC]/85 backdrop-blur-md">
+    <header
+      className={cn(
+        "sticky top-0 z-30",
+        clear
+          ? "bg-[color-mix(in_srgb,var(--cloud)_62%,transparent)] backdrop-blur-md"
+          : "border-b border-border bg-[color-mix(in_srgb,var(--cloud)_88%,transparent)] backdrop-blur-md"
+      )}
+    >
       <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3 sm:px-8">
-        <BrandLink />
+        <Wordmark />
         {children}
       </div>
     </header>
   );
 }
 
-export function ViewerBar({ title, meta }: { title: string; meta?: ReactNode }) {
+export function ViewerBar({ title, meta, tools }: { title: string; meta?: ReactNode; tools?: ReactNode }) {
   return (
-    <header className="z-30 border-b border-border bg-[#F5F6FC]">
-      <div className="mx-auto flex min-h-16 w-full max-w-none flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
-        <BrandLink />
+    <header className="z-30 border-b border-border bg-cloud">
+      <div className="mx-auto flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+        <Wordmark />
         <Button asChild variant="outline" className="h-10">
           <a href="/">Back to library</a>
         </Button>
-        <h1 className="min-w-0 flex-1 truncate font-display text-lg font-semibold tracking-tight" title={title}>
+        <h1 className="min-w-0 flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
           {title}
         </h1>
         {meta}
+        {tools}
       </div>
     </header>
-  );
-}
-
-export function BrandLink() {
-  return (
-    <a href="/" className="inline-flex items-center gap-2.5 rounded-xl text-foreground no-underline">
-      <FactroveLogo />
-      <span className="font-display text-[1.65rem] leading-none font-semibold tracking-tight">Factrove</span>
-    </a>
   );
 }
 
@@ -48,19 +48,27 @@ export function ModeNote() {
   );
 }
 
-export function TabLink({ href, current, children }: { href: string; current: boolean; children: ReactNode }) {
+export function LibraryTabs({ view }: { view: LibraryView | "none" }) {
   return (
-    <a
-      href={href}
-      aria-current={current ? "page" : undefined}
-      className={cn(
-        "rounded-full px-4 py-2 text-sm font-semibold no-underline motion-safe:transition-colors",
-        current
-          ? "bg-white text-foreground shadow-sm"
-          : "text-muted-foreground hover:bg-white/80 hover:text-foreground"
-      )}
-    >
-      {children}
-    </a>
+    <nav className="relative inline-grid grid-cols-2 rounded-full bg-lilac p-1" aria-label="Artifact lists">
+      {view === "none" ? null : <span aria-hidden="true" data-tab={view} className="ft-tab-pill" />}
+      <a href="/" aria-current={view === "mine" ? "page" : undefined} className={tabClass(view === "mine")}>
+        My artifacts
+      </a>
+      <a
+        href="/?view=org"
+        aria-current={view === "org" ? "page" : undefined}
+        className={tabClass(view === "org")}
+      >
+        Organization artifacts
+      </a>
+    </nav>
+  );
+}
+
+function tabClass(current: boolean) {
+  return cn(
+    "relative z-10 rounded-full px-4 py-2 text-center text-sm font-semibold no-underline",
+    current ? "text-ink" : "text-muted-foreground hover:text-ink"
   );
 }

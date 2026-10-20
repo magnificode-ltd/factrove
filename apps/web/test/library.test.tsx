@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ArtifactDto, ContextEnvelope } from "@factrove/contracts";
 import { createWebClient } from "../src/api/client";
-import { accessLabel, formatBytes, formatUploadedAt } from "../src/format";
+import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt } from "../src/format";
 import { libraryViewFromParam, loadLibrary } from "../src/library/load-library";
 import { LibraryScreen } from "../src/library/library-screen";
 import { artifactReturnPath, authPageHref, safeNextPath } from "../src/auth/return-path";
@@ -267,6 +267,8 @@ describe("formatting", () => {
     expect(formatBytes(2048)).toBe("2.0 KB");
     expect(formatBytes(10_485_760)).toBe("10.0 MB");
     expect(formatUploadedAt("2026-10-11T10:00:00.000Z")).toBe("11 Oct 2026, 10:00 UTC");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T10:00:20.000Z"))).toBe("just now");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T10:02:00.000Z"))).toBe("2 min ago");
     expect(accessLabel("private")).toBe("Private");
     expect(accessLabel("org_shared")).toBe("Organization shared");
   });
