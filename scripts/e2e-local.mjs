@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import {
   apiEntry,
+  apiEnvFile,
   assertLoopbackHttpEndpoint,
   e2eApiPort,
   e2eComposeArgs,
@@ -23,7 +24,6 @@ import {
   readDotEnv,
   repoRoot,
   restoreFileSnapshot,
-  rootEnvFile,
   snapshotFile,
   webAppDir,
   webDevBin,
@@ -258,6 +258,8 @@ function apiChildEnv() {
 function cliChildEnv(configDir) {
   const child = { ...env, FACTROVE_API_URL: apiOrigin, FACTROVE_PROFILE: "e2e" };
   delete child.FACTROVE_API_KEY;
+  delete child.FACTROVE_DEV_API_URL;
+  child.FACTROVE_CLI_ENV_FILE = join(tmpdir(), "factrove-e2e-cli-env-absent");
   if (configDir) {
     child.FACTROVE_CONFIG_DIR = configDir;
   }
@@ -265,7 +267,7 @@ function cliChildEnv(configDir) {
 }
 
 function webChildEnv() {
-  const child = webLaunchEnv(env, readDotEnv(rootEnvFile));
+  const child = webLaunchEnv(env, readDotEnv(apiEnvFile));
   child.NEXT_PUBLIC_API_URL = apiOrigin;
   delete child.INIT_CWD;
   return child;

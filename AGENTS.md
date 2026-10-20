@@ -36,4 +36,4 @@ Node and pnpm pins live in `.nvmrc`, `.node-version`, `package.json`, and `pnpm-
 
 File location is a convention. Never store the location of a file in the database. Do not add a column, field, or persisted value for an object key, storage path, or file location. The artifact storage key is `{artifactId}.html`, derived from the artifact id.
 
-When adding an environment variable, add that key to the committed `.env.example` with a placeholder value. Do not commit real secrets.
+When adding an environment variable, add that key to the committed example for the process that reads it. Application settings for the API and the web app belong in `apps/api/.env.example`. CLI settings belong in `apps/cli/.env.example`. Do not commit real secrets.

@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { AppBar } from "@/components/chrome";
 import { AuthField } from "@/components/auth-field";
 import { CopyButton } from "@/components/copy-button";
-import { ToastHost } from "@/components/toast-host";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -89,7 +88,6 @@ export default function ApiKeysPage() {
 
   return (
     <div className="ft-canvas min-h-dvh">
-      <ToastHost />
       <AppBar>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button asChild variant="outline" className="h-10">

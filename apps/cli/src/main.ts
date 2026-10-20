@@ -8,6 +8,8 @@ import { GetCommand } from "./get.command.js";
 import { cliWantsJson, helpText } from "./parse-args.js";
 import { UploadCommand } from "./upload.command.js";
 
+// scripts/factrove.mjs loads apps/cli/.env for local development. This entrypoint does not.
+
 type ApplicationContext = Awaited<ReturnType<typeof NestFactory.createApplicationContext>>;
 
 async function run(): Promise<void> {

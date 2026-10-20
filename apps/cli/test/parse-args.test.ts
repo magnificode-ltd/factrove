@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CliError } from "../src/cli-error.js";
 import { apiKeyForInvocation, cliWantsJson, DEFAULT_API_URL, parseCliArgs } from "../src/parse-args.js";
@@ -30,6 +33,21 @@ describe("CLI argument parsing", () => {
     expect(upload(["upload", file, "--api-url", "http://127.0.0.1:4020"], env).apiUrl).toBe("http://127.0.0.1:4020");
     expect(upload(["upload", file, "--api-url=http://127.0.0.1:4030"], env).apiUrl).toBe("http://127.0.0.1:4030");
     expect(upload(["upload", file], { FACTROVE_API_URL: "   " }).apiUrl).toBe(DEFAULT_API_URL);
+  });
+
+  it("uses a dev file URL only after the environment and the selected profile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-parse-profile-"));
+    try {
+      await writeFile(join(directory, "config"), "[profile prod]\napi_url = https://prod.example\n");
+      const env = { FACTROVE_CONFIG_DIR: directory, FACTROVE_DEV_API_URL: "http://127.0.0.1:9" };
+      expect(upload(["upload", file, "--profile", "prod"], env).apiUrl).toBe("https://prod.example");
+      expect(upload(["upload", file], { ...env, FACTROVE_PROFILE: "prod" }).apiUrl).toBe("https://prod.example");
+      expect(upload(["upload", file], env).apiUrl).toBe("http://127.0.0.1:9");
+      expect(upload(["upload", file], { ...env, FACTROVE_API_URL: "http://127.0.0.1:8" }).apiUrl).toBe("http://127.0.0.1:8");
+      expect(upload(["upload", file, "--api-url", "http://127.0.0.1:7"], env).apiUrl).toBe("http://127.0.0.1:7");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("accepts org_shared, json, and flags around the path", () => {

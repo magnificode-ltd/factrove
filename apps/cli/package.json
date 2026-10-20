@@ -2,6 +2,7 @@
   "name": "@factrove/cli",
   "version": "0.1.0",
   "private": true,
+  "files": ["dist"],
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",

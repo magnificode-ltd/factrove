@@ -269,6 +269,15 @@ describe("formatting", () => {
     expect(formatUploadedAt("2026-10-11T10:00:00.000Z")).toBe("11 Oct 2026, 10:00 UTC");
     expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T10:00:20.000Z"))).toBe("just now");
     expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T10:02:00.000Z"))).toBe("2 min ago");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T11:00:00.000Z"))).toBe("1 hour ago");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-11T15:00:00.000Z"))).toBe("5 hours ago");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-12T10:00:00.000Z"))).toBe("1 day ago");
+    expect(formatRelativeTime("2026-10-11T10:00:00.000Z", Date.parse("2026-10-17T10:00:00.000Z"))).toBe("6 days ago");
+    expect(formatRelativeTime("2026-09-12T10:00:00.000Z", Date.parse("2026-10-11T10:00:00.000Z"))).toBe("29 days ago");
+    expect(formatRelativeTime("2026-09-11T10:00:00.000Z", Date.parse("2026-10-11T10:00:00.000Z"))).toBe(
+      formatUploadedAt("2026-09-11T10:00:00.000Z"),
+    );
+    expect(() => formatRelativeTime("not-a-date")).toThrow(RangeError);
     expect(accessLabel("private")).toBe("Private");
     expect(accessLabel("org_shared")).toBe("Organization shared");
   });

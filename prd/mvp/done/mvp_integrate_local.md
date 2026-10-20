@@ -8,7 +8,7 @@ Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](.
 
 ## Owns
 
-compose.yaml, .env.example, local infrastructure initialization, setup scripts/docs, final root command wiring, shared lockfile reconciliation, and end-to-end checks. Coordinate changes in other task directories with their owners.
+compose.yaml, apps/api/.env.example, apps/cli/.env.example, local infrastructure initialization, setup scripts/docs, final root command wiring, shared lockfile reconciliation, and end-to-end checks. Coordinate changes in other task directories with their owners.
 
 ## Deliverables
 
@@ -20,7 +20,7 @@ compose.yaml, .env.example, local infrastructure initialization, setup scripts/d
 - Keep migrations and local seed explicit before startup. An API restart must not reset data.
 - Make infra:down preserve volumes; any destructive reset must be separately named/documented and never part of normal setup.
 - Ensure only the API receives database/storage secrets. Web/CLI receive HTTP origins.
-- Put `FACTROVE_API_URL=http://localhost:3001` in the root `.env.example`. The CLI already documents that key in `apps/cli/.env.example` and reads it only from the process environment. `--api-url` overrides it.
+- Put `NEXT_PUBLIC_API_URL=http://localhost:3001` in `apps/api/.env.example` with the API settings. `pnpm dev` and `pnpm build` read it when the variable is unset. `FACTROVE_API_URL` lives in `apps/cli/.env.example`, commented out because the built-in default is already that origin. `pnpm factrove` reads the file. The built CLI does not. A profile `api_url` wins over the file. `--api-url` overrides both.
 - Keep `pnpm factrove` on `node scripts/factrove.mjs`, which runs `node apps/cli/dist/main.js` in the caller's directory. The launcher sets that directory from `INIT_CWD`. The CLI resolves a relative path from its own working directory. Do not point the script back at `pnpm --filter @factrove/cli start`.
 - Integrate the independently developed tasks and reconcile shared dependencies/lockfile.
 - Update root README to distinguish implemented behavior from future plans and include commands verified on the actual checkout.
@@ -52,7 +52,7 @@ Use a browser check for visible rendering; HTTP status alone is insufficient. Do
 - `compose.yaml` runs official Postgres `17.11`, pinned by the multi-arch image index `sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3` (linux/amd64 and linux/arm64). Host port `5432` is bound to `127.0.0.1`. The named volume `factrove-postgres` holds the data. There is no S3 service.
 - `pnpm infra:up` waits until Postgres is healthy. `pnpm infra:down` removes the container and network and keeps the volume. `pnpm infra:reset` is the only command that deletes the volume. It asks for confirmation in a terminal and otherwise requires `pnpm infra:reset -- --yes`. Deleting the volume removes Postgres metadata. S3 objects for those rows stay in the bucket.
 - `pnpm dev` builds the API, CLI, and shared packages, then starts both apps with `[api]` and `[web]` logs. Ctrl+C, SIGTERM, and SIGHUP (closing the terminal) stop both. If one app exits, the command stops the other. It does not migrate or seed. The API listens on `127.0.0.1:3001` and loads `apps/api/.env`. The web app listens on `127.0.0.1:3000`. On exit it restores `apps/web/next-env.d.ts` when Next.js rewrote that file.
-- The root `.env.example` documents `FACTROVE_API_URL` and `NEXT_PUBLIC_API_URL`. `pnpm factrove` applies `FACTROVE_API_URL` from that file only when the process variable is unset. `--api-url` still wins. Database and storage variables are removed from the web and CLI process environments.
+- `apps/api/.env.example` documents the API settings and `NEXT_PUBLIC_API_URL`. `pnpm dev` and `pnpm build` pass that origin to the web app when the process variable is unset. The production value is fixed in the client bundle. `apps/cli/.env.example` documents `FACTROVE_API_URL` and `FACTROVE_PROFILE` for `pnpm factrove`. The built CLI does not load that file, and the file does not supply an API key. `--api-url` still wins, then the process environment, then the selected profile. Database and storage variables are removed from the web and CLI process environments.
 - `scripts/factrove.mjs` sets the CLI working directory from `INIT_CWD` and removes `INIT_CWD` from the child environment. The CLI resolves paths from its own working directory and ignores `INIT_CWD`, including a direct `node apps/cli/dist/main.js` run.
 - `apps/api/.env.example` uses `postgresql://factrove:factrove@127.0.0.1:5432/factrove`, matching Compose. Those are local loopback credentials.
 

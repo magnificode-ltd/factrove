@@ -4,11 +4,11 @@ import {
   apiEntry,
   apiEnvFile,
   effectiveApiSetting,
+  legacyRootEnvWarning,
   missingApiSettings,
   readDotEnv,
   repoRoot,
   restoreFileSnapshot,
-  rootEnvFile,
   snapshotFile,
   webAppDir,
   webDevArgs,
@@ -17,6 +17,11 @@ import {
   workspaceBuildArgs,
 } from "./local-runtime.mjs";
 import { supervise } from "./supervise.mjs";
+
+const legacyEnv = legacyRootEnvWarning(join(repoRoot, ".env"));
+if (legacyEnv.length > 0) {
+  process.stderr.write(legacyEnv);
+}
 
 const fileEnv = readDotEnv(apiEnvFile);
 const missing = missingApiSettings(fileEnv, process.env);
@@ -43,8 +48,7 @@ if ((build.status ?? 1) !== 0) {
   process.exit(build.status ?? 1);
 }
 
-const rootEnv = readDotEnv(rootEnvFile);
-const webEnv = webLaunchEnv(process.env, rootEnv);
+const webEnv = webLaunchEnv(process.env, fileEnv);
 const nextEnvPath = join(webAppDir, "next-env.d.ts");
 const nextEnvSnapshot = snapshotFile(nextEnvPath);
 
