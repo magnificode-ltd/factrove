@@ -1,5 +1,6 @@
+import type { IncomingHttpHeaders } from "node:http";
 import { Readable } from "node:stream";
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   artifactDtoSchema,
@@ -19,7 +20,12 @@ type HeaderResponse = {
   setHeader(name: string, value: string): void;
 };
 
-// private and org_shared classify library listings. Detail and content stay unauthenticated.
+type HeaderRequest = {
+  headers: IncomingHttpHeaders;
+};
+
+// private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
+// Missing access returns 404 so an id does not reveal that an artifact exists.
 @Controller("artifacts")
 export class ArtifactsController {
   constructor(
@@ -41,25 +47,27 @@ export class ArtifactsController {
       },
     }),
   )
-  async upload(@UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
-    const artifact = await this.artifacts.upload(file, body);
+  async upload(@Req() request: HeaderRequest, @UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
+    const artifact = await this.artifacts.upload(request, file, body);
     return { artifact: artifactDtoSchema.parse(artifact) };
   }
 
   @Get()
-  async list(@Query("view") view: unknown): Promise<ArtifactListEnvelope> {
-    const records = await this.artifacts.list(parseView(view));
+  async list(@Req() request: HeaderRequest, @Query("view") view: unknown): Promise<ArtifactListEnvelope> {
+    const records = await this.artifacts.list(request, parseView(view));
     return { items: records };
   }
 
   @Get(":id/content")
   async content(
+    @Req() request: HeaderRequest,
     @Param("id") id: string,
     @Query("format") format: unknown,
+    @Query("access") access: unknown,
     @Res({ passthrough: true }) response: HeaderResponse,
   ): Promise<StreamableFile> {
     const requested = parseContentFormat(format);
-    const opened = await this.artifacts.openContent(parseArtifactId(id), requested);
+    const opened = await this.artifacts.openContent(request, parseArtifactId(id), requested, access);
     if (opened.format === "markdown") {
       for (const [name, value] of markdownContentHeaders(opened.body.byteLength)) {
         response.setHeader(name, value);
@@ -93,8 +101,8 @@ export class ArtifactsController {
   }
 
   @Get(":id")
-  async detail(@Param("id") id: string): Promise<ArtifactEnvelope> {
-    const artifact = await this.artifacts.getById(parseArtifactId(id));
+  async detail(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ArtifactEnvelope> {
+    const artifact = await this.artifacts.getById(request, parseArtifactId(id));
     return { artifact };
   }
 }

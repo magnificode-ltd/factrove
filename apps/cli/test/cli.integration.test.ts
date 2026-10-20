@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ type CapturedRequest = {
   method: string | undefined;
   url: string | undefined;
   contentType: string;
+  authorization: string;
   body: Buffer;
 };
 
@@ -47,6 +48,8 @@ describe("factrove upload", () => {
     const request = stub.requests[0];
     expect(request?.method).toBe("POST");
     expect(request?.url).toBe("/api/v1/artifacts");
+    expect(request?.authorization).toBe("Bearer ftrv_test_key");
+    expect(result.stdout).not.toContain("ftrv_test_key");
     expect(request?.contentType).toMatch(/^multipart\/form-data;\s*boundary=/i);
     const parts = multipartParts(request?.contentType ?? "", request?.body ?? Buffer.alloc(0));
     const file = parts.find((part) => part.name === "file");
@@ -402,6 +405,150 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
   };
 }
 
+describe("factrove configure", () => {
+  it("stores a profile from stdin without printing the key", async () => {
+    const directory = await makeTemp();
+    const key = "ftrv_configure_secret_value";
+    const result = await runCliInput(
+      ["configure", "--profile", "dev"],
+      `${key}\nhttp://127.0.0.1:3999\n`,
+      { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "" },
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('Configured profile "dev" for http://127.0.0.1:3999.\n');
+    expect(result.stdout).not.toContain(key);
+    expect(result.stderr).not.toContain(key);
+    const credentials = await readFile(join(directory, "credentials"), "utf8");
+    expect(credentials).toContain(`[dev]\nfactrove_api_key = ${key}\n`);
+    const config = await readFile(join(directory, "config"), "utf8");
+    expect(config).toContain("api_url = http://127.0.0.1:3999");
+    expect((await stat(join(directory, "credentials"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("lets an explicit --profile beat FACTROVE_API_KEY", async () => {
+    const directory = await makeTemp();
+    await writeFile(
+      join(directory, "credentials"),
+      "[dev]\nfactrove_api_key = ftrv_from_profile\n\n[default]\nfactrove_api_key = ftrv_from_default\n",
+    );
+    const stub = await startStub(() => accepted(1));
+    const fromProfile = await runCli(["upload", fixturePath, "--profile", "dev", "--api-url", stub.url], {
+      env: { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "ftrv_from_env" },
+    });
+    expect(fromProfile.code).toBe(0);
+    expect(stub.requests[0]?.authorization).toBe("Bearer ftrv_from_profile");
+    expect(fromProfile.stdout).not.toContain("ftrv_from_env");
+
+    const fromEnv = await runCli(["upload", fixturePath, "--api-url", stub.url], {
+      env: { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "ftrv_from_env" },
+    });
+    expect(fromEnv.code).toBe(0);
+    expect(stub.requests[1]?.authorization).toBe("Bearer ftrv_from_env");
+  });
+
+  it("replaces an existing credentials file through a private temporary file", async () => {
+    const directory = await makeTemp();
+    const credentials = join(directory, "credentials");
+    await writeFile(credentials, "[default]\nfactrove_api_key = ftrv_old\n", { mode: 0o644 });
+    await chmod(credentials, 0o644);
+    const key = "ftrv_replaced_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    const text = await readFile(credentials, "utf8");
+    expect(text).toContain(key);
+    expect(text).not.toContain("ftrv_old");
+    expect((await stat(credentials)).mode & 0o777).toBe(0o600);
+    const names = await readdir(directory);
+    expect(names.filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+
+  it("writes through a credentials symlink to the existing target", async () => {
+    const directory = await makeTemp();
+    const targetDirectory = await makeTemp();
+    const target = join(targetDirectory, "credentials");
+    await writeFile(target, "[default]\nfactrove_api_key = ftrv_old\n", { mode: 0o644 });
+    const link = join(directory, "credentials");
+    await symlink(target, link);
+    const key = "ftrv_symlink_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: link,
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    const text = await readFile(target, "utf8");
+    expect(text).toContain(key);
+    expect(text).not.toContain("ftrv_old");
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
+  });
+
+  it("writes through a dangling credentials symlink", async () => {
+    const directory = await makeTemp();
+    const link = join(directory, "credentials");
+    await symlink("stored-credentials", link);
+    const key = "ftrv_dangling_symlink";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: link,
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    const target = join(directory, "stored-credentials");
+    expect((await lstat(target)).isSymbolicLink()).toBe(false);
+    expect(await readFile(target, "utf8")).toContain(key);
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the mode of an existing directory that holds a custom credentials file", async () => {
+    const parent = await makeTemp();
+    await chmod(parent, 0o755);
+    const credentials = join(parent, "shared-credentials");
+    const config = join(parent, "shared-config");
+    const key = "ftrv_custom_path_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: credentials,
+      FACTROVE_CONFIG_FILE: config,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain(key);
+    expect((await stat(parent)).mode & 0o777).toBe(0o755);
+    expect((await stat(credentials)).mode & 0o777).toBe(0o600);
+    expect((await stat(config)).mode & 0o777).toBe(0o600);
+    expect(await readFile(credentials, "utf8")).toContain(key);
+  });
+
+  it("restricts only directories created for a custom credentials path", async () => {
+    const parent = await makeTemp();
+    await chmod(parent, 0o755);
+    const created = join(parent, "factrove");
+    const credentials = join(created, "credentials");
+    const key = "ftrv_created_dir_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: credentials,
+      FACTROVE_CONFIG_DIR: created,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect((await stat(parent)).mode & 0o777).toBe(0o755);
+    expect((await stat(created)).mode & 0o777).toBe(0o700);
+    expect((await stat(credentials)).mode & 0o777).toBe(0o600);
+    expect((await stat(join(created, "config"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("fails a command that has no API key", async () => {
+    const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("INVALID_INPUT: An API key is required. Run: pnpm factrove configure\n");
+    expect(result.stdout).toBe("");
+  });
+});
+
 type StubResult = {
   status: number;
   body: unknown;
@@ -478,10 +625,12 @@ function readRequest(message: IncomingMessage): Promise<CapturedRequest> {
     message.on("error", reject);
     message.on("end", () => {
       const header = message.headers["content-type"];
+      const authorization = message.headers.authorization;
       resolve({
         method: message.method,
         url: message.url,
         contentType: Array.isArray(header) ? header.join(", ") : header ?? "",
+        authorization: Array.isArray(authorization) ? authorization.join(", ") : authorization ?? "",
         body: Buffer.concat(chunks),
       });
     });
@@ -510,11 +659,43 @@ function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEn
   return runCommand(process.execPath, [cliPath, ...args], options?.cwd ?? repoRoot, options?.env);
 }
 
+function runCliInput(args: string[], input: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {
+  const env = cliEnv(envOverrides);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, ...args], {
+      cwd: repoRoot,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Command timed out: ${args.join(" ")}`));
+    }, 20_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, stdout, stderr });
+    });
+    child.stdin.end(input);
+  });
+}
+
 function runCliBytes(args: string[]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env };
-    delete env.FACTROVE_API_URL;
-    delete env.INIT_CWD;
+    const env = cliEnv();
     const child = spawn(process.execPath, [cliPath, ...args], {
       cwd: repoRoot,
       env,
@@ -543,11 +724,24 @@ function runCliBytes(args: string[]): Promise<Buffer> {
   });
 }
 
-function runCommand(command: string, args: string[], cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {
+function cliEnv(envOverrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.FACTROVE_API_URL;
   delete env.INIT_CWD;
+  delete env.FACTROVE_PROFILE;
+  delete env.FACTROVE_API_KEY;
+  delete env.FACTROVE_SHARED_CREDENTIALS_FILE;
+  delete env.FACTROVE_CONFIG_FILE;
+  env.FACTROVE_CONFIG_DIR = "/tmp/factrove-cli-absent-7044";
   Object.assign(env, envOverrides);
+  if (env.FACTROVE_API_KEY === undefined) {
+    env.FACTROVE_API_KEY = "ftrv_test_key";
+  }
+  return env;
+}
+
+function runCommand(command: string, args: string[], cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {
+  const env = cliEnv(envOverrides);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";

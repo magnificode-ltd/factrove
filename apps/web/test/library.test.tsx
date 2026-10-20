@@ -5,6 +5,7 @@ import { createWebClient } from "../src/api/client";
 import { accessLabel, formatBytes, formatUploadedAt } from "../src/format";
 import { libraryViewFromParam, loadLibrary } from "../src/library/load-library";
 import { LibraryScreen } from "../src/library/library-screen";
+import { artifactReturnPath, authPageHref, safeNextPath } from "../src/auth/return-path";
 import { loadArtifact } from "../src/viewer/load-artifact";
 import { ViewerScreen } from "../src/viewer/viewer-screen";
 
@@ -78,8 +79,10 @@ describe("library requests", () => {
     expect(mineHtml).toContain(`${mineId}.html`);
     expect(mineHtml).toContain(`${sharedId}.html`);
     expect(mineHtml).not.toContain(`${otherId}.html`);
-    expect(mineHtml).toContain("Private · list only");
-    expect(mineHtml).toContain("Organization shared · list only");
+    expect(mineHtml).toContain("Private");
+    expect(mineHtml).toContain("Organization shared");
+    expect(mineHtml).not.toContain("list only");
+    expect(mineHtml).toContain("Private artifacts are visible only to you.");
     expect(orgHtml).toContain(`${otherId}.html`);
     expect(orgHtml).not.toContain(`${mineId}.html`);
     expect(mineHtml.indexOf(`${mineId}.html`)).toBeLessThan(mineHtml.indexOf(`${sharedId}.html`));
@@ -130,7 +133,21 @@ describe("library requests", () => {
     expect(html).toContain("The Factrove API is unavailable");
     expect(html).toContain('href="/?view=org"');
     expect(html).not.toContain("<ul");
-    expect(html).toContain("They are not access control.");
+    expect(html).not.toContain("list only");
+  });
+
+  it("treats an unauthenticated library as signed out", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadLibrary(client, "mine");
+    expect(state).toEqual({ status: "signed-out", view: "mine" });
+    const html = renderToStaticMarkup(<LibraryScreen state={state} />);
+    expect(html).toContain("Sign in to see your artifacts.");
+    expect(html).toContain('href="/login"');
+    expect(html).not.toContain("The Factrove API is unavailable");
+    expect(html).not.toContain("<ul");
   });
 
   it("shows the API error message when a list request fails", async () => {
@@ -149,6 +166,7 @@ describe("viewer", () => {
   it("keeps unconfirmed artifact HTML out of the server render", async () => {
     const item = artifact(mineId, "private");
     const fetchImpl = stubFetch(async (url) => {
+      if (url.endsWith("/context")) return jsonResponse(context);
       expect(url).toBe(`http://localhost:3001/api/v1/artifacts/${mineId}`);
       return jsonResponse({ artifact: item });
     });
@@ -169,9 +187,10 @@ describe("viewer", () => {
   });
 
   it("shows a missing artifact without an iframe", async () => {
-    const fetchImpl = stubFetch(async () =>
-      jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact not found" } }, 404)
-    );
+    const fetchImpl = stubFetch(async (url) => {
+      if (url.endsWith("/context")) return jsonResponse(context);
+      return jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact not found" } }, 404);
+    });
     const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
     const state = await loadArtifact(client, mineId);
     const html = renderToStaticMarkup(<ViewerScreen state={state} />);
@@ -188,6 +207,56 @@ describe("viewer", () => {
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("javascript:");
     expect(html).toContain("The artifact content could not be loaded");
+  });
+
+  it("asks a signed-out viewer to sign in", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadArtifact(client, mineId);
+    const html = renderToStaticMarkup(<ViewerScreen state={state} />);
+    expect(state).toMatchObject({ status: "signed-out", returnTo: artifactReturnPath(mineId) });
+    expect(html).toContain("Sign in to continue.");
+    expect(html).toContain(`href="${authPageHref("login", artifactReturnPath(mineId))}"`);
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("offers sign-in for an existing artifact when the hidden read is a 404", async () => {
+    const fetchImpl = stubFetch(async (url) => {
+      if (url.endsWith("/context")) {
+        return jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401);
+      }
+      return jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } }, 404);
+    });
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const state = await loadArtifact(client, mineId);
+    const html = renderToStaticMarkup(<ViewerScreen state={state} />);
+    expect(state).toEqual({
+      status: "signed-out",
+      message: "Sign in to continue.",
+      returnTo: artifactReturnPath(mineId)
+    });
+    expect(html).toContain("Sign in to continue.");
+    expect(html).toContain(`href="${authPageHref("login", artifactReturnPath(mineId))}"`);
+    expect(html).not.toContain("Artifact not found");
+    expect(html).not.toContain("Artifact was not found.");
+    expect(html).not.toContain("<iframe");
+  });
+});
+
+describe("return path", () => {
+  it("keeps a same-origin artifact path and drops off-site targets", () => {
+    const artifactPath = artifactReturnPath(mineId);
+    expect(safeNextPath(artifactPath)).toBe(artifactPath);
+    expect(authPageHref("login", artifactPath)).toBe(`/login?next=${encodeURIComponent(artifactPath)}`);
+    expect(authPageHref("signup", artifactPath)).toBe(`/signup?next=${encodeURIComponent(artifactPath)}`);
+    expect(safeNextPath(null)).toBe("/");
+    expect(safeNextPath("")).toBe("/");
+    expect(safeNextPath("https://evil.example/artifacts")).toBe("/");
+    expect(safeNextPath("//evil.example")).toBe("/");
+    expect(safeNextPath("/\\evil.example")).toBe("/");
+    expect(authPageHref("login", "/")).toBe("/login");
   });
 });
 

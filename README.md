@@ -42,7 +42,11 @@ apps/api/
 │   ├── services/
 │   │   ├── services.module.ts
 │   │   ├── artifacts.service.ts
-│   │   └── local-actor.service.ts
+│   │   └── api-config.ts
+│   ├── auth/
+│   │   ├── create-auth.ts            # Email/password sessions and the API key plugin
+│   │   ├── api-key-plugin.ts         # @better-auth/api-key options
+│   │   └── actor.service.ts          # Session or API-key caller
 │   ├── database/
 │   │   ├── index.ts                  # Public backend database exports
 │   │   ├── database.module.ts        # Global Nest module
@@ -91,7 +95,7 @@ Backend code is organized by responsibility: controllers handle HTTP, services c
 
 Identity models come from Better Auth: its core schema provides User, and its organization plugin provides Organization and membership-related models. Artifact references those identities directly. Better Auth schema generation and committed Prisma migrations maintain these definitions; Factrove's custom domain model is Artifact. Schema ownership is separate from when authentication flows are enabled, which is specified in the PRDs.
 
-Better Auth connects to PostgreSQL through its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, with `organization()` configured for organization models. This configuration lives in the backend and uses its Prisma setup. Better Auth tooling generates the identity schema; Prisma Migrate manages the committed SQL migrations. See the [installation guide](https://better-auth.com/docs/installation) and [Prisma adapter guide](https://better-auth.com/docs/adapters/prisma).
+Better Auth connects to PostgreSQL through its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, with `organization()` configured for organization models and `@better-auth/api-key` for API keys. This configuration lives in the backend and uses its Prisma setup. Better Auth tooling generates the identity schema; Prisma Migrate manages the committed SQL migrations. See the [installation guide](https://better-auth.com/docs/installation), the [Prisma adapter guide](https://better-auth.com/docs/adapters/prisma), and the [API key plugin](https://better-auth.com/docs/plugins/api-key).
 
 Object storage is another backend-local module. Its S3 implementation uses the configured bucket and region, and `S3_ENDPOINT` when that variable selects an S3-compatible service. The small provider interface accommodates future Azure/GCP implementations. The backend owns database and storage configuration.
 
@@ -101,7 +105,7 @@ Uploaded HTML is rendered by the browser in an isolated viewer. The backend's re
 
 This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to Garage, the local S3-compatible server started with it. Real AWS S3 stays available: set the bucket, region, and credentials, and leave `S3_ENDPOINT` unset. The web app and CLI receive HTTP origins. Database and storage credentials stay in the API environment.
 
-`private` and `org_shared` choose which library list an artifact appears in. This build is unauthenticated: those labels are list classifications, and opening an artifact URL does not check membership. Login, API keys, and managed hosting are later work described in the [MVP end state](docs/MVP_END_STATE.md).
+Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization. The CLI sends an API key from `FACTROVE_API_KEY` or from `factrove configure`. Create and revoke keys at `/account/api-keys`. The secret is shown once.
 
 ### Prerequisites
 
@@ -132,7 +136,9 @@ Edit `apps/api/.env` before uploading:
 - For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`, and set `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for a temporary key). Leave that pair unset to use `AWS_PROFILE` or the default credential chain. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
 - AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
 
-The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command.
+The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's saved key instead. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted.
+
+The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to the narrowest parent of both, such as `factrove.example.com` for `app.factrove.example.com` and `api.factrove.example.com`. The browser sends that cookie to every subdomain of the value. Startup rejects an IP address, a public suffix, and a domain that does not cover both origins. Set `TRUSTED_PROXIES` to the IP addresses or CIDR ranges of reverse proxies that may send `X-Forwarded-For`. Leave it unset when the API sees the client socket directly. Sign-in limits follow that client address, and an incoming `X-Forwarded-For` from an untrusted peer does not choose the bucket.
 
 ### Start, stop, and upload
 
@@ -144,13 +150,22 @@ pnpm db:seed
 pnpm dev
 ```
 
-`pnpm infra:up` starts PostgreSQL and Garage and waits until both are healthy. Garage creates the `factrove` bucket when it starts. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the local user `local-user` (Local User) and organization `local-org` (Local Organization). Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup.
+`pnpm infra:up` starts PostgreSQL and Garage and waits until both are healthy. Garage creates the `factrove` bucket when it starts. `pnpm db:migrate` applies the committed migrations. `pnpm db:seed` upserts the fixture user `local-user` (Local User) and organization `local-org` (Local Organization). That user has no password. Run seed again whenever you want; it keeps those ids and does not wipe artifacts. Neither migrate nor seed runs from API startup. Set `BETTER_AUTH_SECRET` in `apps/api/.env` before `pnpm dev`. Use at least 32 characters. The example value is a local placeholder.
+
+An installation that already has artifacts owned by `local-user` keeps those rows and their ids through migrate. Sign up in the web app, then attach them to that account:
+
+```sh
+pnpm db:claim-local-artifacts -- --email you@example.com
+```
+
+The command changes the creator of those artifacts to the account and adds a membership for each organization they already reference. Viewer links stay `/artifacts/{id}`. Running it again changes nothing. It does not create a password for `local-user`.
 
 `pnpm dev` builds the API, CLI, and shared packages, then starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`. Open the library at `http://localhost:3000`. Logs from both are prefixed `[api]` and `[web]`. Ctrl+C, SIGTERM, and closing the terminal stop both. If one app exits, the command stops the other. Restart `pnpm dev` after API changes. The Next.js app reloads as web files change. While it is running, Next.js may rewrite `apps/web/next-env.d.ts`. The command restores the committed copy when it exits.
 
 In a second terminal, from the repository root:
 
 ```sh
+pnpm factrove configure
 pnpm factrove upload ./fixtures/hello.html
 pnpm factrove upload ./fixtures/hello.html --access org_shared --json
 pnpm factrove upload ./report.html --api-url http://localhost:3001 --json
@@ -189,7 +204,7 @@ pnpm e2e
 - **Port 3900 is taken.** Another process is listening on `127.0.0.1:3900`. Stop it, or change the Garage host port in [compose.yaml](compose.yaml) and `S3_ENDPOINT` together.
 - **Port 3000 or 3001 is taken.** Stop the other process and run `pnpm dev` again. The web origin is `http://localhost:3000` and the API origin is `http://localhost:3001`.
 - **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API. Stop the other process and run `pnpm e2e` again. The dev ports 5432, 3900, 3000, and 3001 stay with `pnpm infra:up` and `pnpm dev`.
-- **The API stops and asks for a seed.** `LOCAL_USER_ID` or `LOCAL_ORGANIZATION_ID` has no matching row. Run `pnpm db:seed`, then `pnpm dev`.
+- **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set a local placeholder in `apps/api/.env`, then run `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
 - **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`.
 - **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in the root `.env` or the environment, then restart `pnpm dev`.

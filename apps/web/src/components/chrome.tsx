@@ -31,8 +31,7 @@ export function ViewerBar({ title, meta }: { title: string; meta?: ReactNode }) 
 export function ModeNote() {
   return (
     <p className="mode">
-      Local unauthenticated mode. Private and organization-shared labels only decide which list an artifact appears in.
-      They are not access control.
+      Private artifacts are visible only to you. Organization-shared artifacts are visible to members of that organization.
     </p>
   );
 }

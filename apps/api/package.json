@@ -8,13 +8,15 @@
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "dev": "pnpm build && node dist/main.js",
-    "test": "prisma generate && vitest run",
+    "test": "prisma generate && vitest run && NODE_ENV=production vitest run --config vitest.rate-limit.config.ts",
     "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "pnpm build && node dist/database/seed/seed.js"
+    "db:seed": "pnpm build && node dist/database/seed/seed.js",
+    "db:claim-local-artifacts": "pnpm build && node dist/database/seed/claim.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1149.0",
+    "@better-auth/api-key": "1.7.7",
     "@better-auth/prisma-adapter": "1.7.7",
     "@factrove/contracts": "workspace:*",
     "@nestjs/common": "11.1.9",
@@ -22,12 +24,15 @@
     "@nestjs/platform-express": "11.1.9",
     "@prisma/client": "6.19.0",
     "better-auth": "1.7.7",
+    "express": "5.1.0",
     "parse5": "7.3.0",
+    "psl": "1.15.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@nestjs/testing": "11.1.9",
+    "@types/express": "5.0.6",
     "@types/pg": "8.23.1",
     "auth": "1.7.7",
     "markdown-it": "14.1.0",

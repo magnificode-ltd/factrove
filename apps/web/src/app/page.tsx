@@ -1,4 +1,4 @@
-import { createWebClient } from "@/api/client";
+import { createRequestClient } from "@/api/server-client";
 import { libraryViewFromParam, loadLibrary } from "@/library/load-library";
 import { LibraryScreen } from "@/library/library-screen";
 
@@ -10,6 +10,6 @@ export default async function HomePage({
   searchParams: Promise<{ view?: string | string[] }>;
 }) {
   const params = await searchParams;
-  const state = await loadLibrary(createWebClient(), libraryViewFromParam(params.view));
+  const state = await loadLibrary(await createRequestClient(), libraryViewFromParam(params.view));
   return <LibraryScreen state={state} />;
 }

@@ -9,7 +9,7 @@ import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
 loadLocalEnv();
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   configureHttpApp(app);
   const config = app.get<ApiConfig>(API_CONFIG);
   await app.listen(config.port, config.host);

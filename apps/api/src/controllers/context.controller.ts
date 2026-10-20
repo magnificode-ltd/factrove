@@ -1,10 +1,15 @@
-import { Controller, Get, Inject } from "@nestjs/common";
+import type { IncomingHttpHeaders } from "node:http";
+import { Controller, Get, Inject, Req } from "@nestjs/common";
 import { contextEnvelopeSchema, healthEnvelopeSchema, type ContextEnvelope, type HealthEnvelope } from "@factrove/contracts";
-import { LocalActorService } from "../services/local-actor.service.js";
+import { ActorService } from "../auth/actor.service.js";
+
+type HeaderRequest = {
+  headers: IncomingHttpHeaders;
+};
 
 @Controller()
 export class ContextController {
-  constructor(@Inject(LocalActorService) private readonly actor: LocalActorService) {}
+  constructor(@Inject(ActorService) private readonly actors: ActorService) {}
 
   @Get("health")
   health(): HealthEnvelope {
@@ -12,7 +17,8 @@ export class ContextController {
   }
 
   @Get("context")
-  context(): ContextEnvelope {
-    return contextEnvelopeSchema.parse(this.actor.current());
+  async context(@Req() request: HeaderRequest): Promise<ContextEnvelope> {
+    const actor = await this.actors.requireActor(request);
+    return contextEnvelopeSchema.parse({ user: actor.user, organization: actor.organization });
   }
 }

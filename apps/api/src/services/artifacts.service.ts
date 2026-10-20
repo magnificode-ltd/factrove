@@ -8,14 +8,15 @@ import {
   type ArtifactView,
   type ContentFormat,
 } from "@factrove/contracts";
-import { ArtifactsRepository, type ArtifactRecord } from "../database/index.js";
+import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
+import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
+import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
-import { LocalActorService } from "./local-actor.service.js";
 
 const IDENTITY_FIELDS = [
   "creatorUserId",
@@ -32,12 +33,14 @@ export class ArtifactsService {
 
   constructor(
     @Inject(ArtifactsRepository) private readonly artifacts: ArtifactsRepository,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BLOB_STORE) private readonly blobs: BlobStore,
-    @Inject(LocalActorService) private readonly actor: LocalActorService,
+    @Inject(ActorService) private readonly actors: ActorService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
 
-  async upload(file: unknown, body: unknown): Promise<ArtifactDto> {
+  async upload(request: HeaderSource, file: unknown, body: unknown): Promise<ArtifactDto> {
+    const actor = await this.actors.requireActor(request);
     const fields = formFields(body);
     assertNoIdentityFields(fields);
     const accessType = readAccessType(fields);
@@ -46,12 +49,11 @@ export class ArtifactsService {
       throw new ApiErrorException(400, "INVALID_REQUEST", "Send exactly one file.");
     }
 
-    const actor = this.actor.current();
     if (accessType === "org_shared" && actor.organization === null) {
       throw new ApiErrorException(
         400,
         "ORGANIZATION_REQUIRED",
-        "Organization sharing requires a configured local organization.",
+        "Organization sharing requires membership in an organization.",
       );
     }
 
@@ -78,30 +80,30 @@ export class ArtifactsService {
         sizeBytes: upload.bytes.byteLength,
         uploadedAt: new Date(),
       });
-      return this.toDto(record);
+      return this.toDto(record, false);
     } catch (error) {
       await this.deleteOrphan(id, objectKey);
       throw error;
     }
   }
 
-  async list(view: ArtifactView): Promise<ArtifactDto[]> {
-    const actor = this.actor.current();
+  async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
+    const actor = await this.actors.requireActor(request);
     const records = await this.artifacts.list({
       view,
       userId: actor.user.id,
       organizationId: actor.organization?.id ?? null,
     });
-    return records.map((record) => this.toDto(record));
+    return records.map((record) => this.toDto(record, false));
   }
 
-  async getById(id: string): Promise<ArtifactDto> {
-    const record = await this.requireRecord(id);
-    return this.toDto(record);
+  async getById(request: HeaderSource, id: string): Promise<ArtifactDto> {
+    const record = await this.requireReadable(request, id, undefined, "html");
+    return this.toDto(record, !this.actors.hasCredentialHeader(request));
   }
 
-  async openContent(id: string, format: ContentFormat): Promise<OpenedArtifactContent> {
-    const record = await this.requireRecord(id);
+  async openContent(request: HeaderSource, id: string, format: ContentFormat, accessToken: unknown): Promise<OpenedArtifactContent> {
+    const record = await this.requireReadable(request, id, accessToken, format);
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
       stored = await this.blobs.get(artifactObjectKey(record.id));
@@ -136,15 +138,52 @@ export class ArtifactsService {
     }
   }
 
-  private async requireRecord(id: string): Promise<ArtifactRecord> {
+  private async requireReadable(
+    request: HeaderSource,
+    id: string,
+    accessToken: unknown,
+    format: ContentFormat,
+  ): Promise<ArtifactRecord> {
     const record = await this.artifacts.findById(id);
     if (!record) {
+      throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+    }
+    if (this.grantCanRead(request, accessToken, record.id, format)) {
+      return record;
+    }
+    const actor = await this.actors.resolve(request);
+    if (!actor || !(await this.canRead(actor, record))) {
       throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
     }
     return record;
   }
 
-  private toDto(record: ArtifactRecord): ArtifactDto {
+  private grantCanRead(request: HeaderSource, accessToken: unknown, artifactId: string, format: ContentFormat): boolean {
+    if (format !== "html" || this.actors.hasCredentialHeader(request)) {
+      return false;
+    }
+    return this.grantAllows(accessToken, artifactId);
+  }
+
+  private grantAllows(accessToken: unknown, artifactId: string): boolean {
+    return typeof accessToken === "string" && accessToken.length > 0 && contentGrantAllows(accessToken, artifactId, this.config.authSecret);
+  }
+
+  private async canRead(actor: Actor, record: ArtifactRecord): Promise<boolean> {
+    if (actor.user.id === record.creatorUserId) {
+      return true;
+    }
+    if (record.accessType !== "org_shared" || record.organizationId === null) {
+      return false;
+    }
+    const membership = await this.prisma.member.findFirst({
+      where: { userId: actor.user.id, organizationId: record.organizationId },
+      select: { id: true },
+    });
+    return membership !== null;
+  }
+
+  private toDto(record: ArtifactRecord, includeGrant: boolean): ArtifactDto {
     if (record.uploadedAt === null || record.mimeType !== "text/html") {
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
@@ -165,7 +204,9 @@ export class ArtifactsService {
       updatedAt: record.updatedAt.toISOString(),
       uploadedAt: record.uploadedAt.toISOString(),
       viewerUrl: `${this.config.webOrigin}/artifacts/${record.id}`,
-      contentUrl: `${this.config.apiPublicOrigin}/api/v1/artifacts/${record.id}/content`,
+      contentUrl: includeGrant
+        ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
+        : artifactContentUrl(this.config.apiPublicOrigin, record.id),
     });
   }
 

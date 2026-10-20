@@ -1,3 +1,7 @@
+import { isIP } from "node:net";
+import { parse as parsePublicSuffix } from "psl";
+import { readTrustedProxies } from "../auth/client-ip.js";
+
 export const API_CONFIG = Symbol("API_CONFIG");
 
 export type ApiConfig = {
@@ -5,22 +9,26 @@ export type ApiConfig = {
   port: number;
   webOrigin: string;
   apiPublicOrigin: string;
-  localUserId: string;
-  localOrganizationId: string | null;
+  authSecret: string;
+  authCookieDomain: string | null;
+  trustedProxies: readonly string[];
 };
 
 const DEFAULT_WEB_ORIGIN = "http://localhost:3000";
 const DEFAULT_API_ORIGIN = "http://localhost:3001";
-const DEFAULT_LOCAL_USER_ID = "local-user";
+const MIN_AUTH_SECRET_LENGTH = 32;
 
 export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const webOrigin = readOrigin(env.WEB_ORIGIN, DEFAULT_WEB_ORIGIN, "WEB_ORIGIN");
+  const apiPublicOrigin = readOrigin(env.API_PUBLIC_ORIGIN, DEFAULT_API_ORIGIN, "API_PUBLIC_ORIGIN");
   return {
     host: readHost(env.HOST),
     port: readPort(env.PORT),
-    webOrigin: readOrigin(env.WEB_ORIGIN, DEFAULT_WEB_ORIGIN, "WEB_ORIGIN"),
-    apiPublicOrigin: readOrigin(env.API_PUBLIC_ORIGIN, DEFAULT_API_ORIGIN, "API_PUBLIC_ORIGIN"),
-    localUserId: readLocalUserId(env.LOCAL_USER_ID),
-    localOrganizationId: readOptionalId(env.LOCAL_ORGANIZATION_ID),
+    webOrigin,
+    apiPublicOrigin,
+    authSecret: readAuthSecret(env.BETTER_AUTH_SECRET),
+    authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin),
+    trustedProxies: readTrustedProxies(env.TRUSTED_PROXIES),
   };
 }
 
@@ -64,12 +72,42 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readLocalUserId(value: string | undefined): string {
-  const userId = value?.trim() ?? "";
-  return userId.length > 0 ? userId : DEFAULT_LOCAL_USER_ID;
+function readCookieDomain(value: string | undefined, webOrigin: string, apiPublicOrigin: string): string | null {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return null;
+  }
+  const domain = (raw.startsWith(".") ? raw.slice(1) : raw).toLowerCase();
+  if (isIP(domain) !== 0) {
+    throw new Error("AUTH_COOKIE_DOMAIN must be a domain name, not an IP address");
+  }
+  const labels = domain.split(".");
+  const valid = labels.length >= 2
+    && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+  if (!valid || domain.length > 253) {
+    throw new Error("AUTH_COOKIE_DOMAIN must be a parent domain such as factrove.example.com");
+  }
+  const parsed = parsePublicSuffix(domain);
+  if ("error" in parsed || parsed.domain === null) {
+    throw new Error("AUTH_COOKIE_DOMAIN must be a registrable domain, not a public suffix");
+  }
+  const webHost = new URL(webOrigin).hostname;
+  const apiHost = new URL(apiPublicOrigin).hostname;
+  if (!hostIsAtOrUnder(webHost, domain) || !hostIsAtOrUnder(apiHost, domain)) {
+    throw new Error("AUTH_COOKIE_DOMAIN must be WEB_ORIGIN and API_PUBLIC_ORIGIN or a parent of both");
+  }
+  return domain;
 }
 
-function readOptionalId(value: string | undefined): string | null {
-  const id = value?.trim() ?? "";
-  return id.length > 0 ? id : null;
+function hostIsAtOrUnder(host: string, domain: string): boolean {
+  const normalized = host.toLowerCase().replace(/\.+$/, "");
+  return normalized === domain || normalized.endsWith(`.${domain}`);
+}
+
+function readAuthSecret(value: string | undefined): string {
+  const secret = value?.trim() ?? "";
+  if (secret.length < MIN_AUTH_SECRET_LENGTH) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters.");
+  }
+  return secret;
 }

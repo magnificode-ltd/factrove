@@ -1,5 +1,6 @@
 import type { ContextEnvelope } from "@factrove/contracts";
 import { AppBar, ModeNote } from "@/components/chrome";
+import { SignOutButton } from "@/components/sign-out-button";
 import { accessLabel, formatBytes, formatUploadedAt } from "@/format";
 import type { LibraryModel } from "@/library/load-library";
 
@@ -13,6 +14,7 @@ function refreshHref(state: LibraryModel): string {
 
 export function LibraryScreen({ state }: { state: LibraryModel }) {
   const title = state.view === "mine" ? "My artifacts" : "Organization artifacts";
+  const signedIn = state.status === "ready" || state.status === "empty" || state.status === "no-organization";
   return (
     <div className="library-page">
       <AppBar>
@@ -27,11 +29,29 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
         <a className="refresh" href={refreshHref(state)}>
           Refresh
         </a>
+        {state.status === "signed-out" ? (
+          <>
+            <a className="refresh" href="/login">
+              Sign in
+            </a>
+            <a className="refresh" href="/signup">
+              Create account
+            </a>
+          </>
+        ) : null}
+        {signedIn ? (
+          <>
+            <a className="refresh" href="/account/api-keys">
+              API keys
+            </a>
+            <SignOutButton />
+          </>
+        ) : null}
       </AppBar>
       <main className="catalog">
         <h1 className="page-title">{title}</h1>
-        <ModeNote />
-        {state.status === "unavailable" ? null : <p className="context">{contextLabel(state.context)}</p>}
+        {signedIn ? <ModeNote /> : null}
+        {signedIn ? <p className="context">{contextLabel(state.context)}</p> : null}
         <LibraryBody state={state} />
       </main>
     </div>
@@ -39,6 +59,13 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
 }
 
 function LibraryBody({ state }: { state: LibraryModel }) {
+  if (state.status === "signed-out") {
+    return (
+      <p role="status" className="banner">
+        Sign in to see your artifacts.
+      </p>
+    );
+  }
   if (state.status === "unavailable") {
     return (
       <p role="alert" className="banner error">
@@ -72,7 +99,7 @@ function LibraryBody({ state }: { state: LibraryModel }) {
           <a className="row" href={`/artifacts/${encodeURIComponent(artifact.id)}`}>
             <span className="filename">{artifact.filename}</span>
             <span className="row-meta">
-              <span>{accessLabel(artifact.accessType)} · list only</span>
+              <span>{accessLabel(artifact.accessType)}</span>
               <time dateTime={artifact.uploadedAt}>{formatUploadedAt(artifact.uploadedAt)}</time>
               <span>{formatBytes(artifact.sizeBytes)}</span>
             </span>

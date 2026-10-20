@@ -58,7 +58,7 @@ The MVP has three domain concepts: `Artifact`, `User`, and `Organization`. **Art
 
 Generate the identity schema from a pinned Better Auth core + organization configuration and include its required supporting models (such as sessions, accounts, verification, members, and invitations) in the initial committed Prisma migrations. Three domain concepts does not mean exactly three physical tables. Authentication endpoints and enforcement remain disabled for this MVP.
 
-The backend-local Better Auth configuration uses the official Prisma adapter with PostgreSQL: `database: prismaAdapter(prisma, { provider: "postgresql" })`, plus `plugins: [organization()]`. This adapter is part of the agreed identity integration; PostgreSQL-only persistence means no custom cross-database abstraction. Better Auth generates the schema, and Prisma Migrate creates and applies the committed migrations.
+The backend-local Better Auth configuration uses the official Prisma adapter with PostgreSQL: `database: prismaAdapter(prisma, { provider: "postgresql" })`, plus `plugins: [organization()]` for the MVP identity schema. Task 20 adds the API key plugin to that generator. This adapter is part of the agreed identity integration; PostgreSQL-only persistence means no custom cross-database abstraction. Better Auth generates the schema, and Prisma Migrate creates and applies the committed migrations.
 
 PostgreSQL stores metadata and identities; object storage holds file bytes. Artifact's column names below are the application specification. Identity fields below summarize Better Auth's schema rather than replacing the generated definition. Preserve adapter-compatible identity names/mappings; JSON API fields use camelCase.
 
@@ -193,7 +193,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Better Auth runtime login/session flows and API keys, real personal/org authorization, membership management, specific-person sharing, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting are later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Membership administration, specific-person sharing, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

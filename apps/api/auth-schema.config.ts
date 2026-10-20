@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins";
 import { PrismaClient } from "@prisma/client";
+import { factroveApiKey } from "./src/auth/api-key-plugin.js";
 
 function requiredBaseUrl(): string {
   const current = process.env.BASE_URL;
@@ -28,7 +29,9 @@ const baseURL = requiredBaseUrl();
 
 /**
  * Backend-local Better Auth configuration used only to generate the Prisma
- * identity schema. It is not mounted as an auth server.
+ * identity schema. Runtime sign-in lives in src/auth/create-auth.ts and does
+ * not mount organization-plugin HTTP routes. The API key plugin is included so
+ * its table stays in the generated schema.
  */
 export const auth = betterAuth({
   baseURL,
@@ -36,5 +39,5 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
-  plugins: [organization()],
+  plugins: [organization(), factroveApiKey()],
 });

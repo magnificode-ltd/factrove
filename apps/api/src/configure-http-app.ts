@@ -1,4 +1,9 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { INestApplication } from "@nestjs/common";
+import { toNodeHandler } from "better-auth/node";
+import { AuthService } from "./auth/auth.service.js";
+import { assignClientIp } from "./auth/client-ip.js";
+import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
 
@@ -8,6 +13,7 @@ type HeaderResponse = {
 
 export function configureHttpApp(app: INestApplication): void {
   const config = app.get<ApiConfig>(API_CONFIG);
+  const auth = app.get(AuthService);
   app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin(requestOrigin: string | undefined, callback: (error: Error | null, allow?: boolean | string) => void) {
@@ -17,8 +23,26 @@ export function configureHttpApp(app: INestApplication): void {
       }
       callback(null, false);
     },
-    methods: ["GET", "HEAD", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Accept"],
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Accept", "Authorization"],
+  });
+  // Cookie-authenticated writes must come from the web origin. API-key calls send
+  // Authorization and skip this check. This runs before the body parser.
+  app.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
+    if (rejectCookieAuthenticatedWrite(request, response, config.webOrigin)) {
+      return;
+    }
+    next();
+  });
+  // Replace any caller-supplied client IP, then mount Better Auth once.
+  // The handler is resolved per request because Better Auth is created in onModuleInit.
+  app.use("/api/auth", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIp(request, config.trustedProxies);
+    next();
+  });
+  app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
+    void toNodeHandler(auth.handler())(request, response);
   });
   app.useGlobalFilters(new ApiExceptionFilter());
   app.use((_request: unknown, response: HeaderResponse, next: () => void) => {

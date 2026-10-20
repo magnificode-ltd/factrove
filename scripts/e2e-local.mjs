@@ -1,6 +1,9 @@
 // Uses Compose project factrove-e2e, with its own volumes and host ports.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
@@ -37,8 +40,10 @@ const nextEnvPath = join(webAppDir, "next-env.d.ts");
 const nextEnvSnapshot = snapshotFile(nextEnvPath);
 const children = [];
 let browser;
+let ownerContext;
 let chromium;
 let e2eProjectStarted = false;
+let ownerKey = "";
 
 const env = { ...process.env };
 delete env.INIT_CWD;
@@ -89,14 +94,26 @@ async function main() {
   startWeb();
   await waitForJson(`${apiOrigin}/api/v1/health`, (body) => body.status === "ok");
   await waitForText(`${webOrigin}/`, "My artifacts");
-  const context = await getJson(`${apiOrigin}/api/v1/context`);
-  if (context.user?.name !== "Local User" || context.organization?.name !== "Local Organization") {
-    throw new Error(`Unexpected local context: ${JSON.stringify(context)}`);
+  const anonymousContext = await fetch(`${apiOrigin}/api/v1/context`);
+  if (anonymousContext.status !== 401) {
+    throw new Error(`Anonymous context returned ${anonymousContext.status}.`);
   }
+  const anonymousBody = await anonymousContext.json();
+  if (anonymousBody.error?.code !== "UNAUTHENTICATED") {
+    throw new Error(`Anonymous context returned ${JSON.stringify(anonymousBody)}.`);
+  }
+
+  browser = await chromium.launch({ headless: true });
+  ownerContext = await browser.newContext();
+  const owner = await signUpAndCreateKey();
+  ownerKey = owner.secret;
+  const configDir = await mkdtemp(join(tmpdir(), "factrove-e2e-"));
+  await configureProfile(configDir, owner.secret);
+  await addOwnerMembership();
   await expectItems("mine", []);
   await expectItems("org", []);
 
-  const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html"], cliChildEnv());
+  const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--profile", "e2e"], cliChildEnv(configDir));
   const plainViewer = plain.stdout.trim();
   if (!viewerUrl(plainViewer)) {
     throw new Error(`Plain upload did not print a viewer URL.\n${plain.stdout}`);
@@ -104,9 +121,12 @@ async function main() {
   if (plain.stdout.includes("Nest") || plain.stdout.includes("successfully started")) {
     throw new Error("Plain upload stdout included framework logs.");
   }
+  if (plain.stdout.includes(owner.secret)) {
+    throw new Error("Plain upload printed the API key.");
+  }
   const plainId = plainViewer.slice(plainViewer.lastIndexOf("/") + 1);
 
-  const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json"], cliChildEnv());
+  const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   const jsonArtifact = JSON.parse(jsonUpload.stdout).artifact;
   if (jsonArtifact.viewerUrl !== `${webOrigin}/artifacts/${jsonArtifact.id}`) {
     throw new Error(`JSON viewer URL did not use the web origin: ${jsonArtifact.viewerUrl}`);
@@ -114,8 +134,18 @@ async function main() {
   if (jsonArtifact.accessType !== "private") {
     throw new Error(`JSON upload was ${jsonArtifact.accessType}`);
   }
+  if (jsonArtifact.contentUrl.includes("access=") || jsonArtifact.contentUrl.includes("?")) {
+    throw new Error("JSON upload included a content grant.");
+  }
+  if (jsonUpload.stdout.includes(owner.secret)) {
+    throw new Error("JSON upload printed the API key.");
+  }
 
-  const shared = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared"], cliChildEnv());
+  const shared = await must(
+    "pnpm",
+    ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
   const sharedViewer = shared.stdout.trim();
   const sharedId = sharedViewer.slice(sharedViewer.lastIndexOf("/") + 1);
   if (!viewerUrl(sharedViewer)) {
@@ -136,16 +166,18 @@ async function main() {
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
 
-  browser = await chromium.launch({ headless: true });
   await checkLibrary(plainId, jsonArtifact.id, sharedId);
   await checkViewer(plainViewer, fixture);
   await checkViewer(sharedViewer, fixture);
+  await checkSignedOutReturn(plainViewer, owner.email, owner.password);
+  await expectOwnerOnly(plainId);
+  await expectKeyHash(owner.secret);
 
-  const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json"], cliChildEnv());
+  const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   if (missing.code === 0 || !missing.stderr.includes("FILE_NOT_FOUND")) {
     throw new Error(`Missing file did not fail usefully.\n${missing.stderr}`);
   }
-  const unsupported = await run("pnpm", ["factrove", "upload", "./README.md", "--json"], cliChildEnv());
+  const unsupported = await run("pnpm", ["factrove", "upload", "./README.md", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   if (unsupported.code === 0 || !unsupported.stderr.includes("INVALID_INPUT")) {
     throw new Error(`Non-HTML upload did not fail usefully.\n${unsupported.stderr}`);
   }
@@ -173,7 +205,19 @@ async function main() {
   await expectItems("org", [sharedId]);
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
-  await expectSql('select count(*) from "user"', "1");
+  await expectSql('select count(*) from "user"', "3");
+  await revokeKey();
+  const revokedUpload = await run(
+    "pnpm",
+    ["factrove", "upload", "./fixtures/hello.html", "--profile", "e2e", "--json"],
+    cliChildEnv(configDir),
+  );
+  if (revokedUpload.code === 0 || !revokedUpload.stderr.includes("UNAUTHENTICATED")) {
+    throw new Error(`Revoked key upload did not fail.\n${revokedUpload.stderr}`);
+  }
+  if (`${revokedUpload.stdout}\n${revokedUpload.stderr}`.includes(owner.secret)) {
+    throw new Error("Revoked key upload printed the API key.");
+  }
   await stopChild(restartedApi);
   await stopChildren();
 
@@ -207,13 +251,17 @@ function apiChildEnv() {
   child.PORT = e2eApiPort;
   child.WEB_ORIGIN = webOrigin;
   child.API_PUBLIC_ORIGIN = apiOrigin;
-  child.LOCAL_USER_ID = "local-user";
-  child.LOCAL_ORGANIZATION_ID = "local-org";
+  child.BETTER_AUTH_SECRET = "local-only-factrove-auth-secret-change-me";
   return child;
 }
 
-function cliChildEnv() {
-  return { ...env, FACTROVE_API_URL: apiOrigin };
+function cliChildEnv(configDir) {
+  const child = { ...env, FACTROVE_API_URL: apiOrigin, FACTROVE_PROFILE: "e2e" };
+  delete child.FACTROVE_API_KEY;
+  if (configDir) {
+    child.FACTROVE_CONFIG_DIR = configDir;
+  }
+  return child;
 }
 
 function webChildEnv() {
@@ -378,8 +426,8 @@ async function expectSql(sql, expected) {
   }
 }
 
-async function getJson(url) {
-  const response = await fetch(url);
+async function getJson(url, headers = {}) {
+  const response = await fetch(url, { headers: { ...headers, authorization: `Bearer ${ownerKey}` } });
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}`);
   }
@@ -389,6 +437,11 @@ async function getJson(url) {
 async function expectItems(view, ids) {
   const body = await getJson(`${apiOrigin}/api/v1/artifacts?view=${view}`);
   const items = body.items ?? [];
+  for (const item of items) {
+    if (String(item.contentUrl ?? "").includes("access=")) {
+      throw new Error("List content URL included a content grant.");
+    }
+  }
   const actual = items.map((item) => item.id).sort();
   const expected = [...ids].sort();
   if (actual.join(",") !== expected.join(",")) {
@@ -398,7 +451,9 @@ async function expectItems(view, ids) {
 }
 
 async function assertContent(id, fixture) {
-  const response = await fetch(`${apiOrigin}/api/v1/artifacts/${id}/content`);
+  const response = await fetch(`${apiOrigin}/api/v1/artifacts/${id}/content`, {
+    headers: { authorization: `Bearer ${ownerKey}` },
+  });
   if (response.status !== 200) {
     throw new Error(`Content for ${id} returned ${response.status}.`);
   }
@@ -425,8 +480,223 @@ async function assertContent(id, fixture) {
   }
 }
 
+async function signUpAndCreateKey() {
+  const email = "e2e-owner@example.invalid";
+  const password = "e2e-owner-password";
+  const page = await ownerContext.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.goto(`${webOrigin}/signup`);
+    await page.getByLabel("Name").fill("E2E Owner");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await page.waitForURL(`${webOrigin}/`);
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByRole("link", { name: "Sign in" }).waitFor();
+    await page.goto(`${webOrigin}/login`);
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${webOrigin}/`);
+    await page.goto(`${webOrigin}/account/api-keys`);
+    await page.getByLabel("Key name").fill("e2e");
+    await page.getByRole("button", { name: "Create API key" }).click();
+    const secret = (await page.getByTestId("api-key-secret").innerText()).trim();
+    if (!secret.startsWith("ftrv_") || secret.length < 20) {
+      throw new Error("The created API key did not have the expected shape.");
+    }
+    await page.reload();
+    if ((await page.getByTestId("api-key-secret").count()) !== 0) {
+      throw new Error("The API key was still shown after reload.");
+    }
+    if ((await page.content()).includes(secret)) {
+      throw new Error("The API key remained on the page after reload.");
+    }
+    return { secret, email, password };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Browser sign-up or API key creation failed. ${detail}`);
+  } finally {
+    await page.close();
+  }
+}
+
+async function configureProfile(configDir, secret) {
+  const result = await runInput(
+    "pnpm",
+    ["factrove", "configure", "--profile", "e2e"],
+    `${secret}\n${apiOrigin}\n`,
+    cliChildEnv(configDir),
+  );
+  if (result.code !== 0) {
+    throw new Error(`configure failed (${result.code}).\n${result.stderr}`);
+  }
+  if (result.stdout.includes(secret) || result.stderr.includes(secret)) {
+    throw new Error("configure printed the API key.");
+  }
+  if (!result.stdout.includes('Configured profile "e2e"')) {
+    throw new Error(`configure stdout was ${result.stdout}`);
+  }
+}
+
+async function addOwnerMembership() {
+  const context = await getJson(`${apiOrigin}/api/v1/context`);
+  const userId = context.user?.id;
+  if (context.user?.name !== "E2E Owner" || typeof userId !== "string" || !/^[A-Za-z0-9_-]+$/.test(userId)) {
+    throw new Error("The signed-in context did not match the new account.");
+  }
+  await must(
+    "docker",
+    [
+      ...e2eComposeBase(),
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-U",
+      "factrove",
+      "-d",
+      "factrove",
+      "-c",
+      `insert into member (id, "organizationId", "userId", role, "createdAt") values ('e2e-owner-member', 'local-org', '${userId}', 'member', now())`,
+    ],
+    e2eInfraEnv(env),
+  );
+}
+
+async function expectOwnerOnly(artifactId) {
+  const anonymous = await fetch(`${apiOrigin}/api/v1/artifacts/${artifactId}`);
+  const anonymousContent = await fetch(`${apiOrigin}/api/v1/artifacts/${artifactId}/content`);
+  if (anonymous.status !== 404 || anonymousContent.status !== 404) {
+    throw new Error(`Anonymous artifact access returned ${anonymous.status}/${anonymousContent.status}.`);
+  }
+  const otherKey = await signUpApiUser("e2e-other@example.invalid", "E2E Other");
+  const denied = await fetch(`${apiOrigin}/api/v1/artifacts/${artifactId}`, {
+    headers: { authorization: `Bearer ${otherKey}` },
+  });
+  const unknown = await fetch(`${apiOrigin}/api/v1/artifacts/00000000-0000-4000-8000-000000000000`, {
+    headers: { authorization: `Bearer ${otherKey}` },
+  });
+  if (denied.status !== 404 || unknown.status !== 404) {
+    throw new Error(`Another account's read returned ${denied.status}.`);
+  }
+  const deniedBody = await denied.json();
+  const unknownBody = await unknown.json();
+  if (JSON.stringify(deniedBody) !== JSON.stringify(unknownBody)) {
+    throw new Error("A hidden artifact did not use the unknown-id response.");
+  }
+}
+
+async function signUpApiUser(email, name) {
+  const response = await fetch(`${apiOrigin}/api/auth/sign-up/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: webOrigin },
+    body: JSON.stringify({ email, password: "e2e-other-password", name }),
+  });
+  if (!response.ok) {
+    throw new Error(`Second sign-up returned ${response.status}.`);
+  }
+  const created = await fetch(`${apiOrigin}/api/auth/api-key/create`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie: cookieHeader(response),
+      origin: webOrigin,
+    },
+    body: JSON.stringify({ name: "other" }),
+  });
+  if (!created.ok) {
+    throw new Error(`Second API key returned ${created.status}.`);
+  }
+  const body = await created.json();
+  if (typeof body.key !== "string") {
+    throw new Error("Second API key response did not include a key.");
+  }
+  return body.key;
+}
+
+function cookieHeader(response) {
+  const pairs = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
+  const parts = pairs.map((value) => value.split(";", 1)[0]).filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join("; ");
+  }
+  const single = response.headers.get("set-cookie")?.split(";", 1)[0];
+  if (!single) {
+    throw new Error("Sign-up did not set a session cookie.");
+  }
+  return single;
+}
+
+async function expectKeyHash(secret) {
+  const hash = createHash("sha256").update(secret).digest("base64url");
+  if (!/^[A-Za-z0-9_-]+$/.test(hash) || hash === secret) {
+    throw new Error("API key hash did not have the expected shape.");
+  }
+  const result = await must(
+    "docker",
+    [
+      ...e2eComposeBase(),
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-U",
+      "factrove",
+      "-d",
+      "factrove",
+      "-tAc",
+      `select "key" from apikey where "key" = '${hash}'`,
+    ],
+    e2eInfraEnv(env),
+  );
+  if (result.stdout.trim() !== hash) {
+    throw new Error("The stored API key was not the SHA-256 hash.");
+  }
+}
+
+async function revokeKey() {
+  const page = await ownerContext.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.goto(`${webOrigin}/account/api-keys`);
+    await page.getByRole("button", { name: "Revoke" }).click();
+    await page.getByText("No active API keys.").waitFor();
+  } finally {
+    await page.close();
+  }
+}
+
+function runInput(command, args, input, childEnv = env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env: childEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdin.end(input);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      resolve({ code: code ?? 1, signal, stdout, stderr });
+    });
+  });
+}
+
 async function checkLibrary(plainId, jsonId, sharedId) {
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
@@ -463,8 +733,43 @@ async function checkLibrary(plainId, jsonId, sharedId) {
   }
 }
 
+async function checkSignedOutReturn(viewer, email, password) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  const artifactPath = new URL(viewer).pathname;
+  try {
+    await page.goto(viewer);
+    const loggedOut = await page.content();
+    if (loggedOut.includes("Artifact not found")) {
+      throw new Error("A logged-out viewer treated an existing artifact as missing.");
+    }
+    const signIn = page.getByRole("link", { name: "Sign in" });
+    await signIn.waitFor();
+    const href = await signIn.getAttribute("href");
+    const next = new URL(href ?? "", webOrigin).searchParams.get("next");
+    if (next !== artifactPath) {
+      throw new Error(`Sign-in link returned to ${next}.`);
+    }
+    await signIn.click();
+    await page.waitForURL((url) => url.pathname === "/login" && url.searchParams.get("next") === artifactPath);
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(viewer);
+    await page.locator("iframe").waitFor({ timeout: 20000 });
+    if ((await page.content()).includes("Artifact not found")) {
+      throw new Error("Login did not return to the requested artifact.");
+    }
+  } finally {
+    await page.close();
+    await context.close();
+  }
+}
+
 async function checkViewer(viewer, fixture) {
-  const page = await browser.newPage();
+  const page = await ownerContext.newPage();
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {

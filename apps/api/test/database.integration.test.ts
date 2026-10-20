@@ -46,7 +46,7 @@ describe("Better Auth schema generation", () => {
     const config = await readFile(configPath, "utf8");
     expect(config).toContain("prismaAdapter(prisma, {");
     expect(config).toContain('provider: "postgresql"');
-    expect(config).toContain("plugins: [organization()]");
+    expect(config).toContain("plugins: [organization(), factroveApiKey()]");
 
     const before = await readFile(schemaPath, "utf8");
     const result = await execFileAsync("pnpm", ["db:generate-schema"], { cwd: apiRoot });
@@ -123,7 +123,10 @@ describe("PostgreSQL artifact persistence", () => {
     const applied = await prisma.$queryRaw<{ migration_name: string }[]>`
       SELECT migration_name FROM _prisma_migrations ORDER BY migration_name
     `;
-    expect(applied.map((row) => row.migration_name)).toEqual(["20261011120000_add_identity_and_artifact"]);
+    expect(applied.map((row) => row.migration_name)).toEqual([
+      "20261011120000_add_identity_and_artifact",
+      "20261018210000_add_apikey",
+    ]);
   });
 
   it("references generated user and organization identities and leaves member.userId non-unique", async () => {
@@ -135,6 +138,7 @@ describe("PostgreSQL artifact persistence", () => {
     `;
     expect(tables.map((row) => row.tablename)).toEqual([
       "account",
+      "apikey",
       "artifact",
       "invitation",
       "member",

@@ -30,6 +30,10 @@ export interface FactroveClientOptions {
   /** API origin, such as http://localhost:3001. A trailing /api/v1 is accepted. */
   baseUrl: string;
   fetch?: typeof fetch;
+  /** Sent as Authorization: Bearer. Never written to logs by this client. */
+  apiKey?: string;
+  /** Cookie header forwarded by the web server for a browser session. */
+  cookie?: string;
 }
 
 export interface UploadArtifactInput {
@@ -87,9 +91,23 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
   const root = `${normalizeBaseUrl(options.baseUrl)}${API_PREFIX}`;
   const requestFetch = options.fetch ?? globalThis.fetch;
 
+  function withAuth(init: RequestInit): RequestInit {
+    if (!options.apiKey && !options.cookie) {
+      return init;
+    }
+    const headers = new Headers(init.headers);
+    if (options.apiKey) {
+      headers.set("authorization", `Bearer ${options.apiKey}`);
+    }
+    if (options.cookie) {
+      headers.set("cookie", options.cookie);
+    }
+    return { ...init, headers };
+  }
+
   async function send(path: string, init: RequestInit): Promise<Response> {
     try {
-      return await requestFetch(`${root}${path}`, init);
+      return await requestFetch(`${root}${path}`, withAuth(init));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Network request failed";
       throw new FactroveApiError(message, { status: null, code: "NETWORK_ERROR" });
