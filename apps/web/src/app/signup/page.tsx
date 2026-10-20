@@ -2,9 +2,11 @@
 
 import { Suspense, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { AuthField } from "@/components/auth-field";
+import { AuthScreen } from "@/components/auth-screen";
+import { Button } from "@/components/ui/button";
 import { authClient } from "@/auth/client";
 import { authPageHref, safeNextPath } from "@/auth/return-path";
-import { AppBar } from "@/components/chrome";
 
 export default function SignupPage() {
   return (
@@ -37,36 +39,39 @@ function SignupForm() {
   }
 
   return (
-    <div className="library-page">
-      <AppBar />
-      <main className="catalog">
-        <h1 className="page-title">Create account</h1>
-        <form className="auth-form" onSubmit={onSubmit}>
-          <label>
-            Name
-            <input name="name" autoComplete="name" required />
-          </label>
-          <label>
-            Email
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autoComplete="new-password" minLength={8} required />
-          </label>
-          {error ? (
-            <p role="alert" className="banner error">
-              {error}
-            </p>
-          ) : null}
-          <button className="action" type="submit" disabled={pending}>
-            Create account
-          </button>
-        </form>
-        <p className="mode">
-          <a href={authPageHref("login", next)}>Sign in</a>
-        </p>
-      </main>
-    </div>
+    <AuthScreen
+      title="Create account"
+      lede="A library for the pages you and your agents keep."
+      footer={
+        <>
+          Already have an account?{" "}
+          <a className="font-semibold text-foreground underline-offset-4 hover:underline" href={authPageHref("login", next)}>
+            Sign in
+          </a>
+        </>
+      }
+    >
+      <form className="grid gap-5" onSubmit={onSubmit}>
+        <AuthField id="name" name="name" label="Name" autoComplete="name" required />
+        <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required />
+        <AuthField
+          id="password"
+          name="password"
+          label="Password"
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <Button className="h-11" type="submit" disabled={pending}>
+          Create account
+        </Button>
+      </form>
+    </AuthScreen>
   );
 }

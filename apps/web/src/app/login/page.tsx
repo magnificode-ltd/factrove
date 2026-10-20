@@ -2,9 +2,11 @@
 
 import { Suspense, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { AuthField } from "@/components/auth-field";
+import { AuthScreen } from "@/components/auth-screen";
+import { Button } from "@/components/ui/button";
 import { authClient } from "@/auth/client";
 import { authPageHref, safeNextPath } from "@/auth/return-path";
-import { AppBar } from "@/components/chrome";
 
 export default function LoginPage() {
   return (
@@ -36,32 +38,37 @@ function LoginForm() {
   }
 
   return (
-    <div className="library-page">
-      <AppBar />
-      <main className="catalog">
-        <h1 className="page-title">Sign in</h1>
-        <form className="auth-form" onSubmit={onSubmit}>
-          <label>
-            Email
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autoComplete="current-password" required />
-          </label>
-          {error ? (
-            <p role="alert" className="banner error">
-              {error}
-            </p>
-          ) : null}
-          <button className="action" type="submit" disabled={pending}>
-            Sign in
-          </button>
-        </form>
-        <p className="mode">
-          <a href={authPageHref("signup", next)}>Create an account</a>
-        </p>
-      </main>
-    </div>
+    <AuthScreen
+      title="Sign in"
+      lede="Pick up the HTML your agents have already published."
+      footer={
+        <>
+          New here?{" "}
+          <a className="font-semibold text-foreground underline-offset-4 hover:underline" href={authPageHref("signup", next)}>
+            Create an account
+          </a>
+        </>
+      }
+    >
+      <form className="grid gap-5" onSubmit={onSubmit}>
+        <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required />
+        <AuthField
+          id="password"
+          name="password"
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          required
+        />
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <Button className="h-11" type="submit" disabled={pending}>
+          Sign in
+        </Button>
+      </form>
+    </AuthScreen>
   );
 }

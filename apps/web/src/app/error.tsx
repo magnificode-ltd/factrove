@@ -1,20 +1,21 @@
 "use client";
 
 import { AppBar, ModeNote } from "@/components/chrome";
+import { Button } from "@/components/ui/button";
 
 export default function LibraryError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <div className="library-page">
+    <div className="ft-canvas min-h-dvh">
       <AppBar />
-      <main className="catalog">
-        <h1 className="page-title">Artifacts</h1>
+      <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+        <h1 className="ft-title text-4xl sm:text-5xl">Artifacts</h1>
         <ModeNote />
-        <p role="alert" className="banner error">
+        <p role="alert" className="mt-8 max-w-xl text-lg text-destructive">
           This page could not be loaded.
         </p>
-        <button className="action" type="button" onClick={() => reset()}>
+        <Button className="mt-6 h-11" type="button" onClick={() => reset()}>
           Try again
-        </button>
+        </Button>
       </main>
     </div>
   );

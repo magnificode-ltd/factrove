@@ -1,11 +1,13 @@
 "use client";
 
 import { authClient } from "@/auth/client";
+import { Button } from "@/components/ui/button";
 
 export function SignOutButton() {
   return (
-    <button
-      className="refresh"
+    <Button
+      variant="outline"
+      className="h-10 bg-white"
       type="button"
       onClick={() => {
         void authClient.signOut().then(() => {
@@ -14,6 +16,6 @@ export function SignOutButton() {
       }}
     >
       Sign out
-    </button>
+    </Button>
   );
 }

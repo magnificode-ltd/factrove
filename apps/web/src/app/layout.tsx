@@ -1,23 +1,20 @@
 import type { ReactNode } from "react";
-import { Source_Sans_3, Source_Serif_4 } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
+import { cn } from "@/lib/utils";
 import "./globals.css";
 
-const display = Source_Serif_4({
-  subsets: ["latin"],
-  variable: "--font-display"
-});
+const sans = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
-const text = Source_Sans_3({
-  subsets: ["latin"],
-  variable: "--font-text"
-});
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" });
 
 export const metadata = { title: "Factrove", description: "Local HTML artifact library" };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className={`${display.variable} ${text.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={cn(sans.variable, mono.variable, "font-sans")}>
+      <body>
+        {children}
+      </body>
     </html>
   );
 }
