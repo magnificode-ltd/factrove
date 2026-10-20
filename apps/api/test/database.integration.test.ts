@@ -126,6 +126,7 @@ describe("PostgreSQL artifact persistence", () => {
     expect(applied.map((row) => row.migration_name)).toEqual([
       "20261011120000_add_identity_and_artifact",
       "20261018210000_add_apikey",
+      "20261020120000_add_artifact_share",
     ]);
   });
 
@@ -186,6 +187,7 @@ describe("PostgreSQL artifact persistence", () => {
       "artifact_creator_created_id_idx",
       "artifact_org_access_created_id_idx",
       "artifact_pkey",
+      "artifact_share_token_hash_key",
     ]);
 
     const createdAtType = await prisma.$queryRaw<{ data_type: string }[]>`

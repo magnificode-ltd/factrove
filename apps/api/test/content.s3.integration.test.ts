@@ -124,7 +124,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
     });
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
-    expect(content.headers.get("content-security-policy")).toBe(contentSecurityPolicy("http://localhost:3000"));
+    expect(content.headers.get("content-security-policy")).toBe(contentSecurityPolicy(["http://localhost:3000"]));
   });
 });
 

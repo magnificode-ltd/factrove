@@ -1209,7 +1209,7 @@ describe("HTTP API", () => {
     expect(JSON.stringify(revokedError)).not.toContain(token);
     const revokedContent = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
     expect(revokedContent.status).toBe(404);
-    expect(await errorOf(revokedContent)).toEqual(await errorOf(missingArtifact));
+    expect(await errorOf(revokedContent)).toEqual(revokedError);
 
     const rotated = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
       method: "POST",
