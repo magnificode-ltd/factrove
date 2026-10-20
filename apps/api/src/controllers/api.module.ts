@@ -3,10 +3,11 @@ import { AuthModule } from "../auth/auth.module.js";
 import { ServicesModule } from "../services/services.module.js";
 import { ArtifactsController } from "./artifacts.controller.js";
 import { ContextController } from "./context.controller.js";
+import { PublicArtifactsController } from "./public-artifacts.controller.js";
 
 @Module({
   imports: [ServicesModule, AuthModule],
-  controllers: [ContextController, ArtifactsController],
+  controllers: [ContextController, ArtifactsController, PublicArtifactsController],
   exports: [ServicesModule],
 })
 export class ApiModule {}

@@ -43,7 +43,8 @@ export function ViewerBar({ title, meta, tools }: { title: string; meta?: ReactN
 export function ModeNote() {
   return (
     <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
-      Private artifacts are visible only to you. Organization-shared artifacts are visible to members of that organization.
+      Private artifacts are visible only to you. Organization-shared artifacts are visible to members of that
+      organization. A public link works only after you share the artifact.
     </p>
   );
 }

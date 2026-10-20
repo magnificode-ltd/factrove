@@ -54,8 +54,9 @@ type ArtifactDto = {
   createdAt: string;
   updatedAt: string;
   uploadedAt: string; // Set when the row is inserted after the object write succeeds.
-  viewerUrl: string;  // WEB_ORIGIN + /artifacts/{id}
+  viewerUrl: string;  // PUBLIC_BASE_URL + /artifacts/{id}. PUBLIC_BASE_URL defaults to WEB_ORIGIN.
   contentUrl: string; // API_PUBLIC_ORIGIN + /api/v1/artifacts/{id}/content. Session detail appends ?access=<grant>
+  shared: boolean;    // True when the owner has an active public link. The token is not included.
 };
 type ApiError = {
   error: { code: string; message: string };
@@ -72,13 +73,24 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/v1/artifacts?view=mine\|org | Default mine | 200 `{ items: ArtifactDto[] }` |
 | GET /api/v1/artifacts/{id} | Session cookie or `Authorization: Bearer` | 200 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts/{id}/content | Optional `format=html\|markdown`. Omitted means `html`. Optional `access` grant. | 200 HTML bytes, or Markdown converted from those bytes |
+| GET /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared, shareUrl } }` |
+| POST /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared: true, shareUrl } }`. Repeating it returns the same link. |
+| DELETE /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared: false, shareUrl: null } }` |
+| GET /api/v1/public/artifacts/{id}/{token} | No credentials | 200 `{ artifact: { id, filename, mimeType, sizeBytes, uploadedAt, contentUrl } }` |
+| GET /api/v1/public/artifacts/{id}/{token}/content | No credentials | 200 HTML bytes |
 | POST /api/auth/api-key/create | Browser session, JSON `{ name }` | 200 API key, including `key` once |
 | GET /api/auth/api-key/list | Browser session | 200 `{ apiKeys, total }` without `key` |
 | POST /api/auth/api-key/delete | Browser session, JSON `{ keyId }` | 200 `{ success: true }` |
 
 `/api/auth/*` is Better Auth email/password sign-up, sign-in, sign-out, and API key management. It is outside the `/api/v1` prefix and is mounted once. Product routes accept `Authorization: Bearer <key>`. They do not accept `x-api-key` as a credential. A present `Authorization` or `x-api-key` header disables the content grant. The CLI sends `Authorization: Bearer`.
 
-The API builds absolute URLs from configuration, never an untrusted Host header. An unknown id, an unauthenticated read, and a read by someone who is not allowed all return the same `404 ARTIFACT_NOT_FOUND` body. List, upload, and context without credentials return `401 UNAUTHENTICATED`. A present `Authorization` header that is not a valid active key does not fall back to a session cookie.
+The API builds absolute URLs from configuration, never an untrusted Host header. `PUBLIC_BASE_URL` is that origin for viewer URLs and public share links. An unset or blank value uses `WEB_ORIGIN`. It must be an absolute `http` or `https` origin with no credentials, path, query, or hash. `http://localhost:3000` keeps links on localhost. `https://factrove.app` uses that domain plus the artifact id. Embeds use the same setting. Setting it does not start a server or publish the app.
+
+An unknown id, an unauthenticated read, and a read by someone who is not allowed all return the same `404 ARTIFACT_NOT_FOUND` body. List, upload, and context without credentials return `401 UNAUTHENTICATED`. A present `Authorization` header that is not a valid active key does not fall back to a session cookie.
+
+Artifacts stay private until the owner shares them. `POST /api/v1/artifacts/{id}/share` stores a new 32-byte base64url token and its SHA-256 hash. The raw token is returned only on the owner share routes, as `shareUrl` = `PUBLIC_BASE_URL/share/{id}/{token}`. The artifact id is already visible in private viewer URLs, so the public path adds the token. A later `POST` returns the same token. `DELETE` clears both columns. Sharing again mints a new token, and the previous URL stays `404`. Only the creator can read or change the share. Another member who can read an `org_shared` artifact receives the same `404` as a missing id. A share request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded. `shared` on `ArtifactDto` tells the library whether a public link exists. List and detail JSON do not include the token.
+
+`GET /api/v1/public/artifacts/{id}/{token}` and its `/content` route need no session. The response is the filename, size, upload time, and a content URL. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Markdown is not offered on the public route. An invalid id, an invalid token, an unshared artifact, and a revoked token all return the same `404 ARTIFACT_NOT_FOUND` body. Those responses do not say whether the artifact exists. Public views are rate limited to 60 requests per 60 seconds, keyed by `x-factrove-client-ip` after the API replaces any caller-supplied value. A missing address shares one bucket. The limit counts lookups that will 404. The status is `429 RATE_LIMITED` with message `Too many requests. Try again later.` Application logs record a Prisma error code when a share cannot be stored. They do not record the token.
 
 `private` is readable only by the creator. `org_shared` is readable by the creator and by members of `artifact.organizationId`. `org_shared` upload without a current organization is `400 ORGANIZATION_REQUIRED`.
 
@@ -122,7 +134,8 @@ Return the common JSON envelope without stack traces or secrets:
 | 413 | CONTENT_TOO_LARGE | Stored HTML exceeds the Markdown conversion limit |
 | 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
-| 404 | ARTIFACT_NOT_FOUND | Unknown artifact, or an artifact the caller cannot read |
+| 404 | ARTIFACT_NOT_FOUND | Unknown artifact, an artifact the caller cannot read, or a public link that is not active |
+| 429 | RATE_LIMITED | Too many public views from one client address |
 | 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
 | 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
@@ -140,6 +153,10 @@ client.uploadArtifact({ file: Blob, filename, accessType? })
 client.listArtifacts({ view: "mine" | "org" })
 client.getArtifact(id)
 client.getArtifactContent(id, { format?: "html" | "markdown" })
+client.getArtifactShare(id)
+client.createArtifactShare(id)
+client.revokeArtifactShare(id)
+client.getPublicArtifact(id, token)
 ```
 
 `getArtifactContent` returns `{ format, mediaType, content }`. `format` defaults to `html`. `mediaType` is `text/html` or `text/markdown`. `content` is the response body as text, including a leading UTF-8 BOM when the stored HTML has one. HTML requests omit the format query. Markdown requests use `?format=markdown`. The HTTP success body stays raw text; this object is the client result, not a second JSON envelope from the API.
@@ -157,6 +174,9 @@ Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. O
 - `delete(id)`
 - `findById(id)`
 - `list({ view, userId, organizationId })`
+- `saveShare(id, shareToken, shareTokenHash)`
+- `clearShare(id)`
+- `findShared(id, shareTokenHash)` looks up an active public share by hash and does not select the raw token
 
 Return backend-internal records; task 04 maps them to DTOs. PrismaService remains available for resolving the configured user/org. Concrete repositories are PostgreSQL implementations, not interchangeable adapters.
 
@@ -193,9 +213,9 @@ Set iframe sandbox to `allow-scripts` without allow-same-origin, and referrer po
 - includes `sandbox allow-scripts`;
 - allows inline scripts/styles and embedded data/blob images, plus embedded fonts as needed;
 - blocks network connections, external scripts/resources, forms, objects, nested frames, base-URL changes, and top-level navigation;
-- permits framing only by configured WEB_ORIGIN.
+- permits framing by `PUBLIC_BASE_URL`, and also by `WEB_ORIGIN` when that origin is different.
 
-Keep the policy fixed and tested. API CORS allows only WEB_ORIGIN, not wildcard or the opaque null origin of sandboxed HTML. Error responses remain non-executable JSON. Content lives on the API origin (port 3001), separate from the Next.js origin (port 3000). The iframe stays `sandbox="allow-scripts"` without `allow-same-origin`, and the viewer preflight omits credentials. `contentUrl` carries a short-lived HMAC grant so that request can still be authorized. Try again reloads the artifact page so the server mints a new grant. Fetching the previous `contentUrl` again would reuse an expired one.
+Keep the policy fixed and tested. API CORS allows those same browser origins, not wildcard or the opaque null origin of sandboxed HTML. Cookie-authenticated writes still require `Origin` to equal `WEB_ORIGIN`. Error responses remain non-executable JSON. Content lives on the API origin (port 3001), separate from the Next.js origin (port 3000). The iframe stays `sandbox="allow-scripts"` without `allow-same-origin`, and the viewer preflight omits credentials. `contentUrl` carries a short-lived HMAC grant so that request can still be authorized. Try again reloads the artifact page so the server mints a new grant. Fetching the previous `contentUrl` again would reuse an expired one.
 
 Self-contained HTML is the stored artifact. Documents relying on CDNs/network resources are not supported. Previews, screenshots, and headless rendering are out of scope. Markdown exists only as an on-request conversion of the stored HTML. Uploads remain HTML, and neither the database nor object storage gains a Markdown copy.
 
@@ -212,6 +232,9 @@ pnpm factrove upload ./report.html --api-url http://localhost:3001 --profile dev
 pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown --json
 pnpm factrove get <artifact-id> --api-url http://localhost:3001
+pnpm factrove share <artifact-id>
+pnpm factrove share <artifact-id> --json
+pnpm factrove share <artifact-id> --revoke
 ```
 
 - When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
@@ -220,13 +243,15 @@ pnpm factrove get <artifact-id> --api-url http://localhost:3001
 - `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. When the path is a symlink, the rename updates the target and leaves the symlink in place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
 - Access defaults to private. `--access` is only valid for `upload`.
 - `--format html|markdown` is only valid for `get` and defaults to `html`.
-- Plain upload success prints only viewerUrl plus newline to stdout.
+- `--revoke` is only valid for `share`.
+- Plain upload success prints only viewerUrl plus newline to stdout. The viewer URL uses `PUBLIC_BASE_URL`.
 - JSON upload success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
 - Plain get success prints the content bytes and does not add a newline of its own.
 - JSON get success prints one line: `{ format, mediaType, content }`, with `mediaType` of `text/html` or `text/markdown`.
+- Plain share success prints only the public URL plus newline. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. JSON share success prints `{ share: { shared, shareUrl } }` on one line. `shareUrl` is null after revoke.
 - Errors go to stderr and exit nonzero. In --json mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR.
 - No progress/framework startup logs on stdout. Close the Nest application context so the process exits.
-- `configure` is the credentials command. There is no login, list, or share command in the CLI, no background process, and no separate CLI server.
+- `configure` is the credentials command. There is no login or list command in the CLI, no background process, and no separate CLI server.
 - Do not add automatic retries for uploads. `get` calls the content endpoint once.
 
 ## Configuration and planned root commands
@@ -243,11 +268,12 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 | pnpm factrove configure | Save an API key and API URL for a profile |
 | pnpm factrove upload ... | Run Nest CLI upload |
 | pnpm factrove get ... | Print artifact content as HTML or Markdown |
+| pnpm factrove share ... | Create, print, or revoke a public link |
 | pnpm build / pnpm typecheck / pnpm test | Workspace verification |
 | pnpm infra:down | Stop services without removing data volumes |
 | pnpm e2e | Run the local upload, viewer, restart, and S3 integration checks against Compose project factrove-e2e |
 
-Application env (`apps/api/.env`, copied from `apps/api/.env.example`): DATABASE_URL, HOST (127.0.0.1), PORT (3001), WEB_ORIGIN, API_PUBLIC_ORIGIN, NEXT_PUBLIC_API_URL, BETTER_AUTH_SECRET, optional AUTH_COOKIE_DOMAIN, optional TRUSTED_PROXIES, S3_BUCKET, S3_REGION, optional S3_ENDPOINT and S3_FORCE_PATH_STYLE, and the standard AWS credential chain (`AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN`). The API loads that file and keeps variables already set in the process. `pnpm dev` passes `NEXT_PUBLIC_API_URL` from the same file to the web app when the variable is unset. `pnpm build` and `next build` do the same, and Next.js fixes that origin in the client bundle. `next start` cannot change it. Only `NEXT_PUBLIC_API_URL` is copied. The default is http://localhost:3001. `S3_INTEGRATION=1` runs the storage integration tests against local Garage. Those tests set the Garage endpoint and credentials, remove `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before opening a client. With `S3_ENDPOINT` unset, the API does not use a custom S3 endpoint. `MARKDOWN_CONVERSION_CONCURRENCY` (default 2) and `MARKDOWN_CONVERSION_QUEUE` (default 2) bound on-request Markdown conversion.
+Application env (`apps/api/.env`, copied from `apps/api/.env.example`): DATABASE_URL, HOST (127.0.0.1), PORT (3001), WEB_ORIGIN, API_PUBLIC_ORIGIN, PUBLIC_BASE_URL, NEXT_PUBLIC_API_URL, BETTER_AUTH_SECRET, optional AUTH_COOKIE_DOMAIN, optional TRUSTED_PROXIES, S3_BUCKET, S3_REGION, optional S3_ENDPOINT and S3_FORCE_PATH_STYLE, and the standard AWS credential chain (`AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN`). `PUBLIC_BASE_URL` defaults to `WEB_ORIGIN` when unset. It is an absolute http(s) origin and is the only source for viewer URLs and public share links. The API loads that file and keeps variables already set in the process. `pnpm dev` passes `NEXT_PUBLIC_API_URL` from the same file to the web app when the variable is unset. `pnpm build` and `next build` do the same, and Next.js fixes that origin in the client bundle. `next start` cannot change it. Only `NEXT_PUBLIC_API_URL` is copied. The default is http://localhost:3001. `S3_INTEGRATION=1` runs the storage integration tests against local Garage. Those tests set the Garage endpoint and credentials, remove `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before opening a client. With `S3_ENDPOINT` unset, the API does not use a custom S3 endpoint. `MARKDOWN_CONVERSION_CONCURRENCY` (default 2) and `MARKDOWN_CONVERSION_QUEUE` (default 2) bound on-request Markdown conversion.
 
 CLI env (`apps/cli/.env`, copied from `apps/cli/.env.example`): `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `pnpm factrove` reads that file. The built CLI does not. A URL from the file is used only when `FACTROVE_API_URL` is unset and the selected profile has no `api_url`. The file does not supply an API key or config-path overrides. The CLI reads `FACTROVE_API_KEY`, `FACTROVE_PROFILE`, and the config-path overrides from the process environment, and reads `api_url` and `factrove_api_key` from `~/.factrove/config` and `~/.factrove/credentials`. Precedence is flags, then process environment variables, then profile files, then the dev file URL. Client packages must never receive database, storage, or auth-secret credentials. The dev file is limited to `FACTROVE_API_URL` and `FACTROVE_PROFILE`.
 

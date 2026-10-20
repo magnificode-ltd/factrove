@@ -6,6 +6,7 @@ import { formatFailure } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
 import { GetCommand } from "./get.command.js";
 import { cliWantsJson, helpText } from "./parse-args.js";
+import { ShareCommand } from "./share.command.js";
 import { UploadCommand } from "./upload.command.js";
 
 // scripts/factrove.mjs loads apps/cli/.env for local development. This entrypoint does not.
@@ -26,6 +27,8 @@ async function run(): Promise<void> {
       await app.get(ConfigureCommand).execute();
     } else if (invocation.kind === "get") {
       await app.get(GetCommand).execute();
+    } else if (invocation.kind === "share") {
+      await app.get(ShareCommand).execute();
     } else {
       await app.get(UploadCommand).execute();
     }

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getContext: vi.fn(),
   listArtifacts: vi.fn(),
   getArtifact: vi.fn(),
+  getArtifactShare: vi.fn(),
   uploadArtifact: vi.fn()
 }));
 
@@ -32,13 +33,16 @@ const artifact: ArtifactDto = {
   updatedAt: "2026-10-11T10:00:00.000Z",
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
-  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content"
+  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content",
+  shared: false
 };
 
 beforeEach(() => {
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
   api.getArtifact.mockReset();
+  api.getArtifactShare.mockReset();
+  api.getArtifactShare.mockResolvedValue({ share: { shared: false, shareUrl: null } });
   api.getContext.mockResolvedValue({
     user: { id: "local-user", name: "Local User" },
     organization: { id: "local-org", name: "Local Organization" }

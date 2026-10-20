@@ -5,6 +5,7 @@ import { CliError } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { GetCommand } from "./get.command.js";
+import { ShareCommand } from "./share.command.js";
 import { UploadCommand } from "./upload.command.js";
 import { UploadFileService } from "./upload-file.service.js";
 
@@ -14,6 +15,7 @@ import { UploadFileService } from "./upload-file.service.js";
     UploadFileService,
     UploadCommand,
     GetCommand,
+    ShareCommand,
     ConfigureCommand,
     {
       provide: FACTROVE_CLIENT,
@@ -45,5 +47,9 @@ function lazyClient(config: CliConfigService): FactroveClient {
     listArtifacts: (input) => resolve().listArtifacts(input),
     getArtifact: (id) => resolve().getArtifact(id),
     getArtifactContent: (id, input) => resolve().getArtifactContent(id, input),
+    getArtifactShare: (id) => resolve().getArtifactShare(id),
+    createArtifactShare: (id) => resolve().createArtifactShare(id),
+    revokeArtifactShare: (id) => resolve().revokeArtifactShare(id),
+    getPublicArtifact: (id, token) => resolve().getPublicArtifact(id, token),
   };
 }

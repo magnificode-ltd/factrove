@@ -554,6 +554,43 @@ describe("factrove get", () => {
   });
 });
 
+describe("factrove share", () => {
+  const token = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const shareUrl = `https://factrove.app/share/${artifactId}/${token}`;
+
+  it("prints only the public link and does not print it again on revoke", async () => {
+    const stub = await startStub((request) => {
+      if (request.method === "DELETE") {
+        return { status: 200, body: { share: { shared: false, shareUrl: null } } };
+      }
+      return { status: 200, body: { share: { shared: true, shareUrl } } };
+    });
+    const created = await runCli(["share", artifactId, "--api-url", stub.url]);
+    expect(created.code).toBe(0);
+    expect(created.stdout).toBe(`${shareUrl}\n`);
+    expect(created.stderr).toBe("");
+    expect(stub.requests[0]?.method).toBe("POST");
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share`);
+    expect(created.stdout).not.toContain("ftrv_test_key");
+
+    const revoked = await runCli(["share", artifactId, "--revoke", "--api-url", stub.url]);
+    expect(revoked.code).toBe(0);
+    expect(revoked.stdout).toBe(`Revoked the public link for ${artifactId}.\n`);
+    expect(revoked.stdout).not.toContain(token);
+    expect(revoked.stderr).not.toContain(token);
+    expect(stub.requests[1]?.method).toBe("DELETE");
+  });
+
+  it("prints the share envelope on one line", async () => {
+    const body = { share: { shared: true, shareUrl } };
+    const stub = await startStub(() => ({ status: 200, body }));
+    const result = await runCli(["share", artifactId, "--json", "--api-url", stub.url]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`${JSON.stringify(body)}\n`);
+    expect(result.stderr).toBe("");
+  });
+});
+
 function accepted(sizeBytes: number, accessType: "private" | "org_shared" = "private") {
   return { status: 201, body: created(sizeBytes, accessType) };
 }
@@ -573,6 +610,7 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
       uploadedAt: "2026-10-18T12:00:00.000Z",
       viewerUrl: `http://localhost:3000/artifacts/${artifactId}`,
       contentUrl: `http://localhost:3001/api/v1/artifacts/${artifactId}/content`,
+      shared: false,
     },
   };
 }

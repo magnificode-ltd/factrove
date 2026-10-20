@@ -6,6 +6,7 @@ import { assignClientIp } from "./auth/client-ip.js";
 import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
+import { browserOrigins } from "./sharing/public-origin.js";
 
 type HeaderResponse = {
   setHeader(name: string, value: string): void;
@@ -17,8 +18,8 @@ export function configureHttpApp(app: INestApplication): void {
   app.setGlobalPrefix("api/v1");
   app.enableCors({
     origin(requestOrigin: string | undefined, callback: (error: Error | null, allow?: boolean | string) => void) {
-      if (requestOrigin === config.webOrigin) {
-        callback(null, config.webOrigin);
+      if (requestOrigin !== undefined && browserOrigins(config.webOrigin, config.publicBaseUrl).includes(requestOrigin)) {
+        callback(null, requestOrigin);
         return;
       }
       callback(null, false);
@@ -38,6 +39,11 @@ export function configureHttpApp(app: INestApplication): void {
   // Replace any caller-supplied client IP, then mount Better Auth once.
   // The handler is resolved per request because Better Auth is created in onModuleInit.
   app.use("/api/auth", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIp(request, config.trustedProxies);
+    next();
+  });
+  // Public views use the same client-IP header. Drop any caller-supplied value first.
+  app.use("/api/v1/public", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
     assignClientIp(request, config.trustedProxies);
     next();
   });

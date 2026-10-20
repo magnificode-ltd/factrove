@@ -63,6 +63,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       port: 3001,
       webOrigin: "http://localhost:3000",
       apiPublicOrigin: "http://localhost:3001",
+      publicBaseUrl: "http://localhost:3000",
       authSecret: TEST_AUTH_SECRET,
       authCookieDomain: null,
       trustedProxies: [],

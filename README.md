@@ -38,6 +38,7 @@ apps/api/
 │   ├── controllers/
 │   │   ├── api.module.ts
 │   │   ├── artifacts.controller.ts
+│   │   ├── public-artifacts.controller.ts
 │   │   └── context.controller.ts
 │   ├── services/
 │   │   ├── services.module.ts
@@ -58,6 +59,10 @@ apps/api/
 │   │   │   └── seed-local-identities.ts
 │   │   └── types/
 │   │       └── artifact-record.ts    # Internal persistence records/inputs
+│   ├── sharing/
+│   │   ├── share-link.ts             # Public base URL, share token, and link builders
+│   │   ├── public-origin.ts          # Browser origins for CORS and frame-ancestors
+│   │   └── public-view-limit.ts      # Public view rate limit
 │   ├── storage/
 │   │   ├── index.ts
 │   │   ├── storage.module.ts
@@ -105,7 +110,9 @@ Uploaded HTML is rendered by the browser in an isolated viewer. The backend's re
 
 This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to Garage, the local S3-compatible server started with it. Real AWS S3 stays available: set the bucket, region, and credentials, and leave `S3_ENDPOINT` unset. The API and the web app share one environment file. The CLI reads its own environment file, process variables, and `~/.factrove` profile files. Database and storage credentials stay in the application environment.
 
-Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization. The CLI sends an API key from `FACTROVE_API_KEY` or from `factrove configure`. Create and revoke keys at `/account/api-keys`. The secret is shown once.
+Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization. A public link works only after the owner shares the artifact. Anyone with that link can open it without an account. The CLI sends an API key from `FACTROVE_API_KEY` or from `factrove configure`. Create and revoke keys at `/account/api-keys`. The secret is shown once.
+
+`PUBLIC_BASE_URL` is the origin used for viewer URLs and public share links. When it is unset, those links use `WEB_ORIGIN`. `http://localhost:3000` keeps every link on localhost. `https://factrove.app` uses that domain plus the artifact id. The same value is the source for later embeds. It does not start a server or publish the app. CORS and `frame-ancestors` follow that origin and `WEB_ORIGIN`.
 
 ### Prerequisites
 
@@ -179,11 +186,15 @@ pnpm factrove upload --help
 pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown
 pnpm factrove get <artifact-id> --format markdown --json
+pnpm factrove share <artifact-id>
+pnpm factrove share <artifact-id> --revoke
 ```
 
 Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
 `pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
+
+`pnpm factrove share <id>` creates a public link, or prints the existing one. Plain success prints that URL. `--revoke` removes it and prints a confirmation that does not include the token. `--json` prints `{ share: { shared, shareUrl } }`. The owner can also use Share in the library or the viewer. Copy link copies the public URL while a share is on, and the private viewer URL otherwise.
 
 When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get <id>` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 

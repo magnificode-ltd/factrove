@@ -115,7 +115,12 @@ function LibraryBody({ state, now }: { state: LibraryModel; now: number }) {
   return (
     <ul className="ft-list mt-10 grid list-none gap-3 p-0">
       {state.items.map((artifact) => (
-        <ArtifactCard key={artifact.id} artifact={artifact} now={now} />
+        <ArtifactCard
+          key={artifact.id}
+          artifact={artifact}
+          now={now}
+          canShare={artifact.creatorUserId === state.context.user.id}
+        />
       ))}
     </ul>
   );

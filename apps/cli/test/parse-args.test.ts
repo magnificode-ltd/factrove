@@ -161,6 +161,35 @@ describe("factrove configure arguments", () => {
   });
 });
 
+describe("factrove share arguments", () => {
+  it("shares an artifact and can revoke that link", () => {
+    expect(parseCliArgs(["share", artifactId], isolated)).toEqual({
+      kind: "share",
+      id: artifactId,
+      revoke: false,
+      json: false,
+      apiUrl: DEFAULT_API_URL,
+      profile: "default",
+      profileExplicit: false,
+    });
+    expect(parseCliArgs(["share", artifactId, "--revoke", "--json"], isolated)).toMatchObject({
+      kind: "share",
+      revoke: true,
+      json: true,
+    });
+  });
+
+  it("rejects share flags on the other commands", () => {
+    expect(failure(["share"], {}).message).toMatch(/Missing artifact id/);
+    expect(failure(["share", "not-a-uuid"], {}).message).toMatch(/UUID/);
+    expect(failure(["share", artifactId, "--revoke", "--revoke"], {}).message).toMatch(/more than once/);
+    expect(failure(["upload", file, "--revoke"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["get", artifactId, "--revoke"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["share", artifactId, "--access", "private"], {}).message).toMatch(/only valid for the upload command/);
+    expect(failure(["configure", "--revoke"], {}).message).toMatch(/configure accepts/);
+  });
+});
+
 function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {
   const parsed = parseCliArgs(argv, { ...isolated, ...env });
   if (parsed.kind !== "upload") {

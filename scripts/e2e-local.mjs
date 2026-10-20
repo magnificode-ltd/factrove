@@ -172,6 +172,7 @@ async function main() {
   await checkSignedOutReturn(plainViewer, owner.email, owner.password);
   await expectOwnerOnly(plainId);
   await expectKeyHash(owner.secret);
+  await checkPublicShare(plainId, fixture, configDir);
 
   const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   if (missing.code === 0 || !missing.stderr.includes("FILE_NOT_FOUND")) {
@@ -251,6 +252,7 @@ function apiChildEnv() {
   child.PORT = e2eApiPort;
   child.WEB_ORIGIN = webOrigin;
   child.API_PUBLIC_ORIGIN = apiOrigin;
+  child.PUBLIC_BASE_URL = webOrigin;
   child.BETTER_AUTH_SECRET = "local-only-factrove-auth-secret-change-me";
   return child;
 }
@@ -776,43 +778,184 @@ async function checkViewer(viewer, fixture) {
   page.setDefaultNavigationTimeout(60000);
   try {
     await page.goto(viewer);
-    const frame = page.locator("iframe");
-    await frame.waitFor({ timeout: 20000 });
-    const sandbox = await frame.getAttribute("sandbox");
-    const referrer = await frame.getAttribute("referrerpolicy");
-    if (sandbox !== "allow-scripts" || referrer !== "no-referrer") {
-      throw new Error(`iframe sandbox=${sandbox} referrerpolicy=${referrer}`);
+    await assertIsolatedFrame(page, fixture);
+  } finally {
+    await page.close();
+  }
+}
+
+function shareLinkPattern(id) {
+  return new RegExp(`^http://127\\.0\\.0\\.1:${e2eWebPort}/share/${id}/[A-Za-z0-9_-]{43}$`);
+}
+
+async function checkPublicShare(plainId, fixture, configDir) {
+  const guessed = await fetch(`${apiOrigin}/api/v1/public/artifacts/${plainId}/${"a".repeat(43)}`);
+  const guessedBody = await guessed.json();
+  if (guessed.status !== 404 || guessedBody.error?.code !== "ARTIFACT_NOT_FOUND") {
+    throw new Error(`An unshared artifact returned ${guessed.status} ${JSON.stringify(guessedBody)}.`);
+  }
+
+  const shared = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
+  const shareUrl = shared.stdout.trim();
+  if (!shareLinkPattern(plainId).test(shareUrl)) {
+    throw new Error(`Share did not print a public link on the configured base URL.\n${shared.stdout}`);
+  }
+  if (shareUrl.startsWith("http://localhost:3000/") || shared.stdout.includes(ownerKey)) {
+    throw new Error("Share printed a hard-coded origin or the API key.");
+  }
+  const token = shareUrl.slice(shareUrl.lastIndexOf("/") + 1);
+
+  const jsonShare = await must(
+    "pnpm",
+    ["factrove", "share", plainId, "--json", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  const envelope = JSON.parse(jsonShare.stdout);
+  if (envelope.share?.shareUrl !== shareUrl || jsonShare.stdout.includes(ownerKey)) {
+    throw new Error(`JSON share did not repeat the same public link.\n${jsonShare.stdout}`);
+  }
+
+  const anonymous = await browser.newContext();
+  const publicPage = await anonymous.newPage();
+  publicPage.setDefaultTimeout(30000);
+  publicPage.setDefaultNavigationTimeout(60000);
+  try {
+    await publicPage.goto(shareUrl);
+    await assertIsolatedFrame(publicPage, fixture);
+    const visible = await publicPage.locator("body").innerText();
+    if (visible.includes(token)) {
+      throw new Error("The public page text included the share token.");
     }
-    const parent = await page.content();
-    if (parent.includes("Inline JavaScript ran successfully.") || parent.includes(fixture.toString("utf8").slice(0, 40))) {
-      throw new Error("Uploaded HTML was injected into the viewer page.");
+  } finally {
+    await publicPage.close();
+    await anonymous.close();
+  }
+
+  const content = await fetch(`${apiOrigin}/api/v1/public/artifacts/${plainId}/${token}/content`);
+  if (content.status !== 200) {
+    throw new Error(`Public content returned ${content.status}.`);
+  }
+  const csp = content.headers.get("content-security-policy") ?? "";
+  if (!csp.includes("sandbox allow-scripts") || csp.includes("allow-same-origin") || !csp.includes(`frame-ancestors ${webOrigin}`)) {
+    throw new Error(`Public content CSP was ${csp}`);
+  }
+
+  await ownerContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin: webOrigin });
+  const ownerPage = await ownerContext.newPage();
+  ownerPage.setDefaultTimeout(30000);
+  ownerPage.setDefaultNavigationTimeout(60000);
+  try {
+    await ownerPage.goto(`${webOrigin}/artifacts/${plainId}`);
+    const region = ownerPage.getByRole("region", { name: "Public link" });
+    await region.waitFor();
+    const shown = (await ownerPage.getByTestId("share-url").innerText()).trim();
+    if (shown !== shareUrl) {
+      throw new Error(`Viewer share link was ${shown}`);
     }
-    const status = page.frameLocator("iframe").locator("#status");
-    await status.waitFor({ timeout: 20000 });
-    const text = await status.innerText();
-    if (text !== "Inline JavaScript ran successfully.") {
-      throw new Error(`Inline script result was ${text}`);
+    await region.getByRole("button", { name: "Copy link" }).click();
+    await ownerPage.getByRole("button", { name: "Copied" }).first().waitFor();
+    const copied = await ownerPage.evaluate(() => navigator.clipboard.readText());
+    if (copied !== shareUrl) {
+      throw new Error(`Copied link was ${copied}`);
     }
-    const isolation = await page.frameLocator("iframe").locator("body").evaluate(async () => {
-      let parentAccess = "read";
-      try {
-        void window.parent.document.title;
-      } catch {
-        parentAccess = "blocked";
-      }
-      let external = "allowed";
-      try {
-        await fetch("https://example.com/");
-      } catch {
-        external = "blocked";
-      }
-      return { parentAccess, external };
-    });
-    if (isolation.parentAccess !== "blocked" || isolation.external !== "blocked") {
-      throw new Error(`iframe isolation was ${JSON.stringify(isolation)}`);
+  } finally {
+    await ownerPage.close();
+  }
+
+  const revoked = await must(
+    "pnpm",
+    ["factrove", "share", plainId, "--revoke", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  if (revoked.stdout.trim() !== `Revoked the public link for ${plainId}.` || revoked.stdout.includes(token)) {
+    throw new Error(`Revoke output was ${JSON.stringify(revoked.stdout)}`);
+  }
+  await expectPublicMissing(shareUrl, token);
+
+  const rotated = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
+  const nextUrl = rotated.stdout.trim();
+  if (!shareLinkPattern(plainId).test(nextUrl) || nextUrl === shareUrl) {
+    throw new Error(`A new share did not replace the revoked link.\n${rotated.stdout}`);
+  }
+  const oldStillDead = await fetch(`${apiOrigin}/api/v1/public/artifacts/${plainId}/${token}`);
+  if (oldStillDead.status !== 404) {
+    throw new Error(`The revoked link returned ${oldStillDead.status}.`);
+  }
+  const nextToken = nextUrl.slice(nextUrl.lastIndexOf("/") + 1);
+  const fresh = await fetch(`${apiOrigin}/api/v1/public/artifacts/${plainId}/${nextToken}`);
+  if (fresh.status !== 200) {
+    throw new Error(`The replacement public link returned ${fresh.status}.`);
+  }
+
+  const stopPage = await ownerContext.newPage();
+  stopPage.setDefaultTimeout(30000);
+  stopPage.setDefaultNavigationTimeout(60000);
+  try {
+    await stopPage.goto(`${webOrigin}/artifacts/${plainId}`);
+    await stopPage.getByRole("button", { name: "Stop sharing" }).click();
+    await stopPage.getByRole("button", { name: "Share" }).waitFor();
+  } finally {
+    await stopPage.close();
+  }
+  await expectPublicMissing(nextUrl, nextToken);
+}
+
+async function expectPublicMissing(shareUrl, token) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.goto(shareUrl);
+    await page.getByText("This artifact does not exist.").waitFor();
+    if ((await page.locator("iframe").count()) !== 0) {
+      throw new Error("A revoked public link rendered an iframe.");
+    }
+    const visible = await page.locator("body").innerText();
+    if (visible.includes(token) || /revok/i.test(visible) || visible.includes("Sign in")) {
+      throw new Error(`Revoked public page leaked state: ${visible}`);
     }
   } finally {
     await page.close();
+    await context.close();
+  }
+}
+
+async function assertIsolatedFrame(page, fixture) {
+  const frame = page.locator("iframe");
+  await frame.waitFor({ timeout: 20000 });
+  const sandbox = await frame.getAttribute("sandbox");
+  const referrer = await frame.getAttribute("referrerpolicy");
+  if (sandbox !== "allow-scripts" || referrer !== "no-referrer") {
+    throw new Error(`iframe sandbox=${sandbox} referrerpolicy=${referrer}`);
+  }
+  const parent = await page.content();
+  if (parent.includes("Inline JavaScript ran successfully.") || parent.includes(fixture.toString("utf8").slice(0, 40))) {
+    throw new Error("Uploaded HTML was injected into the viewer page.");
+  }
+  const status = page.frameLocator("iframe").locator("#status");
+  await status.waitFor({ timeout: 20000 });
+  const text = await status.innerText();
+  if (text !== "Inline JavaScript ran successfully.") {
+    throw new Error(`Inline script result was ${text}`);
+  }
+  const isolation = await page.frameLocator("iframe").locator("body").evaluate(async () => {
+    let parentAccess = "read";
+    try {
+      void window.parent.document.title;
+    } catch {
+      parentAccess = "blocked";
+    }
+    let external = "allowed";
+    try {
+      await fetch("https://example.com/");
+    } catch {
+      external = "blocked";
+    }
+    return { parentAccess, external };
+  });
+  if (isolation.parentAccess !== "blocked" || isolation.external !== "blocked") {
+    throw new Error(`iframe isolation was ${JSON.stringify(isolation)}`);
   }
 }
 

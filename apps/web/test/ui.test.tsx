@@ -6,6 +6,7 @@ import { ArtifactCard } from "../src/components/artifact-card";
 import { LibraryTabs } from "../src/components/chrome";
 import NotFound from "../src/app/not-found";
 import { formatUploadedAt } from "../src/format";
+import { PublicShareScreen } from "../src/share/public-share-screen";
 import { ViewerScreen } from "../src/viewer/viewer-screen";
 
 const artifact: ArtifactDto = {
@@ -20,7 +21,8 @@ const artifact: ArtifactDto = {
   updatedAt: "2026-10-11T10:00:00.000Z",
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
-  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content"
+  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content",
+  shared: false
 };
 
 describe("LibraryTabs", () => {
@@ -80,6 +82,33 @@ describe("viewer toolbar", () => {
     expect(html).not.toContain("Open raw");
     expect(html).not.toContain(artifact.contentUrl);
     expect(html).toContain(formatUploadedAt(artifact.uploadedAt));
+  });
+});
+
+describe("share controls", () => {
+  it("shows a public link for the owner and keeps the token out of a revoked page", () => {
+    const shareUrl = `http://localhost:3000/share/${artifact.id}/ccccccccccccccccccccccccccccccccccccccccccc`;
+    const shared = renderToStaticMarkup(
+      <ViewerScreen state={{ status: "ready", artifact: { ...artifact, shared: true }, share: { shared: true, shareUrl } }} />
+    );
+    expect(shared).toContain("Sharing");
+    expect(shared).toContain("Anyone with this link can open the artifact without an account.");
+    expect(shared).toContain(shareUrl);
+    expect(shared).toContain("Stop sharing");
+    expect(shared).toContain("ft-pop");
+
+    const privateView = renderToStaticMarkup(
+      <ViewerScreen state={{ status: "ready", artifact, share: { shared: false, shareUrl: null } }} />
+    );
+    expect(privateView).toContain("Share");
+    expect(privateView).not.toContain("Stop sharing");
+
+    const missing = renderToStaticMarkup(
+      <PublicShareScreen state={{ status: "missing", message: "This artifact does not exist." }} />
+    );
+    expect(missing).toContain("This artifact does not exist.");
+    expect(missing).not.toContain("ccccccccccccccccccccccccccccccccccccccccccc");
+    expect(missing).not.toContain("<iframe");
   });
 });
 

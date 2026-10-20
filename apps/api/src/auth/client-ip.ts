@@ -18,6 +18,11 @@ export function readTrustedProxies(value: string | undefined): readonly string[]
   return entries;
 }
 
+export function readAssignedClientIp(headers: IncomingHttpHeaders): string | null {
+  const value = headers[CLIENT_IP_HEADER];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 export function assignClientIp(request: IncomingMessage, trustedProxies: readonly string[]): void {
   delete request.headers[CLIENT_IP_HEADER];
   const clientIp = resolveClientIp(request.socket?.remoteAddress, headerValue(request.headers, "x-forwarded-for"), trustedProxies);

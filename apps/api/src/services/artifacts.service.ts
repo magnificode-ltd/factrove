@@ -3,10 +3,14 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   accessTypeSchema,
   artifactDtoSchema,
+  publicArtifactSchema,
+  shareStateSchema,
   type AccessType,
   type ArtifactDto,
   type ArtifactView,
   type ContentFormat,
+  type PublicArtifact,
+  type ShareState,
 } from "@factrove/contracts";
 import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
@@ -14,6 +18,16 @@ import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markd
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
+import { browserOrigins } from "../sharing/public-origin.js";
+import { PublicViewLimiter } from "../sharing/public-view-limit.js";
+import {
+  artifactShareUrl,
+  artifactViewerUrl,
+  createShareToken,
+  hashShareToken,
+  isShareToken,
+  publicContentUrl,
+} from "../sharing/share-link.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
@@ -37,6 +51,7 @@ export class ArtifactsService {
     @Inject(BLOB_STORE) private readonly blobs: BlobStore,
     @Inject(ActorService) private readonly actors: ActorService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
+    @Inject(PublicViewLimiter) private readonly publicViews: PublicViewLimiter,
   ) {}
 
   async upload(request: HeaderSource, file: unknown, body: unknown): Promise<ArtifactDto> {
@@ -97,6 +112,79 @@ export class ArtifactsService {
     return records.map((record) => this.toDto(record, false));
   }
 
+  async shareState(request: HeaderSource, id: string): Promise<ShareState> {
+    return this.toShareState(await this.requireOwner(request, id));
+  }
+
+  async createShare(request: HeaderSource, id: string): Promise<ShareState> {
+    const record = await this.requireOwner(request, id);
+    if (record.shareToken && record.shareTokenHash) {
+      return this.toShareState(record);
+    }
+    const token = createShareToken();
+    let saved: ArtifactRecord | null;
+    try {
+      saved = await this.artifacts.saveShare(record.id, token, hashShareToken(token));
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
+      this.logger.error(`Could not store a public share (${code}).`);
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    if (!saved?.shareToken) {
+      const current = await this.requireOwner(request, id);
+      if (current.shareToken) {
+        return this.toShareState(current);
+      }
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    return this.toShareState(saved);
+  }
+
+  async revokeShare(request: HeaderSource, id: string): Promise<ShareState> {
+    const record = await this.requireOwner(request, id);
+    if (!record.shareTokenHash) {
+      return { shared: false, shareUrl: null };
+    }
+    return this.toShareState(await this.artifacts.clearShare(record.id));
+  }
+
+  async openPublic(id: string, token: string, clientIp: string | null): Promise<PublicArtifact> {
+    const record = await this.requirePublic(id, token, clientIp);
+    if (record.uploadedAt === null) {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    return publicArtifactSchema.parse({
+      id: record.id,
+      filename: artifactObjectKey(record.id),
+      mimeType: "text/html",
+      sizeBytes: record.sizeBytes,
+      uploadedAt: record.uploadedAt.toISOString(),
+      contentUrl: publicContentUrl(this.config.apiPublicOrigin, record.id, token),
+    });
+  }
+
+  async openPublicContent(
+    id: string,
+    token: string,
+    clientIp: string | null,
+  ): Promise<Extract<OpenedArtifactContent, { format: "html" }>> {
+    const record = await this.requirePublic(id, token, clientIp);
+    let stored: { body: AsyncIterable<Uint8Array> };
+    try {
+      stored = await this.blobs.get(artifactObjectKey(record.id));
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) {
+        throw artifactNotFound();
+      }
+      throw error;
+    }
+    return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+  }
+
+  framingOrigins(): readonly string[] {
+    return browserOrigins(this.config.webOrigin, this.config.publicBaseUrl);
+  }
+
   async getById(request: HeaderSource, id: string): Promise<ArtifactDto> {
     const record = await this.requireReadable(request, id, undefined, "html");
     return this.toDto(record, !this.actors.hasCredentialHeader(request));
@@ -109,7 +197,7 @@ export class ArtifactsService {
       stored = await this.blobs.get(artifactObjectKey(record.id));
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
-        throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+        throw artifactNotFound();
       }
       throw error;
     }
@@ -123,7 +211,7 @@ export class ArtifactsService {
       return { format: "markdown", body: Buffer.from(markdown, "utf8") };
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
-        throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+        throw artifactNotFound();
       }
       if (error instanceof BlobStoreUnavailableError || error instanceof ApiErrorException) {
         throw error;
@@ -146,16 +234,49 @@ export class ArtifactsService {
   ): Promise<ArtifactRecord> {
     const record = await this.artifacts.findById(id);
     if (!record) {
-      throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+      throw artifactNotFound();
     }
     if (this.grantCanRead(request, accessToken, record.id, format)) {
       return record;
     }
     const actor = await this.actors.resolve(request);
     if (!actor || !(await this.canRead(actor, record))) {
-      throw new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+      throw artifactNotFound();
     }
     return record;
+  }
+
+  private async requireOwner(request: HeaderSource, id: string): Promise<ArtifactRecord> {
+    const actor = await this.actors.requireActor(request);
+    const record = await this.artifacts.findById(id);
+    if (!record || actor.user.id !== record.creatorUserId) {
+      throw artifactNotFound();
+    }
+    return record;
+  }
+
+  private async requirePublic(id: string, token: string, clientIp: string | null): Promise<ArtifactRecord> {
+    if (!this.publicViews.allow(clientIp)) {
+      throw new ApiErrorException(429, "RATE_LIMITED", "Too many requests. Try again later.");
+    }
+    if (!isArtifactId(id) || !isShareToken(token)) {
+      throw artifactNotFound();
+    }
+    const record = await this.artifacts.findShared(id, hashShareToken(token));
+    if (!record || record.mimeType !== "text/html") {
+      throw artifactNotFound();
+    }
+    return record;
+  }
+
+  private toShareState(record: ArtifactRecord): ShareState {
+    if (!record.shareToken || !record.shareTokenHash) {
+      return shareStateSchema.parse({ shared: false, shareUrl: null });
+    }
+    return shareStateSchema.parse({
+      shared: true,
+      shareUrl: artifactShareUrl(this.config.publicBaseUrl, record.id, record.shareToken),
+    });
   }
 
   private grantCanRead(request: HeaderSource, accessToken: unknown, artifactId: string, format: ContentFormat): boolean {
@@ -203,7 +324,8 @@ export class ArtifactsService {
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
       uploadedAt: record.uploadedAt.toISOString(),
-      viewerUrl: `${this.config.webOrigin}/artifacts/${record.id}`,
+      viewerUrl: artifactViewerUrl(this.config.publicBaseUrl, record.id),
+      shared: record.shareTokenHash !== null,
       contentUrl: includeGrant
         ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
         : artifactContentUrl(this.config.apiPublicOrigin, record.id),
@@ -234,6 +356,14 @@ export class ArtifactsService {
 export type OpenedArtifactContent =
   | { format: "html"; sizeBytes: number; body: AsyncIterable<Uint8Array> }
   | { format: "markdown"; body: Buffer };
+
+function artifactNotFound(): ApiErrorException {
+  return new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+}
+
+function isArtifactId(value: string): boolean {
+  return artifactDtoSchema.shape.id.safeParse(value).success;
+}
 
 function decodeUtf8(bytes: Uint8Array): string {
   try {

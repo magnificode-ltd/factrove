@@ -340,6 +340,32 @@ describe("PostgreSQL artifact persistence", () => {
     await expect(repository.delete(created.id)).rejects.toMatchObject({ code: "P2025" });
   });
 
+  it("stores a share token for the owner and looks public links up by hash", async () => {
+    const created = await repository.create(artifactInput());
+    expect(created.shareToken).toBeNull();
+    expect(created.shareTokenHash).toBeNull();
+    const token = "share-token-value";
+    const hash = "a".repeat(64);
+    const saved = await repository.saveShare(created.id, token, hash);
+    expect(saved?.shareToken).toBe(token);
+    expect(saved?.shareTokenHash).toBe(hash);
+    const raced = await repository.saveShare(created.id, "other-token", "b".repeat(64));
+    expect(raced).toBeNull();
+    expect((await repository.findById(created.id))?.shareToken).toBe(token);
+
+    const shared = await repository.findShared(created.id, hash);
+    expect(shared?.id).toBe(created.id);
+    expect(shared?.shareToken).toBeNull();
+    expect(shared?.shareTokenHash).toBe(hash);
+    expect(await repository.findShared(created.id, "b".repeat(64))).toBeNull();
+    expect(await repository.findShared(randomUUID(), hash)).toBeNull();
+
+    const cleared = await repository.clearShare(created.id);
+    expect(cleared.shareToken).toBeNull();
+    expect(cleared.shareTokenHash).toBeNull();
+    expect(await repository.findShared(created.id, hash)).toBeNull();
+  });
+
   it("rejects missing creators, org_shared without an organization, and unknown access values", async () => {
     const personal = await repository.create(artifactInput({ organizationId: null, accessType: "private" }));
     expect(personal.organizationId).toBeNull();

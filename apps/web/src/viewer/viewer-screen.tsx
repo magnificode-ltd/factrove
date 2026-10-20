@@ -2,10 +2,10 @@ import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
+import { ShareControl } from "@/components/share-control";
 import { Button } from "@/components/ui/button";
 import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
-import type { ArtifactDto } from "@factrove/contracts";
 
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const title =
@@ -21,7 +21,7 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
       <ViewerBar
         title={title}
         meta={state.status === "ready" ? <ViewerFacts state={state} /> : null}
-        tools={state.status === "ready" ? <ViewerTools artifact={state.artifact} /> : null}
+        tools={state.status === "ready" ? <ViewerTools state={state} /> : null}
       />
       <main className="min-h-0 flex-1 bg-white">
         {state.status === "ready" ? <ReadyArtifact state={state} /> : <ViewerNotice state={state} />}
@@ -46,10 +46,16 @@ function ViewerFacts({ state }: { state: Extract<ViewerModel, { status: "ready" 
   );
 }
 
-function ViewerTools({ artifact }: { artifact: ArtifactDto }) {
+function ViewerTools({ state }: { state: Extract<ViewerModel, { status: "ready" }> }) {
+  const { artifact } = state;
+  const share = state.share ?? null;
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={artifact.viewerUrl} />
+    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+      {share ? (
+        <ShareControl artifactId={artifact.id} initial={share} viewerUrl={artifact.viewerUrl} showCopyLink />
+      ) : (
+        <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={artifact.viewerUrl} />
+      )}
       <CopyButton label="Copy ID" copiedLabel="Copied" message="Artifact ID copied" value={artifact.id} />
     </div>
   );

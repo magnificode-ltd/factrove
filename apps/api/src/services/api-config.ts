@@ -9,6 +9,8 @@ export type ApiConfig = {
   port: number;
   webOrigin: string;
   apiPublicOrigin: string;
+  // Origin embedded in viewer and share links. Embeds reuse this same value.
+  publicBaseUrl: string;
   authSecret: string;
   authCookieDomain: string | null;
   trustedProxies: readonly string[];
@@ -26,10 +28,19 @@ export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     port: readPort(env.PORT),
     webOrigin,
     apiPublicOrigin,
+    publicBaseUrl: readPublicBaseUrl(env.PUBLIC_BASE_URL, webOrigin),
     authSecret: readAuthSecret(env.BETTER_AUTH_SECRET),
     authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin),
     trustedProxies: readTrustedProxies(env.TRUSTED_PROXIES),
   };
+}
+
+function readPublicBaseUrl(value: string | undefined, webOrigin: string): string {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return webOrigin;
+  }
+  return readOrigin(raw, webOrigin, "PUBLIC_BASE_URL");
 }
 
 function readHost(value: string | undefined): string {
