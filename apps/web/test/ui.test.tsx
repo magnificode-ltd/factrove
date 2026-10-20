@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ArtifactDto } from "@factrove/contracts";
@@ -6,6 +7,7 @@ import { ArtifactCard } from "../src/components/artifact-card";
 import { LibraryTabs } from "../src/components/chrome";
 import NotFound from "../src/app/not-found";
 import { formatUploadedAt } from "../src/format";
+import { shareToggleLabel } from "../src/components/share-control";
 import { PublicShareScreen } from "../src/share/public-share-screen";
 import { ViewerScreen } from "../src/viewer/viewer-screen";
 
@@ -96,6 +98,10 @@ describe("share controls", () => {
     expect(shared).toContain(shareUrl);
     expect(shared).toContain("Stop sharing");
     expect(shared).toContain("ft-pop");
+    expect(shared).toContain("aria-controls");
+    expect(shareToggleLabel("revoke", true)).toBe("Stopping…");
+    expect(shareToggleLabel("share", false)).toBe("Sharing…");
+    expect(shareToggleLabel(null, true)).toBe("Sharing");
 
     const privateView = renderToStaticMarkup(
       <ViewerScreen state={{ status: "ready", artifact, share: { shared: false, shareUrl: null } }} />
@@ -107,8 +113,38 @@ describe("share controls", () => {
       <PublicShareScreen state={{ status: "missing", message: "This artifact does not exist." }} />
     );
     expect(missing).toContain("This artifact does not exist.");
+    expect(missing).not.toContain("Back to library");
     expect(missing).not.toContain("ccccccccccccccccccccccccccccccccccccccccccc");
     expect(missing).not.toContain("<iframe");
+
+    const ready = renderToStaticMarkup(
+      <PublicShareScreen
+        state={{
+          status: "ready",
+          artifact: {
+            id: artifact.id,
+            filename: artifact.filename,
+            mimeType: "text/html",
+            sizeBytes: artifact.sizeBytes,
+            uploadedAt: artifact.uploadedAt,
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/token/content`
+          }
+        }}
+      />
+    );
+    expect(ready).not.toContain("Back to library");
+  });
+});
+
+describe("public share page", () => {
+  it("renders the public artifact from the browser", () => {
+    const page = readFileSync(fileURLToPath(new URL("../src/app/share/[id]/[token]/page.tsx", import.meta.url)), "utf8");
+    expect(page).not.toContain("createWebClient");
+    expect(page).toContain("PublicShareLoader");
+    const headers = readFileSync(fileURLToPath(new URL("../next.config.ts", import.meta.url)), "utf8");
+    expect(headers).toContain('source: "/share/:path*"');
+    expect(headers).toContain("no-referrer");
+    expect(headers).toContain("noindex");
   });
 });
 

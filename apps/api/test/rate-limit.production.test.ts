@@ -35,6 +35,7 @@ const config: ApiConfig = {
   authSecret: TEST_AUTH_SECRET,
   authCookieDomain: null,
   trustedProxies: [],
+  shareTokenKey: null,
 };
 
 class UnusedBlobStore implements BlobStore {
@@ -108,7 +109,7 @@ describe("sign-in rate limit", () => {
     expect(secondPeer).toBe(401);
   });
 
-  it("rate limits public views by the socket address, not a caller-supplied client IP", async () => {
+  it("gives two visitors opening a public link separate buckets", async () => {
     const token = "a".repeat(43);
     const first = await publicView(port, "127.0.0.1", token, 1);
     const second = await publicView(port, "127.0.0.1", token, 2);

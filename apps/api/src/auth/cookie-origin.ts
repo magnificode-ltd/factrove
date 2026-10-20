@@ -5,7 +5,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export function rejectsCookieAuthenticatedWrite(
   method: string | undefined,
   headers: IncomingHttpHeaders,
-  webOrigin: string,
+  allowedOrigins: readonly string[],
 ): boolean {
   if (SAFE_METHODS.has((method ?? "GET").toUpperCase())) {
     return false;
@@ -16,15 +16,16 @@ export function rejectsCookieAuthenticatedWrite(
   if (!hasSessionCookie(headerValue(headers, "cookie"))) {
     return false;
   }
-  return requestOrigin(headers) !== webOrigin;
+  const origin = requestOrigin(headers);
+  return origin === null || !allowedOrigins.includes(origin);
 }
 
 export function rejectCookieAuthenticatedWrite(
   request: IncomingMessage,
   response: ServerResponse,
-  webOrigin: string,
+  allowedOrigins: readonly string[],
 ): boolean {
-  if (!rejectsCookieAuthenticatedWrite(request.method, request.headers, webOrigin)) {
+  if (!rejectsCookieAuthenticatedWrite(request.method, request.headers, allowedOrigins)) {
     return false;
   }
   if (response.headersSent) {

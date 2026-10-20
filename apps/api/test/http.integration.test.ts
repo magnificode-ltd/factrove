@@ -30,6 +30,7 @@ import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-c
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
 import { withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
 import { markdownContentSecurityPolicy, MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
+import { browserOrigins } from "../src/sharing/public-origin.js";
 import { addMembership, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
@@ -46,6 +47,7 @@ const config: ApiConfig = {
   authSecret: TEST_AUTH_SECRET,
   authCookieDomain: null,
   trustedProxies: [],
+  shareTokenKey: null,
 };
 
 let ownerApiKey = "";
@@ -129,6 +131,7 @@ describe("API configuration", () => {
     expect(defaults.authSecret).toBe(TEST_AUTH_SECRET);
     expect(defaults.authCookieDomain).toBeNull();
     expect(defaults.trustedProxies).toEqual([]);
+    expect(defaults.shareTokenKey).toBeNull();
   });
 
   it("accepts a parent domain that covers both origins", () => {
@@ -167,6 +170,10 @@ describe("API configuration", () => {
     })).toThrow(/WEB_ORIGIN/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      SHARE_TOKEN_KEY: "too-short",
+    })).toThrow(/SHARE_TOKEN_KEY/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
       TRUSTED_PROXIES: "10.0.0.0/99",
     })).toThrow(/TRUSTED_PROXIES/);
   });
@@ -186,16 +193,52 @@ describe("API configuration", () => {
     }).publicBaseUrl).toBe("http://localhost:3000");
     expect(readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      WEB_ORIGIN: "http://127.0.0.1:3000",
+      WEB_ORIGIN: "http://localhost:3000",
       PUBLIC_BASE_URL: "http://localhost:4000",
     }).publicBaseUrl).toBe("http://localhost:4000");
+    const published = readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      WEB_ORIGIN: "https://app.factrove.example.com",
+      API_PUBLIC_ORIGIN: "https://api.factrove.example.com",
+      PUBLIC_BASE_URL: "https://factrove.example.com",
+      AUTH_COOKIE_DOMAIN: "factrove.example.com",
+      SHARE_TOKEN_KEY: "dedicated-share-token-key-value-here",
+    });
+    expect(published.publicBaseUrl).toBe("https://factrove.example.com");
+    expect(published.shareTokenKey).toBe("dedicated-share-token-key-value-here");
+    expect(browserOrigins(published.webOrigin, published.publicBaseUrl)).toEqual([
+      "https://factrove.example.com",
+      "https://app.factrove.example.com",
+    ]);
     expect(readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      WEB_ORIGIN: "https://app.factrove.example.com",
+      API_PUBLIC_ORIGIN: "https://api.factrove.example.com",
+      PUBLIC_BASE_URL: "https://Factrove.Example.com/",
+      AUTH_COOKIE_DOMAIN: "factrove.example.com",
+    }).publicBaseUrl).toBe("https://factrove.example.com");
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
       PUBLIC_BASE_URL: "https://factrove.app",
-    }).publicBaseUrl).toBe("https://factrove.app");
+    })).toThrow(/AUTH_COOKIE_DOMAIN/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      WEB_ORIGIN: "https://app.factrove.example.com",
+      API_PUBLIC_ORIGIN: "https://api.factrove.example.com",
+      PUBLIC_BASE_URL: "https://other.example",
+      AUTH_COOKIE_DOMAIN: "factrove.example.com",
+    })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
       PUBLIC_BASE_URL: "https://factrove.app/share",
+    })).toThrow(/PUBLIC_BASE_URL/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      PUBLIC_BASE_URL: "https://factrove.app/?share=1",
+    })).toThrow(/PUBLIC_BASE_URL/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      PUBLIC_BASE_URL: "https://factrove.app/#share",
     })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
@@ -1169,6 +1212,23 @@ describe("HTTP API", () => {
     expect(shareUrl).toBe(`http://localhost:3000/share/${artifact.id}/${token}`);
     expect(token).not.toBe(artifact.id);
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const storedShare = await prisma.artifact.findUnique({
+      where: { id: artifact.id },
+      select: { shareToken: true, shareTokenHash: true },
+    });
+    expect(storedShare?.shareToken).toBeTruthy();
+    expect(storedShare?.shareToken).not.toBe(token);
+    expect(storedShare?.shareToken ?? "").not.toContain(token);
+    expect(storedShare?.shareTokenHash).toBe(createHash("sha256").update(token).digest("hex"));
+
+    const shortPath = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}`);
+    expect(shortPath.status).toBe(404);
+    expect(shortPath.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(shortPath.headers.get("x-robots-tag")).toBe("noindex");
+    expect(await errorOf(shortPath)).toEqual({ code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." });
+    const extraPath = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/extra`);
+    expect(extraPath.status).toBe(404);
+    expect(await errorOf(extraPath)).toEqual({ code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." });
 
     const again = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
       method: "POST",
@@ -1190,6 +1250,18 @@ describe("HTTP API", () => {
     expect(contentResponse.status).toBe(200);
     expect(Buffer.from(await contentResponse.arrayBuffer())).toEqual(Buffer.from(bytes));
     expectHtmlHeaders(contentResponse.headers);
+    expect(contentResponse.headers.get("x-robots-tag")).toBe("noindex");
+
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { uploadedAt: null } });
+    const unpublished = await globalThis.fetch(publicPath(baseUrl, artifact.id, token));
+    const unpublishedContent = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+    expect(unpublished.status).toBe(404);
+    expect(unpublishedContent.status).toBe(404);
+    expect(unpublished.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(unpublished.headers.get("x-robots-tag")).toBe("noindex");
+    expect(await errorOf(unpublished)).toEqual(hiddenError);
+    expect(await errorOf(unpublishedContent)).toEqual(hiddenError);
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { uploadedAt: new Date(artifact.uploadedAt) } });
 
     const privateContent = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
     expect(privateContent.status).toBe(404);
@@ -1204,6 +1276,8 @@ describe("HTTP API", () => {
     const revoked = await globalThis.fetch(publicPath(baseUrl, artifact.id, token));
     const missingArtifact = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/00000000-0000-4000-8000-000000000099`);
     expect(revoked.status).toBe(404);
+    expect(revoked.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(revoked.headers.get("x-robots-tag")).toBe("noindex");
     const revokedError = await errorOf(revoked);
     expect(revokedError).toEqual(await errorOf(missingArtifact));
     expect(JSON.stringify(revokedError)).not.toContain(token);
@@ -1247,6 +1321,39 @@ describe("HTTP API", () => {
     expect(await errorOf(denied)).toEqual(await errorOf(missing));
   });
 
+  it("accepts a session share from both the web origin and a different public base URL", async () => {
+    const artifact = await upload(baseUrl, "session.html", new TextEncoder().encode("<p>session</p>"));
+    const previousWeb = config.webOrigin;
+    const previousBase = config.publicBaseUrl;
+    config.webOrigin = "https://app.factrove.test";
+    config.publicBaseUrl = "https://factrove.test";
+    try {
+      const denied = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+        method: "POST",
+        headers: { cookie: owner.cookie, origin: "https://evil.example" },
+      });
+      expect(denied.status).toBe(403);
+
+      const created = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+        method: "POST",
+        headers: { cookie: owner.cookie, origin: "https://factrove.test" },
+      });
+      expect(created.status).toBe(200);
+      const share = shareEnvelopeSchema.parse(await created.json());
+      expect(share.share.shareUrl?.startsWith(`https://factrove.test/share/${artifact.id}/`)).toBe(true);
+
+      const stopped = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+        method: "DELETE",
+        headers: { cookie: owner.cookie, origin: "https://app.factrove.test" },
+      });
+      expect(stopped.status).toBe(200);
+      expect(shareEnvelopeSchema.parse(await stopped.json())).toEqual({ share: { shared: false, shareUrl: null } });
+    } finally {
+      config.webOrigin = previousWeb;
+      config.publicBaseUrl = previousBase;
+    }
+  });
+
   it("builds share links and framing from a localhost base URL or a public domain", async () => {
     const bytes = new TextEncoder().encode("<p>domain</p>");
     const artifact = await upload(baseUrl, "domain.html", bytes);
@@ -1271,6 +1378,18 @@ describe("HTTP API", () => {
         headers: { origin: "https://factrove.app" },
       });
       expect(allowed.headers.get("access-control-allow-origin")).toBe("https://factrove.app");
+      expect(allowed.headers.get("access-control-allow-credentials")).toBeNull();
+      const preflight = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`, {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://factrove.app",
+          "access-control-request-method": "GET",
+        },
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-origin")).toBe("https://factrove.app");
+      expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
+      expect(preflight.headers.get("access-control-allow-methods")).toBe("GET,HEAD,OPTIONS");
       const local = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}`, {
         headers: { origin: "http://localhost:3000" },
       });

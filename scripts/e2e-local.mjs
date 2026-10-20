@@ -820,7 +820,18 @@ async function checkPublicShare(plainId, fixture, configDir) {
   publicPage.setDefaultTimeout(30000);
   publicPage.setDefaultNavigationTimeout(60000);
   try {
-    await publicPage.goto(shareUrl);
+    const detailRequest = publicPage.waitForRequest(
+      (request) => request.method() === "GET" && request.url() === `${apiOrigin}/api/v1/public/artifacts/${plainId}/${token}`,
+    );
+    const documentResponse = await publicPage.goto(shareUrl);
+    const documentHeaders = documentResponse?.headers() ?? {};
+    if (documentHeaders["referrer-policy"] !== "no-referrer" || documentHeaders["x-robots-tag"] !== "noindex") {
+      throw new Error("The public page did not send no-referrer and noindex.");
+    }
+    const detail = await detailRequest;
+    if (detail.headers().cookie) {
+      throw new Error("The public page attached a cookie to the artifact request.");
+    }
     await assertIsolatedFrame(publicPage, fixture);
     const visible = await publicPage.locator("body").innerText();
     if (visible.includes(token)) {
@@ -906,8 +917,23 @@ async function expectPublicMissing(shareUrl, token) {
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(60000);
   try {
-    await page.goto(shareUrl);
+    const detailRequest = page.waitForRequest(
+      (request) => request.method() === "GET" && request.url().startsWith(`${apiOrigin}/api/v1/public/artifacts/`),
+    );
+    const documentResponse = await page.goto(shareUrl);
+    const documentHeaders = documentResponse?.headers() ?? {};
+    if (documentHeaders["referrer-policy"] !== "no-referrer" || documentHeaders["x-robots-tag"] !== "noindex") {
+      throw new Error("The missing public page did not send no-referrer and noindex.");
+    }
+    const detail = await detailRequest;
+    const detailResponse = await detail.response();
+    if (detail.headers().cookie || detailResponse?.status() !== 404) {
+      throw new Error(`The visitor's public request returned ${detailResponse?.status() ?? "no response"}.`);
+    }
     await page.getByText("This artifact does not exist.").waitFor();
+    if ((await page.getByRole("link", { name: "Back to library" }).count()) !== 0) {
+      throw new Error("Anonymous visitors were offered the library.");
+    }
     if ((await page.locator("iframe").count()) !== 0) {
       throw new Error("A revoked public link rendered an iframe.");
     }

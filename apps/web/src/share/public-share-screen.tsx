@@ -7,7 +7,11 @@ export function PublicShareScreen({ state }: { state: PublicShareModel }) {
   const title = state.status === "ready" ? state.artifact.filename : "Artifact not found";
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
-      <ViewerBar title={title} meta={state.status === "ready" ? <p className="text-sm text-muted-foreground">Shared artifact</p> : null} />
+      <ViewerBar
+        title={title}
+        showLibraryLink={false}
+        meta={state.status === "ready" ? <p className="text-sm text-muted-foreground">Shared artifact</p> : null}
+      />
       <main className="min-h-0 flex-1 bg-white">
         {state.status === "ready" ? <ReadyShare artifact={state.artifact} /> : <ShareNotice state={state} />}
       </main>

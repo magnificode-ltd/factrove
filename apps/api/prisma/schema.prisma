@@ -140,8 +140,8 @@ model Artifact {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
   uploadedAt     DateTime?     @map("uploaded_at") @db.Timestamptz(3)
-  // Capability secret for a public link. Returned only to the owner. Never log it.
-  // Public lookup uses the hash so the raw token is not a query predicate.
+  // AES-256-GCM ciphertext for a public link. The hash is the lookup key.
+  // A check requires both columns to be null or both to be set. Never log the token.
   shareToken     String?       @map("share_token")
   shareTokenHash String?       @unique @map("share_token_hash")
 

@@ -22,14 +22,26 @@ export function AppBar({ children, clear = false }: { children?: ReactNode; clea
   );
 }
 
-export function ViewerBar({ title, meta, tools }: { title: string; meta?: ReactNode; tools?: ReactNode }) {
+export function ViewerBar({
+  title,
+  meta,
+  tools,
+  showLibraryLink = true
+}: {
+  title: string;
+  meta?: ReactNode;
+  tools?: ReactNode;
+  showLibraryLink?: boolean;
+}) {
   return (
     <header className="z-30 border-b border-border bg-cloud">
       <div className="mx-auto flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
         <Wordmark />
-        <Button asChild variant="outline" className="h-10">
-          <a href="/">Back to library</a>
-        </Button>
+        {showLibraryLink ? (
+          <Button asChild variant="outline" className="h-10">
+            <a href="/">Back to library</a>
+          </Button>
+        ) : null}
         <h1 className="min-w-0 flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
           {title}
         </h1>

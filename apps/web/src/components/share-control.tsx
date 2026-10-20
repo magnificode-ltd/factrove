@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { FactroveApiError } from "@factrove/api-client";
@@ -26,10 +26,21 @@ export function ShareControl({
 }) {
   const [share, setShare] = useState(initial);
   const [expanded, setExpanded] = useState(Boolean(initial.shareUrl));
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<"share" | "revoke" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  const panelId = `public-link-${artifactId}`;
   const link = share.shareUrl ?? viewerUrl ?? "";
   const buttonClass = compact ? "h-8" : "h-10 bg-white";
+
+  useEffect(() => {
+    if (!returnFocus.current) {
+      return;
+    }
+    returnFocus.current = false;
+    toggleRef.current?.focus();
+  }, [expanded, pending, share.shared]);
 
   async function onShare() {
     if (share.shared && share.shareUrl) {
@@ -37,7 +48,7 @@ export function ShareControl({
       setError(null);
       return;
     }
-    setPending(true);
+    setPending("share");
     setError(null);
     try {
       const client = createWebClient();
@@ -52,22 +63,23 @@ export function ShareControl({
     } catch (caught) {
       setError(shareError(caught, artifactId));
     } finally {
-      setPending(false);
+      setPending(null);
     }
   }
 
   async function onRevoke() {
-    setPending(true);
+    setPending("revoke");
     setError(null);
     try {
       const envelope = await createWebClient().revokeArtifactShare(artifactId);
+      returnFocus.current = true;
       setShare(envelope.share);
       setExpanded(false);
       toast.success("Public link revoked");
     } catch (caught) {
       setError(shareError(caught, artifactId));
     } finally {
-      setPending(false);
+      setPending(null);
     }
   }
 
@@ -81,15 +93,17 @@ export function ShareControl({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Button
+          ref={toggleRef}
           type="button"
           variant={share.shared ? "default" : "outline"}
           className={cn(buttonClass, share.shared ? "" : "bg-white")}
           aria-expanded={expanded}
-          disabled={pending}
+          aria-controls={panelId}
+          disabled={pending !== null}
           onClick={() => void onShare()}
         >
           <Link2 />
-          {pending ? "Sharing…" : share.shared ? "Sharing" : "Share"}
+          {shareToggleLabel(pending, share.shared)}
         </Button>
         {showCopyLink && link ? (
           <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={link} />
@@ -97,6 +111,7 @@ export function ShareControl({
       </div>
       {expanded && share.shareUrl ? (
         <div
+          id={panelId}
           role="region"
           aria-label="Public link"
           className="ft-pop ft-key basis-full rounded-[14px] border border-line bg-lilac p-4"
@@ -111,10 +126,10 @@ export function ShareControl({
               type="button"
               variant="destructive"
               className="h-10"
-              disabled={pending}
+              disabled={pending !== null}
               onClick={() => void onRevoke()}
             >
-              Stop sharing
+              {pending === "revoke" ? "Stopping…" : "Stop sharing"}
             </Button>
           </div>
         </div>
@@ -126,6 +141,16 @@ export function ShareControl({
       ) : null}
     </div>
   );
+}
+
+export function shareToggleLabel(pending: "share" | "revoke" | null, shared: boolean): string {
+  if (pending === "revoke") {
+    return "Stopping…";
+  }
+  if (pending === "share") {
+    return "Sharing…";
+  }
+  return shared ? "Sharing" : "Share";
 }
 
 function shareError(error: unknown, artifactId: string): string {

@@ -87,10 +87,11 @@ export class ArtifactsRepository {
     return toArtifactRecord(row);
   }
 
-  // Public lookup by hash. The raw token is not selected and is not a query argument.
+  // Public lookup uses the unique hash alone, then compares the id in memory.
+  // The raw token is not selected and is not a query argument.
   async findShared(id: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
-    const row = await this.prisma.artifact.findFirst({
-      where: { id, shareTokenHash },
+    const row = await this.prisma.artifact.findUnique({
+      where: { shareTokenHash },
       select: {
         id: true,
         creatorUserId: true,
@@ -104,7 +105,7 @@ export class ArtifactsRepository {
         shareTokenHash: true,
       },
     });
-    if (!row) {
+    if (!row || row.id !== id) {
       return null;
     }
     return {

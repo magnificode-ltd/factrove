@@ -25,7 +25,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    const mapped = mapException(exception);
+    const request = host.switchToHttp().getRequest<{ originalUrl?: string; url?: string }>();
+    const path = `${request?.originalUrl ?? request?.url ?? ""}`.split("?")[0] ?? "";
+    const publicApi = path === "/api/v1/public" || path.startsWith("/api/v1/public/");
+    const mapped = mapException(exception, publicApi);
     if (mapped.status >= 500 || exception instanceof BlobStoreUnavailableError) {
       this.logServerError(exception);
     }
@@ -34,6 +37,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "no-store");
+    if (publicApi) {
+      response.setHeader("Referrer-Policy", "no-referrer");
+      response.setHeader("X-Robots-Tag", "noindex");
+    }
     response.json({ error: { code: mapped.code, message: mapped.message } });
   }
 
@@ -53,7 +60,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
   }
 }
 
-function mapException(exception: unknown): ErrorBody {
+function mapException(exception: unknown, publicApi: boolean): ErrorBody {
   if (exception instanceof ApiErrorException) {
     return { status: exception.status, code: exception.code, message: exception.message };
   }
@@ -77,6 +84,9 @@ function mapException(exception: unknown): ErrorBody {
       return { status: 400, code: "INVALID_REQUEST", message: invalidRequestMessage(exception) };
     }
     if (status === 404) {
+      if (publicApi) {
+        return { status: 404, code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." };
+      }
       return { status: 404, code: "INVALID_REQUEST", message: "Not found." };
     }
   }

@@ -28,6 +28,7 @@ import {
   isShareToken,
   publicContentUrl,
 } from "../sharing/share-link.js";
+import { decryptShareToken, deriveShareTokenKey, encryptShareToken } from "../sharing/share-token-cipher.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
@@ -118,13 +119,16 @@ export class ArtifactsService {
 
   async createShare(request: HeaderSource, id: string): Promise<ShareState> {
     const record = await this.requireOwner(request, id);
-    if (record.shareToken && record.shareTokenHash) {
+    if (record.shareToken && record.shareTokenHash && this.readShareToken(record.shareToken)) {
       return this.toShareState(record);
+    }
+    if (record.shareTokenHash && !this.readShareToken(record.shareToken)) {
+      await this.artifacts.clearShare(record.id);
     }
     const token = createShareToken();
     let saved: ArtifactRecord | null;
     try {
-      saved = await this.artifacts.saveShare(record.id, token, hashShareToken(token));
+      saved = await this.artifacts.saveShare(record.id, encryptShareToken(token, this.shareKey()), hashShareToken(token));
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
       this.logger.error(`Could not store a public share (${code}).`);
@@ -151,7 +155,7 @@ export class ArtifactsService {
   async openPublic(id: string, token: string, clientIp: string | null): Promise<PublicArtifact> {
     const record = await this.requirePublic(id, token, clientIp);
     if (record.uploadedAt === null) {
-      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+      throw artifactNotFound();
     }
     return publicArtifactSchema.parse({
       id: record.id,
@@ -263,19 +267,35 @@ export class ArtifactsService {
       throw artifactNotFound();
     }
     const record = await this.artifacts.findShared(id, hashShareToken(token));
-    if (!record || record.mimeType !== "text/html") {
+    if (!record || record.mimeType !== "text/html" || record.uploadedAt === null) {
       throw artifactNotFound();
     }
     return record;
   }
 
+  private shareKey(): Buffer {
+    return deriveShareTokenKey(this.config.shareTokenKey ?? this.config.authSecret);
+  }
+
+  private readShareToken(stored: string | null): string | null {
+    if (!stored) {
+      return null;
+    }
+    const token = decryptShareToken(stored, this.shareKey());
+    return token && isShareToken(token) ? token : null;
+  }
+
   private toShareState(record: ArtifactRecord): ShareState {
-    if (!record.shareToken || !record.shareTokenHash) {
+    const token = this.readShareToken(record.shareToken);
+    if (!record.shareTokenHash || !token) {
+      if (record.shareTokenHash) {
+        throw new ApiErrorException(500, "INTERNAL_ERROR", "The public link could not be read.");
+      }
       return shareStateSchema.parse({ shared: false, shareUrl: null });
     }
     return shareStateSchema.parse({
       shared: true,
-      shareUrl: artifactShareUrl(this.config.publicBaseUrl, record.id, record.shareToken),
+      shareUrl: artifactShareUrl(this.config.publicBaseUrl, record.id, token),
     });
   }
 

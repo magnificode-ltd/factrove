@@ -67,6 +67,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       authSecret: TEST_AUTH_SECRET,
       authCookieDomain: null,
       trustedProxies: [],
+      shareTokenKey: null,
     };
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(API_CONFIG)

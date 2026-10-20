@@ -18,6 +18,7 @@ export class AuthService implements OnModuleInit {
       prisma: this.prisma,
       baseURL: this.config.apiPublicOrigin,
       secret: this.config.authSecret,
+      // Sign-in is trusted on the owner app, the public base URL, and the API origin.
       trustedOrigins: [...new Set([...browserOrigins(this.config.webOrigin, this.config.publicBaseUrl), this.config.apiPublicOrigin])],
       cookieDomain: this.config.authCookieDomain,
     });

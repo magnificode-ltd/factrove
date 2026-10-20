@@ -127,6 +127,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261011120000_add_identity_and_artifact",
       "20261018210000_add_apikey",
       "20261020120000_add_artifact_share",
+      "20261020143000_pair_artifact_share_columns",
     ]);
   });
 
@@ -366,6 +367,22 @@ describe("PostgreSQL artifact persistence", () => {
     expect(cleared.shareToken).toBeNull();
     expect(cleared.shareTokenHash).toBeNull();
     expect(await repository.findShared(created.id, hash)).toBeNull();
+
+    const paired = await repository.create(artifactInput());
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE "artifact" SET "share_token" = $1 WHERE "id" = $2::uuid`,
+        "only-the-token",
+        paired.id,
+      ),
+    ).rejects.toThrow(/artifact_share_columns_paired_check|23514/);
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE "artifact" SET "share_token_hash" = $1 WHERE "id" = $2::uuid`,
+        "c".repeat(64),
+        paired.id,
+      ),
+    ).rejects.toThrow(/artifact_share_columns_paired_check|23514/);
   });
 
   it("rejects missing creators, org_shared without an organization, and unknown access values", async () => {

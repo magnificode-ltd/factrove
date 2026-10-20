@@ -112,7 +112,11 @@ This checkout runs the local upload, library, and viewer loop. PostgreSQL runs i
 
 Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization. A public link works only after the owner shares the artifact. Anyone with that link can open it without an account. The CLI sends an API key from `FACTROVE_API_KEY` or from `factrove configure`. Create and revoke keys at `/account/api-keys`. The secret is shown once.
 
-`PUBLIC_BASE_URL` is the origin used for viewer URLs and public share links. When it is unset, those links use `WEB_ORIGIN`. `http://localhost:3000` keeps every link on localhost. `https://factrove.app` uses that domain plus the artifact id. The same value is the source for later embeds. It does not start a server or publish the app. CORS and `frame-ancestors` follow that origin and `WEB_ORIGIN`.
+`PUBLIC_BASE_URL` is the origin used for viewer URLs and public share links. When it is unset, those links use `WEB_ORIGIN`. `http://localhost:3000` keeps every link on localhost. `https://factrove.app` uses that domain plus the artifact id. A trailing slash or an uppercase host is normalized to the origin. A path, query, or hash is rejected. The same value is the source for later embeds. It does not start a server or publish the app. `frame-ancestors` follows that origin and `WEB_ORIGIN`. Public API routes allow those origins with credentials omitted and only GET, HEAD, and OPTIONS. Session writes are accepted from both origins. When the hosts differ, `AUTH_COOKIE_DOMAIN` must cover both, and Better Auth trusts both origins.
+
+The share token is encrypted at rest with AES-256-GCM. Set `SHARE_TOKEN_KEY` to choose the key material. When it is unset, the key is derived from `BETTER_AUTH_SECRET`. Rotating the value that supplies the key makes existing links unreadable, so share the artifact again after a rotation. The SHA-256 hash remains the lookup key.
+
+Public views allow 60 requests per minute per client address, in memory, on each API process. IPv6 addresses share a bucket by their /64. Behind a reverse proxy, set `TRUSTED_PROXIES` to that proxy so the limit uses the visitor address from `X-Forwarded-For`. Without it, every visitor shares the proxy's address.
 
 ### Prerequisites
 
