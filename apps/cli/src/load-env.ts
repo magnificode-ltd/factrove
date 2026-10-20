@@ -20,7 +20,7 @@ export function loadCliEnv(env: NodeJS.ProcessEnv, filePath = cliEnvFilePath()):
   }
   const parsed = parseEnv(text);
   for (const [key, value] of Object.entries(parsed)) {
-    if (!key.startsWith("FACTROVE_")) {
+    if (value === undefined || !key.startsWith("FACTROVE_")) {
       continue;
     }
     const trimmed = value.trim();
