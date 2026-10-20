@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -70,22 +70,130 @@ export function withoutInfrastructureSecrets(env) {
   return next;
 }
 
-export function cliLaunch(env, launcherCwd) {
-  const cwd = invocationCwd(env, launcherCwd);
-  const childEnv = withoutInfrastructureSecrets(env);
-  delete childEnv.INIT_CWD;
-  return { cwd, env: childEnv };
-}
-
-export function webLaunchEnv(parent, rootEnv) {
+export function webLaunchEnv(parent, apiEnv) {
   const env = withoutInfrastructureSecrets(parent);
   if (!env.NEXT_PUBLIC_API_URL?.trim()) {
-    const fromFile = rootEnv.NEXT_PUBLIC_API_URL?.trim();
+    const fromFile = apiEnv.NEXT_PUBLIC_API_URL?.trim();
     if (fromFile) {
       env.NEXT_PUBLIC_API_URL = fromFile;
     }
   }
   return env;
+}
+
+const cliDevEnvKeys = ["FACTROVE_API_URL", "FACTROVE_PROFILE"];
+const optionsWithValues = new Set(["--access", "--api-url", "--api-key", "--format", "--profile"]);
+
+export function cliEnvFilePath(env) {
+  const override = env.FACTROVE_CLI_ENV_FILE?.trim() ?? "";
+  if (override.length > 0) {
+    return override;
+  }
+  return join(repoRoot, "apps/cli/.env");
+}
+
+export function readCliEnvFile(filePath) {
+  let text;
+  try {
+    text = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return { ok: true, values: {} };
+    }
+    return {
+      ok: false,
+      message: `Could not read the CLI environment file at ${filePath}.`,
+    };
+  }
+  return { ok: true, values: cliDevEnvValues(parseEnv(text)) };
+}
+
+export function cliLaunch(env, launcherCwd, fileValues = {}) {
+  const cwd = invocationCwd(env, launcherCwd);
+  const childEnv = withoutInfrastructureSecrets(applyCliDevEnv(env, fileValues));
+  delete childEnv.INIT_CWD;
+  return { cwd, env: childEnv };
+}
+
+export function launcherSkipsEnvFile(argv) {
+  const positionals = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--") {
+      break;
+    }
+    if (arg === "--help" || arg === "-h") {
+      return true;
+    }
+    if (optionsWithValues.has(arg)) {
+      const next = argv[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      continue;
+    }
+    positionals.push(arg);
+  }
+  return positionals[0] === "help";
+}
+
+export function launcherWantsJson(argv) {
+  let json = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--") {
+      break;
+    }
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (optionsWithValues.has(arg)) {
+      const next = argv[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        index += 1;
+      }
+    }
+  }
+  return json;
+}
+
+export function legacyRootEnvWarning(rootEnvPath) {
+  if (!existsSync(rootEnvPath)) {
+    return "";
+  }
+  return "A root .env is no longer read. Application settings belong in apps/api/.env. CLI settings for pnpm factrove belong in apps/cli/.env.\n";
+}
+
+function applyCliDevEnv(env, fileValues) {
+  const next = { ...env };
+  const profile = fileValues.FACTROVE_PROFILE?.trim() ?? "";
+  if (profile.length > 0 && !next.FACTROVE_PROFILE?.trim()) {
+    next.FACTROVE_PROFILE = profile;
+  }
+  if (!next.FACTROVE_API_URL?.trim()) {
+    const fileUrl = fileValues.FACTROVE_API_URL?.trim() ?? "";
+    if (fileUrl.length > 0) {
+      next.FACTROVE_DEV_API_URL = fileUrl;
+    } else {
+      delete next.FACTROVE_DEV_API_URL;
+    }
+  }
+  return next;
+}
+
+function cliDevEnvValues(parsed) {
+  const values = {};
+  for (const key of cliDevEnvKeys) {
+    const value = parsed[key]?.trim() ?? "";
+    if (value.length > 0) {
+      values[key] = value;
+    }
+  }
+  return values;
 }
 
 export function effectiveApiSetting(fileEnv, processEnv, key) {

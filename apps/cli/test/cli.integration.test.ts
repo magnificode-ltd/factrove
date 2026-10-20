@@ -101,39 +101,176 @@ describe("factrove upload", () => {
     expect(selected.requests).toHaveLength(2);
   });
 
-  it("reads apps/cli/.env when FACTROVE_API_URL and FACTROVE_API_KEY are unset", async () => {
-    const stub = await startStub(() => accepted(1));
-    await withCliEnvFile(`FACTROVE_API_URL=${stub.url}\nFACTROVE_API_KEY=ftrv_from_file\nDATABASE_URL=postgresql://secret\n`, async () => {
-      const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
-      expect(result.code).toBe(0);
-      expect(result.stdout).not.toContain("ftrv_from_file");
-      expect(stub.requests).toHaveLength(1);
-      expect(stub.requests[0]?.authorization).toBe("Bearer ftrv_from_file");
+  it("sends an explicit profile's key to that profile's origin when the dev env file names another origin", async () => {
+    const profileStub = await startStub(() => accepted(1));
+    const fileStub = await startStub(() => {
+      throw new Error("the dev env file origin received the profile key");
     });
+    const directory = await makeTemp();
+    await writeProfile(directory, "prod", "ftrv_PROD_SECRET", profileStub.url);
+    const envFile = await writeCliEnvFile(
+      [
+        `FACTROVE_API_URL=${fileStub.url}`,
+        "FACTROVE_API_KEY=ftrv_from_file",
+        "FACTROVE_PROFILE=default",
+        "FACTROVE_CONFIG_DIR=/tmp/should-not-redirect",
+        "DATABASE_URL=postgresql://secret",
+      ].join("\n"),
+    );
+    const result = await runLauncher(["upload", fixturePath, "--profile", "prod"], {
+      env: devFileEnv(envFile, directory, { FACTROVE_API_KEY: "ftrv_from_env" }),
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("ftrv_PROD_SECRET");
+    expect(result.stdout).not.toContain("ftrv_from_file");
+    expect(profileStub.requests).toHaveLength(1);
+    expect(profileStub.requests[0]?.authorization).toBe("Bearer ftrv_PROD_SECRET");
+    expect(fileStub.requests).toHaveLength(0);
   });
 
-  it("lets flags and the environment win over apps/cli/.env", async () => {
+  it("keeps a profile selected by FACTROVE_PROFILE ahead of the dev env file origin", async () => {
+    const profileStub = await startStub(() => accepted(1));
+    const fileStub = await startStub(() => {
+      throw new Error("the dev env file origin received the profile key");
+    });
+    const directory = await makeTemp();
+    await writeProfile(directory, "prod", "ftrv_PROD_SECRET", profileStub.url);
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${fileStub.url}\nFACTROVE_PROFILE=default\nFACTROVE_API_KEY=ftrv_from_file\n`);
+    const result = await runLauncher(["upload", fixturePath], {
+      env: devFileEnv(envFile, directory, { FACTROVE_PROFILE: "prod", FACTROVE_API_KEY: "" }),
+    });
+
+    expect(result.code).toBe(0);
+    expect(profileStub.requests).toHaveLength(1);
+    expect(profileStub.requests[0]?.authorization).toBe("Bearer ftrv_PROD_SECRET");
+    expect(fileStub.requests).toHaveLength(0);
+  });
+
+  it("lets FACTROVE_PROFILE from the dev env file select a profile whose api_url wins over that file", async () => {
+    const profileStub = await startStub(() => accepted(1));
+    const fileStub = await startStub(() => {
+      throw new Error("the dev env file origin received the profile key");
+    });
+    const directory = await makeTemp();
+    await writeProfile(directory, "prod", "ftrv_PROD_SECRET", profileStub.url);
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${fileStub.url}\nFACTROVE_PROFILE=prod\nFACTROVE_API_KEY=ftrv_from_file\n`);
+    const result = await runLauncher(["upload", fixturePath], {
+      env: devFileEnv(envFile, directory, { FACTROVE_API_KEY: "" }),
+    });
+
+    expect(result.code).toBe(0);
+    expect(profileStub.requests).toHaveLength(1);
+    expect(profileStub.requests[0]?.authorization).toBe("Bearer ftrv_PROD_SECRET");
+    expect(fileStub.requests).toHaveLength(0);
+  });
+
+  it("uses the dev env file origin when the selected profile has no api_url", async () => {
+    const stub = await startStub(() => accepted(1));
+    const directory = await makeTemp();
+    await writeProfile(directory, "default", "ftrv_from_profile");
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${stub.url}\nFACTROVE_API_KEY=ftrv_from_file\nDATABASE_URL=postgresql://secret\n`);
+    const result = await runLauncher(["upload", fixturePath], {
+      env: devFileEnv(envFile, directory, { FACTROVE_API_KEY: "" }),
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("ftrv_from_profile");
+    expect(result.stdout).not.toContain("ftrv_from_file");
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]?.authorization).toBe("Bearer ftrv_from_profile");
+  });
+
+  it("lets --api-url and FACTROVE_API_URL win over the dev env file", async () => {
     const selected = await startStub(() => accepted(1));
     const fromFile = await startStub(() => {
-      throw new Error("apps/cli/.env was used instead of the flag or the environment");
+      throw new Error("the dev env file was used instead of the flag or the environment");
     });
-    await withCliEnvFile(`FACTROVE_API_URL=${fromFile.url}\nFACTROVE_API_KEY=ftrv_from_file\n`, async () => {
-      const flagged = await runCli(["upload", fixturePath, "--api-url", selected.url], {
-        env: { FACTROVE_API_KEY: "" },
-      });
-      expect(flagged.code).toBe(0);
-      expect(selected.requests).toHaveLength(1);
-      expect(selected.requests[0]?.authorization).toBe("Bearer ftrv_from_file");
-      expect(fromFile.requests).toHaveLength(0);
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${fromFile.url}\nFACTROVE_API_KEY=ftrv_from_file\n`);
+    const flagged = await runLauncher(["upload", fixturePath, "--api-url", selected.url], {
+      env: devFileEnv(envFile, undefined, {}),
+    });
+    expect(flagged.code).toBe(0);
+    expect(selected.requests).toHaveLength(1);
+    expect(selected.requests[0]?.authorization).toBe("Bearer ftrv_test_key");
+    expect(fromFile.requests).toHaveLength(0);
 
-      const fromEnv = await runCli(["upload", fixturePath], {
-        env: { FACTROVE_API_URL: selected.url, FACTROVE_API_KEY: "ftrv_from_env" },
-      });
-      expect(fromEnv.code).toBe(0);
-      expect(selected.requests).toHaveLength(2);
-      expect(selected.requests[1]?.authorization).toBe("Bearer ftrv_from_env");
-      expect(fromFile.requests).toHaveLength(0);
+    const fromEnv = await runLauncher(["upload", fixturePath], {
+      env: devFileEnv(envFile, undefined, { FACTROVE_API_URL: selected.url, FACTROVE_API_KEY: "ftrv_from_env" }),
     });
+    expect(fromEnv.code).toBe(0);
+    expect(selected.requests).toHaveLength(2);
+    expect(selected.requests[1]?.authorization).toBe("Bearer ftrv_from_env");
+    expect(fromFile.requests).toHaveLength(0);
+  });
+
+  it("ignores an API key in the dev env file", async () => {
+    const stub = await startStub(() => {
+      throw new Error("the dev env file supplied an API key");
+    });
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${stub.url}\nFACTROVE_API_KEY=ftrv_from_file\n`);
+    const result = await runLauncher(["upload", fixturePath], {
+      env: devFileEnv(envFile, undefined, { FACTROVE_API_KEY: "" }),
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("An API key is required");
+    expect(result.stderr).not.toContain("ftrv_from_file");
+    expect(stub.requests).toHaveLength(0);
+  });
+
+  it("ignores the dev env file when the built CLI is started directly", async () => {
+    const profileStub = await startStub(() => accepted(1));
+    const fileStub = await startStub(() => {
+      throw new Error("dist/main.js read the dev env file");
+    });
+    const directory = await makeTemp();
+    await writeProfile(directory, "prod", "ftrv_PROD_SECRET", profileStub.url);
+    const envFile = await writeCliEnvFile(`FACTROVE_API_URL=${fileStub.url}\nFACTROVE_API_KEY=ftrv_from_file\nFACTROVE_PROFILE=default\n`);
+    const built = await readFile(cliPath, "utf8");
+    expect(built).not.toContain("loadCliEnv");
+    expect(built).not.toContain("parseEnv");
+    const result = await runCli(["upload", fixturePath, "--profile", "prod"], {
+      env: devFileEnv(envFile, directory, { FACTROVE_API_KEY: "ftrv_from_env" }),
+    });
+
+    expect(result.code).toBe(0);
+    expect(profileStub.requests).toHaveLength(1);
+    expect(profileStub.requests[0]?.authorization).toBe("Bearer ftrv_PROD_SECRET");
+    expect(fileStub.requests).toHaveLength(0);
+  });
+
+  it("prints help when the dev env file cannot be read", async () => {
+    const unreadable = await unreadableEnvPath();
+    const help = await runLauncher(["--help"], { env: { FACTROVE_CLI_ENV_FILE: unreadable } });
+    expect(help.code).toBe(0);
+    expect(help.stderr).toBe("");
+    expect(help.stdout).toBe(helpText());
+
+    const commandHelp = await runLauncher(["upload", "--help"], { env: { FACTROVE_CLI_ENV_FILE: unreadable } });
+    expect(commandHelp.code).toBe(0);
+    expect(commandHelp.stdout).toBe(helpText());
+  });
+
+  it("reports an unreadable dev env file as a CLI error and honors --json", async () => {
+    const unreadable = await unreadableEnvPath();
+    const json = await runLauncher(["upload", fixturePath, "--json"], {
+      env: { FACTROVE_CLI_ENV_FILE: unreadable, FACTROVE_API_KEY: "" },
+    });
+    expect(json.code).toBe(1);
+    expect(json.stdout).toBe("");
+    expect(JSON.parse(json.stderr)).toEqual({
+      error: {
+        code: "INVALID_INPUT",
+        message: `Could not read the CLI environment file at ${unreadable}.`,
+      },
+    });
+
+    const plain = await runLauncher(["upload", fixturePath], {
+      env: { FACTROVE_CLI_ENV_FILE: unreadable, FACTROVE_API_KEY: "" },
+    });
+    expect(plain.code).toBe(1);
+    expect(plain.stderr).toBe(`INVALID_INPUT: Could not read the CLI environment file at ${unreadable}.\n`);
   });
 
   it("resolves a relative path from the process directory and ignores INIT_CWD", async () => {
@@ -759,43 +896,62 @@ function runCliBytes(args: string[]): Promise<Buffer> {
   });
 }
 
-const cliEnvPath = fileURLToPath(new URL("../.env", import.meta.url));
-
-async function withCliEnvFile(contents: string, run: () => Promise<void>): Promise<void> {
-  let previous: string | null = null;
-  try {
-    previous = await readFile(cliEnvPath, "utf8");
-  } catch (error) {
-    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
-      throw error;
-    }
-  }
-  await writeFile(cliEnvPath, contents);
-  try {
-    await run();
-  } finally {
-    if (previous === null) {
-      await rm(cliEnvPath, { force: true });
-    } else {
-      await writeFile(cliEnvPath, previous);
-    }
-  }
-}
-
 function cliEnv(envOverrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.FACTROVE_API_URL;
   delete env.INIT_CWD;
   delete env.FACTROVE_PROFILE;
   delete env.FACTROVE_API_KEY;
+  delete env.FACTROVE_DEV_API_URL;
   delete env.FACTROVE_SHARED_CREDENTIALS_FILE;
   delete env.FACTROVE_CONFIG_FILE;
   env.FACTROVE_CONFIG_DIR = "/tmp/factrove-cli-absent-7044";
+  env.FACTROVE_CLI_ENV_FILE = "/tmp/factrove-cli-env-absent-7044";
   Object.assign(env, envOverrides);
   if (env.FACTROVE_API_KEY === undefined) {
     env.FACTROVE_API_KEY = "ftrv_test_key";
   }
   return env;
+}
+
+function devFileEnv(envFile: string, configDir: string | undefined, overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    FACTROVE_CLI_ENV_FILE: envFile,
+    ...(configDir ? { FACTROVE_CONFIG_DIR: configDir } : {}),
+    ...overrides,
+  };
+}
+
+function runLauncher(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<CliResult> {
+  return runCommand(process.execPath, [launcherPath, ...args], options?.cwd ?? repoRoot, options?.env);
+}
+
+async function writeCliEnvFile(contents: string): Promise<string> {
+  const directory = await makeTemp();
+  const path = join(directory, "cli.env");
+  await writeFile(path, `${contents}\n`, { mode: 0o600 });
+  return path;
+}
+
+async function writeProfile(directory: string, profile: string, apiKey: string, apiUrl?: string): Promise<void> {
+  await writeFile(join(directory, "credentials"), `[${profile}]\nfactrove_api_key = ${apiKey}\n`, { mode: 0o600 });
+  if (apiUrl !== undefined) {
+    const section = profile === "default" ? "default" : `profile ${profile}`;
+    await writeFile(join(directory, "config"), `[${section}]\napi_url = ${apiUrl}\n`, { mode: 0o600 });
+  }
+}
+
+async function unreadableEnvPath(): Promise<string> {
+  const directory = await makeTemp();
+  const file = join(directory, ".env");
+  await writeFile(file, "FACTROVE_API_URL=http://127.0.0.1:9\n", { mode: 0o600 });
+  await chmod(file, 0o000);
+  try {
+    await readFile(file, "utf8");
+  } catch {
+    return file;
+  }
+  return directory;
 }
 
 function runCommand(command: string, args: string[], cwd: string, envOverrides?: NodeJS.ProcessEnv): Promise<CliResult> {

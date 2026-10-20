@@ -2,7 +2,6 @@ import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
-import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
@@ -19,7 +18,6 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
           : "Artifact unavailable";
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
-      <Toaster />
       <ViewerBar
         title={title}
         meta={state.status === "ready" ? <ViewerFacts state={state} /> : null}

@@ -5,11 +5,10 @@ import { CliModule } from "./cli.module.js";
 import { formatFailure } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
 import { GetCommand } from "./get.command.js";
-import { loadCliEnv } from "./load-env.js";
 import { cliWantsJson, helpText } from "./parse-args.js";
 import { UploadCommand } from "./upload.command.js";
 
-loadCliEnv(process.env);
+// scripts/factrove.mjs loads apps/cli/.env for local development. This entrypoint does not.
 
 type ApplicationContext = Awaited<ReturnType<typeof NestFactory.createApplicationContext>>;
 

@@ -4,6 +4,7 @@ import {
   apiEntry,
   apiEnvFile,
   effectiveApiSetting,
+  legacyRootEnvWarning,
   missingApiSettings,
   readDotEnv,
   repoRoot,
@@ -16,6 +17,11 @@ import {
   workspaceBuildArgs,
 } from "./local-runtime.mjs";
 import { supervise } from "./supervise.mjs";
+
+const legacyEnv = legacyRootEnvWarning(join(repoRoot, ".env"));
+if (legacyEnv.length > 0) {
+  process.stderr.write(legacyEnv);
+}
 
 const fileEnv = readDotEnv(apiEnvFile);
 const missing = missingApiSettings(fileEnv, process.env);
