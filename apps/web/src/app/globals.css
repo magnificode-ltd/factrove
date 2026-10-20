@@ -169,14 +169,19 @@
   position: absolute;
   z-index: -1;
   top: -5rem;
-  right: -12%;
-  left: -12%;
+  right: 0;
+  left: 0;
   height: 34rem;
   pointer-events: none;
   background:
     radial-gradient(ellipse 42% 55% at 12% 18%, color-mix(in srgb, var(--peri) 78%, white), transparent 68%),
     radial-gradient(ellipse 36% 48% at 88% 0%, color-mix(in srgb, var(--peri) 55%, white), transparent 64%),
     radial-gradient(ellipse 28% 40% at 58% 42%, var(--lilac), transparent 70%);
+  background-repeat: no-repeat;
+  background-size:
+    78% 88%,
+    68% 78%,
+    56% 70%;
   mask-image: linear-gradient(to bottom, #000 42%, transparent 100%);
   animation: ft-drift 16s ease-in-out infinite;
 }
@@ -312,11 +317,17 @@
 @keyframes ft-drift {
   0%,
   100% {
-    transform: translate3d(0, 0, 0) scale(1);
+    background-position:
+      0% 0%,
+      100% 0%,
+      46% 18%;
   }
 
   50% {
-    transform: translate3d(1.6%, -1.4%, 0) scale(1.045);
+    background-position:
+      14% 10%,
+      78% 8%,
+      58% 28%;
   }
 }
 
