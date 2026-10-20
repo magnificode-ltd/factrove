@@ -359,6 +359,51 @@ describe("local runtime", () => {
     assert.match(stderr, /real AWS bucket/);
     assert.equal(stderr.includes("docker"), false);
   });
+
+  it("copies only NEXT_PUBLIC_API_URL from the application env file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-public-url-"));
+    const envFile = join(directory, "api.env");
+    const secret = "postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove";
+    writeFileSync(
+      envFile,
+      `NEXT_PUBLIC_API_URL=https://api.probe-example.test\nDATABASE_URL=${secret}\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\n`,
+    );
+    const env = { PATH: "/usr/bin" };
+    applyNextPublicApiUrl(env, envFile);
+    assert.equal(env.NEXT_PUBLIC_API_URL, "https://api.probe-example.test");
+    assert.equal(env.DATABASE_URL, undefined);
+    assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
+    const kept = { NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001" };
+    applyNextPublicApiUrl(kept, envFile);
+    assert.equal(kept.NEXT_PUBLIC_API_URL, "http://127.0.0.1:3001");
+    const missing = {};
+    applyNextPublicApiUrl(missing, join(directory, "absent.env"));
+    assert.equal(missing.NEXT_PUBLIC_API_URL, undefined);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it("inlines NEXT_PUBLIC_API_URL from the application env file into the production bundle", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-public-build-"));
+    const envFile = join(directory, "api.env");
+    const probe = "https://api.probe-example.test";
+    writeFileSync(
+      envFile,
+      `NEXT_PUBLIC_API_URL=${probe}\nDATABASE_URL=postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\n`,
+    );
+    const env = { ...process.env };
+    delete env.NEXT_PUBLIC_API_URL;
+    env.FACTROVE_APP_ENV_FILE = envFile;
+    const result = spawnSync(webDevBin, ["build"], { cwd: webAppDir, env, encoding: "utf8", timeout: 180000 });
+    assert.equal(result.status, 0, `${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+    const staticDir = join(webAppDir, ".next/static");
+    const serverDir = join(webAppDir, ".next/server");
+    assert.equal(treeContains(staticDir, "api.probe-example.test"), true);
+    assert.equal(treeContains(staticDir, "probe-secret-pass"), false);
+    assert.equal(treeContains(staticDir, "probe-aws-secret"), false);
+    assert.equal(treeContains(serverDir, "probe-secret-pass"), false);
+    assert.equal(treeContains(serverDir, "probe-aws-secret"), false);
+    await rm(directory, { recursive: true, force: true });
+  });
 });
 
 describe("process supervision", () => {
@@ -406,51 +451,6 @@ describe("process supervision", () => {
       killProcess(run.pids.api);
       killProcess(run.pids.web);
     }
-  });
-
-  it("copies only NEXT_PUBLIC_API_URL from the application env file", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "factrove-public-url-"));
-    const envFile = join(directory, "api.env");
-    const secret = "postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove";
-    writeFileSync(
-      envFile,
-      `NEXT_PUBLIC_API_URL=https://api.probe-example.test\nDATABASE_URL=${secret}\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\n`,
-    );
-    const env = { PATH: "/usr/bin" };
-    applyNextPublicApiUrl(env, envFile);
-    assert.equal(env.NEXT_PUBLIC_API_URL, "https://api.probe-example.test");
-    assert.equal(env.DATABASE_URL, undefined);
-    assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
-    const kept = { NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001" };
-    applyNextPublicApiUrl(kept, envFile);
-    assert.equal(kept.NEXT_PUBLIC_API_URL, "http://127.0.0.1:3001");
-    const missing = {};
-    applyNextPublicApiUrl(missing, join(directory, "absent.env"));
-    assert.equal(missing.NEXT_PUBLIC_API_URL, undefined);
-    await rm(directory, { recursive: true, force: true });
-  });
-
-  it("inlines NEXT_PUBLIC_API_URL from the application env file into the production bundle", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "factrove-public-build-"));
-    const envFile = join(directory, "api.env");
-    const probe = "https://api.probe-example.test";
-    writeFileSync(
-      envFile,
-      `NEXT_PUBLIC_API_URL=${probe}\nDATABASE_URL=postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\n`,
-    );
-    const env = { ...process.env };
-    delete env.NEXT_PUBLIC_API_URL;
-    env.FACTROVE_APP_ENV_FILE = envFile;
-    const result = spawnSync(webDevBin, ["build"], { cwd: webAppDir, env, encoding: "utf8", timeout: 180000 });
-    assert.equal(result.status, 0, `${result.stdout ?? ""}\n${result.stderr ?? ""}`);
-    const staticDir = join(webAppDir, ".next/static");
-    const serverDir = join(webAppDir, ".next/server");
-    assert.equal(treeContains(staticDir, "api.probe-example.test"), true);
-    assert.equal(treeContains(staticDir, "probe-secret-pass"), false);
-    assert.equal(treeContains(staticDir, "probe-aws-secret"), false);
-    assert.equal(treeContains(serverDir, "probe-secret-pass"), false);
-    assert.equal(treeContains(serverDir, "probe-aws-secret"), false);
-    await rm(directory, { recursive: true, force: true });
   });
 });
 

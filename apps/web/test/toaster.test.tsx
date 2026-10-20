@@ -2,6 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act } from "react";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -22,15 +23,15 @@ describe("Toaster", () => {
   });
 
   it("is mounted once from the root layout", () => {
-    const layout = readFileSync(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
+    const layout = readFileSync(join(process.cwd(), "src/app/layout.tsx"), "utf8");
     expect(layout).toContain("<Toaster />");
     const screens = [
-      "../src/library/library-screen.tsx",
-      "../src/viewer/viewer-screen.tsx",
-      "../src/app/account/api-keys/page.tsx"
+      "src/library/library-screen.tsx",
+      "src/viewer/viewer-screen.tsx",
+      "src/app/account/api-keys/page.tsx"
     ];
     for (const screen of screens) {
-      const source = readFileSync(new URL(screen, import.meta.url), "utf8");
+      const source = readFileSync(join(process.cwd(), screen), "utf8");
       expect(source).not.toContain("<Toaster");
     }
   });
@@ -45,6 +46,7 @@ describe("Toaster", () => {
 
     await act(async () => {
       toast.success("API key created");
+      await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
     expect(document.body.textContent).toContain("API key created");
