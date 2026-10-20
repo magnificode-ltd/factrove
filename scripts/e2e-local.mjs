@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import {
   apiEntry,
+  apiEnvFile,
   assertLoopbackHttpEndpoint,
   e2eApiPort,
   e2eComposeArgs,
@@ -23,7 +24,6 @@ import {
   readDotEnv,
   repoRoot,
   restoreFileSnapshot,
-  rootEnvFile,
   snapshotFile,
   webAppDir,
   webDevBin,
@@ -265,7 +265,7 @@ function cliChildEnv(configDir) {
 }
 
 function webChildEnv() {
-  const child = webLaunchEnv(env, readDotEnv(rootEnvFile));
+  const child = webLaunchEnv(env, readDotEnv(apiEnvFile));
   child.NEXT_PUBLIC_API_URL = apiOrigin;
   delete child.INIT_CWD;
   return child;

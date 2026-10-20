@@ -103,7 +103,7 @@ Uploaded HTML is rendered by the browser in an isolated viewer. The backend's re
 
 ## Local setup
 
-This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to Garage, the local S3-compatible server started with it. Real AWS S3 stays available: set the bucket, region, and credentials, and leave `S3_ENDPOINT` unset. The web app and CLI receive HTTP origins. Database and storage credentials stay in the API environment.
+This checkout runs the local upload, library, and viewer loop. PostgreSQL runs in Docker and keeps metadata in a named volume. Artifact bytes go to Garage, the local S3-compatible server started with it. Real AWS S3 stays available: set the bucket, region, and credentials, and leave `S3_ENDPOINT` unset. The API and the web app share one environment file. The CLI reads its own environment file, process variables, and `~/.factrove` profile files. Database and storage credentials stay in the application environment.
 
 Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization. The CLI sends an API key from `FACTROVE_API_KEY` or from `factrove configure`. Create and revoke keys at `/account/api-keys`. The secret is shown once.
 
@@ -126,8 +126,12 @@ The Postgres image is pinned to the official `postgres:17.11` multi-arch index, 
 
 ```sh
 cp apps/api/.env.example apps/api/.env
-cp .env.example .env
+cp apps/cli/.env.example apps/cli/.env
 ```
+
+`apps/api/.env` is the application environment. The API loads it on startup and keeps variables that are already set. `pnpm dev` reads `NEXT_PUBLIC_API_URL` from that file and passes it to the web app when the variable is unset. The web process receives that origin. Database, storage, and auth-secret settings stay on the API process.
+
+`apps/cli/.env` is the CLI environment. The CLI loads `FACTROVE_*` names from it when they are unset or blank. Copying that example is enough for the local API origin. Omit the file and the CLI still defaults to `http://localhost:3001`.
 
 Edit `apps/api/.env` before uploading:
 
@@ -136,7 +140,9 @@ Edit `apps/api/.env` before uploading:
 - For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`, and set `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` (and `AWS_SESSION_TOKEN` for a temporary key). Leave that pair unset to use `AWS_PROFILE` or the default credential chain. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
 - AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN.
 
-The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's saved key instead. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted.
+`NEXT_PUBLIC_API_URL` in `apps/api/.env` is the origin the browser uses for the API. It defaults to `http://localhost:3001`.
+
+CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `apps/cli/.env` fills `FACTROVE_API_URL`, `FACTROVE_API_KEY`, and `FACTROVE_PROFILE` only when the process environment leaves them blank, so it sits with the environment variables and below the flags. `--api-url` overrides the API origin for one command. After the environment, the origin is the selected profile's `api_url` in `~/.factrove/config`, then `http://localhost:3001`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials`. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted. `factrove configure` writes those two files. The API key is not printed.
 
 The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to the narrowest parent of both, such as `factrove.example.com` for `app.factrove.example.com` and `api.factrove.example.com`. The browser sends that cookie to every subdomain of the value. Startup rejects an IP address, a public suffix, and a domain that does not cover both origins. Set `TRUSTED_PROXIES` to the IP addresses or CIDR ranges of reverse proxies that may send `X-Forwarded-For`. Leave it unset when the API sees the client socket directly. Sign-in limits follow that client address, and an incoming `X-Forwarded-For` from an untrusted peer does not choose the bucket.
 
@@ -206,8 +212,8 @@ pnpm e2e
 - **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API. Stop the other process and run `pnpm e2e` again. The dev ports 5432, 3900, 3000, and 3001 stay with `pnpm infra:up` and `pnpm dev`.
 - **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set a local placeholder in `apps/api/.env`, then run `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
-- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then `http://localhost:3001`.
-- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in the root `.env` or the environment, then restart `pnpm dev`.
+- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL` from the environment or `apps/cli/.env`, then the selected profile's `api_url`, then `http://localhost:3001`.
+- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`.
 
 ## Development
 

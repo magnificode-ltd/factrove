@@ -3,7 +3,7 @@ import { ArtifactCard } from "@/components/artifact-card";
 import { CliTerminal, uploadCommand } from "@/components/cli-terminal";
 import { AppBar, LibraryTabs, ModeNote } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
-import { ToastHost } from "@/components/toast-host";
+import { Toaster } from "@/components/ui/sonner";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
   const signedIn = state.status === "ready" || state.status === "empty" || state.status === "no-organization";
   return (
     <div className="ft-canvas min-h-dvh">
-      <ToastHost />
+      <Toaster />
       <div className="ft-hero">
         <AppBar clear>
           <LibraryTabs view={state.view} />

@@ -87,4 +87,30 @@ describe("CopyButton", () => {
     expect(button?.textContent).toContain("Copy command");
     expect(button?.textContent).not.toContain("Copied");
   });
+
+  it("reports a clipboard failure and leaves the idle label", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<CopyButton value="artifact-id" label="Copy ID" />);
+    });
+    const button = container.querySelector("button");
+
+    await act(async () => {
+      button?.click();
+    });
+
+    expect(writeText).toHaveBeenCalledWith("artifact-id");
+    expect(toast.error).toHaveBeenCalledWith("Could not copy. Select the text and copy it manually.");
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(button?.textContent).toContain("Copy ID");
+    expect(button?.textContent).not.toContain("Copied");
+    expect(button?.querySelector("[data-copied='false']")).not.toBeNull();
+  });
 });

@@ -18,7 +18,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 | 04 | [Backend](mvp/done/mvp_build_backend.md) | Done | API bootstrap, controllers, services, rendering | 01; 02/03 interfaces, implementations for final verification |
 | 05 | [Frontend](mvp/done/mvp_build_frontend.md) | Done | apps/web after scaffold handoff | 01; may use contract fixtures before 04 is ready |
 | 06 | [CLI](mvp/done/mvp_build_cli.md) | Done — stub-verified | apps/cli after scaffold handoff | 01; may use an HTTP stub before 04 is ready |
-| 07 | [Local runtime and integration](mvp/done/mvp_integrate_local.md) | Done — runtime verified; AWS live loop not run | compose.yaml, .env.example, setup docs/scripts, integration checks, shared lockfile reconciliation | 01 to start; 02–06 to finish |
+| 07 | [Local runtime and integration](mvp/done/mvp_integrate_local.md) | Done — runtime verified; AWS live loop not run | compose.yaml, apps/api/.env.example, apps/cli/.env.example, setup docs/scripts, integration checks, shared lockfile reconciliation | 01 to start; 02–06 to finish |
 | 08 | [End-to-end local acceptance](mvp/done/mvp_verify_end_to_end.md) | Done — local stack verified; macOS not run | Local Garage stand-in, live CLI upload, viewer and list refresh, content CSP, bytes after restart, macOS setup, S3-gated integration tests | 07 |
 
 ## Parallel execution

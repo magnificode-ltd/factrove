@@ -8,7 +8,6 @@ import {
   readDotEnv,
   repoRoot,
   restoreFileSnapshot,
-  rootEnvFile,
   snapshotFile,
   webAppDir,
   webDevArgs,
@@ -43,8 +42,7 @@ if ((build.status ?? 1) !== 0) {
   process.exit(build.status ?? 1);
 }
 
-const rootEnv = readDotEnv(rootEnvFile);
-const webEnv = webLaunchEnv(process.env, rootEnv);
+const webEnv = webLaunchEnv(process.env, fileEnv);
 const nextEnvPath = join(webAppDir, "next-env.d.ts");
 const nextEnvSnapshot = snapshotFile(nextEnvPath);
 

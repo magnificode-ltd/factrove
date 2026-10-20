@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { cliLaunch, readDotEnv, rootEnvFile } from "./local-runtime.mjs";
+import { cliLaunch } from "./local-runtime.mjs";
 
 const entry = fileURLToPath(new URL("../apps/cli/dist/main.js", import.meta.url));
 
@@ -10,7 +10,7 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-const launch = cliLaunch(process.env, process.cwd(), readDotEnv(rootEnvFile));
+const launch = cliLaunch(process.env, process.cwd());
 const child = spawn(process.execPath, [entry, ...process.argv.slice(2)], {
   cwd: launch.cwd,
   env: launch.env,

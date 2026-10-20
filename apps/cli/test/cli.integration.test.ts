@@ -101,6 +101,41 @@ describe("factrove upload", () => {
     expect(selected.requests).toHaveLength(2);
   });
 
+  it("reads apps/cli/.env when FACTROVE_API_URL and FACTROVE_API_KEY are unset", async () => {
+    const stub = await startStub(() => accepted(1));
+    await withCliEnvFile(`FACTROVE_API_URL=${stub.url}\nFACTROVE_API_KEY=ftrv_from_file\nDATABASE_URL=postgresql://secret\n`, async () => {
+      const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
+      expect(result.code).toBe(0);
+      expect(result.stdout).not.toContain("ftrv_from_file");
+      expect(stub.requests).toHaveLength(1);
+      expect(stub.requests[0]?.authorization).toBe("Bearer ftrv_from_file");
+    });
+  });
+
+  it("lets flags and the environment win over apps/cli/.env", async () => {
+    const selected = await startStub(() => accepted(1));
+    const fromFile = await startStub(() => {
+      throw new Error("apps/cli/.env was used instead of the flag or the environment");
+    });
+    await withCliEnvFile(`FACTROVE_API_URL=${fromFile.url}\nFACTROVE_API_KEY=ftrv_from_file\n`, async () => {
+      const flagged = await runCli(["upload", fixturePath, "--api-url", selected.url], {
+        env: { FACTROVE_API_KEY: "" },
+      });
+      expect(flagged.code).toBe(0);
+      expect(selected.requests).toHaveLength(1);
+      expect(selected.requests[0]?.authorization).toBe("Bearer ftrv_from_file");
+      expect(fromFile.requests).toHaveLength(0);
+
+      const fromEnv = await runCli(["upload", fixturePath], {
+        env: { FACTROVE_API_URL: selected.url, FACTROVE_API_KEY: "ftrv_from_env" },
+      });
+      expect(fromEnv.code).toBe(0);
+      expect(selected.requests).toHaveLength(2);
+      expect(selected.requests[1]?.authorization).toBe("Bearer ftrv_from_env");
+      expect(fromFile.requests).toHaveLength(0);
+    });
+  });
+
   it("resolves a relative path from the process directory and ignores INIT_CWD", async () => {
     const directory = await makeTemp();
     await writeFile(join(directory, "note.html"), "<p>here</p>");
@@ -722,6 +757,29 @@ function runCliBytes(args: string[]): Promise<Buffer> {
       resolve(Buffer.concat(chunks));
     });
   });
+}
+
+const cliEnvPath = fileURLToPath(new URL("../.env", import.meta.url));
+
+async function withCliEnvFile(contents: string, run: () => Promise<void>): Promise<void> {
+  let previous: string | null = null;
+  try {
+    previous = await readFile(cliEnvPath, "utf8");
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+  await writeFile(cliEnvPath, contents);
+  try {
+    await run();
+  } finally {
+    if (previous === null) {
+      await rm(cliEnvPath, { force: true });
+    } else {
+      await writeFile(cliEnvPath, previous);
+    }
+  }
 }
 
 function cliEnv(envOverrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

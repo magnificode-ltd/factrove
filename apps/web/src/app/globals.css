@@ -121,6 +121,11 @@
     background: var(--peri);
     color: var(--ink);
   }
+
+  :where(button, input, [aria-label="Artifact lists"] a, .ft-card a, .wm):focus-visible {
+    outline: 2px solid var(--peri-d);
+    outline-offset: 2px;
+  }
 }
 
 .wm {
@@ -143,11 +148,6 @@
 
 .wm:focus-visible {
   border-radius: 8px;
-}
-
-:where(button, input, [aria-label="Artifact lists"] a, .ft-card a, .wm):focus-visible {
-  outline: 2px solid var(--peri-d);
-  outline-offset: 2px;
 }
 
 .ft-title {

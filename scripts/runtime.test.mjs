@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,11 +39,6 @@ describe("local runtime", () => {
         FACTROVE_API_URL: "http://127.0.0.1:3999",
       },
       tmpdir(),
-      {
-        FACTROVE_API_URL: "http://localhost:3001",
-        DATABASE_URL: "postgresql://from-file",
-        AWS_ACCESS_KEY_ID: "from-file",
-      },
     );
 
     assert.equal(launch.cwd, repoRoot);
@@ -56,7 +51,7 @@ describe("local runtime", () => {
     assert.equal(launch.env.PATH, "/usr/bin");
   });
 
-  it("uses a relative INIT_CWD and the root env file only when the process variable is blank", async () => {
+  it("uses a relative INIT_CWD and leaves CLI settings for the CLI env file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "factrove-runtime-"));
     const nested = join(directory, "docs");
     await mkdir(nested);
@@ -65,11 +60,9 @@ describe("local runtime", () => {
     assert.equal(invocationCwd({ INIT_CWD: join(directory, "missing") }, directory), directory);
     assert.equal(invocationCwd({ INIT_CWD: "   " }, directory), directory);
 
-    const launch = cliLaunch({ INIT_CWD: "docs", FACTROVE_API_URL: "   " }, directory, {
-      FACTROVE_API_URL: "http://localhost:3001",
-    });
+    const launch = cliLaunch({ INIT_CWD: "docs", FACTROVE_API_URL: "   " }, directory);
     assert.equal(launch.cwd, nested);
-    assert.equal(launch.env.FACTROVE_API_URL, "http://localhost:3001");
+    assert.equal(launch.env.FACTROVE_API_URL, "   ");
     assert.equal(launch.env.INIT_CWD, undefined);
   });
 
@@ -161,14 +154,11 @@ describe("local runtime", () => {
     assert.match(compose, /factrove-garage-data:/);
     assert.match(compose, /GARAGE_DEFAULT_BUCKET: factrove/);
 
-    const rootExample = readFileSync(join(repoRoot, ".env.example"), "utf8");
-    assert.match(rootExample, /^FACTROVE_API_URL=http:\/\/localhost:3001$/m);
-    assert.match(rootExample, /^NEXT_PUBLIC_API_URL=http:\/\/localhost:3001$/m);
-    assert.equal(rootExample.includes("DATABASE_URL"), false);
-    assert.equal(rootExample.includes("AWS_"), false);
-    assert.equal(rootExample.includes("S3_"), false);
+    assert.equal(existsSync(join(repoRoot, ".env.example")), false);
 
     const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
+    assert.match(apiExample, /^NEXT_PUBLIC_API_URL=http:\/\/localhost:3001$/m);
+    assert.equal(apiExample.includes("FACTROVE_"), false);
     assert.match(apiExample, /^DATABASE_URL=postgresql:\/\/factrove:factrove@127\.0\.0\.1:5432\/factrove$/m);
     assert.match(apiExample, /^S3_BUCKET=factrove$/m);
     assert.match(apiExample, /^S3_REGION=us-east-1$/m);
@@ -177,6 +167,18 @@ describe("local runtime", () => {
     assert.match(apiExample, /^AWS_ACCESS_KEY_ID=factrove-local$/m);
     assert.match(apiExample, /^AWS_SECRET_ACCESS_KEY=factrove-local-secret$/m);
     assert.match(apiExample, /Plain http:\/\/ is accepted only for localhost, 127\.0\.0\.1, and ::1/);
+
+    const cliExample = readFileSync(join(repoRoot, "apps/cli/.env.example"), "utf8");
+    assert.match(cliExample, /^FACTROVE_API_URL=http:\/\/localhost:3001$/m);
+    assert.match(cliExample, /^# FACTROVE_API_KEY=$/m);
+    assert.match(cliExample, /^# FACTROVE_PROFILE=default$/m);
+    assert.equal(cliExample.includes("DATABASE_URL"), false);
+    assert.equal(cliExample.includes("NEXT_PUBLIC_"), false);
+    assert.equal(cliExample.includes("AWS_"), false);
+    assert.equal(cliExample.includes("S3_"), false);
+    const launcher = readFileSync(join(repoRoot, "scripts/factrove.mjs"), "utf8");
+    assert.equal(launcher.includes("readDotEnv"), false);
+    assert.equal(launcher.includes("FACTROVE_API_URL"), false);
   });
 
   it("replaces shell S3 and AWS overrides with the local Garage endpoint", () => {

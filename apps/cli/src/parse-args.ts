@@ -59,6 +59,8 @@ Options:
 
 The API key is read from FACTROVE_API_KEY, then the selected profile in ~/.factrove/credentials.
 An explicit --profile uses that profile's key and ignores FACTROVE_API_KEY. The API key is not printed.
+apps/cli/.env fills unset FACTROVE_API_URL, FACTROVE_API_KEY, and FACTROVE_PROFILE.
+Precedence is flags, then environment variables, then profile files.
 
 Examples:
   pnpm factrove configure --profile default

@@ -8,7 +8,6 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = dirname(scriptsDir);
 export const composeFile = join(repoRoot, "compose.yaml");
 export const apiEnvFile = join(repoRoot, "apps/api/.env");
-export const rootEnvFile = join(repoRoot, ".env");
 export const apiEntry = join(repoRoot, "apps/api/dist/main.js");
 
 export const requiredApiSettings = ["DATABASE_URL", "S3_BUCKET", "S3_REGION"];
@@ -71,16 +70,10 @@ export function withoutInfrastructureSecrets(env) {
   return next;
 }
 
-export function cliLaunch(env, launcherCwd, rootEnv) {
+export function cliLaunch(env, launcherCwd) {
   const cwd = invocationCwd(env, launcherCwd);
   const childEnv = withoutInfrastructureSecrets(env);
   delete childEnv.INIT_CWD;
-  if (!childEnv.FACTROVE_API_URL?.trim()) {
-    const fromFile = rootEnv.FACTROVE_API_URL?.trim();
-    if (fromFile) {
-      childEnv.FACTROVE_API_URL = fromFile;
-    }
-  }
   return { cwd, env: childEnv };
 }
 
