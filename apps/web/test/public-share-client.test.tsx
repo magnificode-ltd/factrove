@@ -8,8 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createPublicBrowserClient } from "../src/api/client";
 import { PublicShareLoader } from "../src/share/public-share-loader";
 
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const token = "a".repeat(43);
 let root: Root | undefined;
