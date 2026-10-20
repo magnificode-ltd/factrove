@@ -27,4 +27,19 @@ describe("content grants", () => {
     expect(url.pathname).toBe(`/api/v1/artifacts/${artifactId}/content`);
     expect(url.searchParams.get("access")).toBe(token);
   });
+
+  it("rejects a grant whose expiry is further ahead than the ttl and skew", () => {
+    const now = Date.UTC(2026, 9, 18, 12, 0, 0);
+    const nowSeconds = Math.floor(now / 1000);
+    const skew = 60;
+    expect(contentGrantAllows(signedGrant(nowSeconds + CONTENT_GRANT_TTL_SECONDS + skew), artifactId, secret, now)).toBe(true);
+    expect(contentGrantAllows(signedGrant(nowSeconds + CONTENT_GRANT_TTL_SECONDS + skew + 1), artifactId, secret, now)).toBe(false);
+    expect(contentGrantAllows(signedGrant(nowSeconds + 24 * 60 * 60), artifactId, secret, now)).toBe(false);
+  });
 });
+
+function signedGrant(exp: number): string {
+  const key = createHmac("sha256", secret).update("factrove:content-grant:v1").digest();
+  const signature = createHmac("sha256", key).update(`${artifactId}.${exp}`).digest("base64url");
+  return `${exp.toString(36)}.${signature}`;
+}

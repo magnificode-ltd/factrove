@@ -63,6 +63,9 @@ importers:
       parse5:
         specifier: 7.3.0
         version: 7.3.0
+      psl:
+        specifier: 1.15.0
+        version: 1.15.0
       reflect-metadata:
         specifier: 0.2.2
         version: 0.2.2
@@ -2741,6 +2744,9 @@ packages:
   proxy-addr@2.0.8:
     resolution: {integrity: sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ==}
     engines: {node: '>= 0.10'}
+
+  psl@1.15.0:
+    resolution: {integrity: sha512-JZd3gMVBAVQkSs6HdNZo9Sdo0LNcQeMNP3CozBJb3JYC/QUYZTnKxP+f8oWRX4rHP5EurWxqAHTSwUCjlNKa1w==}
 
   punycode.js@2.3.1:
     resolution: {integrity: sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==}
@@ -5612,6 +5618,10 @@ snapshots:
     dependencies:
       forwarded: 0.2.0
       ipaddr.js: 1.9.1
+
+  psl@1.15.0:
+    dependencies:
+      punycode: 2.3.1
 
   punycode.js@2.3.1: {}
 

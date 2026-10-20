@@ -138,7 +138,7 @@ Edit `apps/api/.env` before uploading:
 
 The root `.env` holds `NEXT_PUBLIC_API_URL` and `FACTROVE_API_URL`. Both default to `http://localhost:3001`. `--api-url` overrides `FACTROVE_API_URL` for one CLI command. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's saved key instead. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted.
 
-The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to their parent domain, such as `example.com`, so the browser stores one session cookie for both.
+The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to the narrowest parent of both, such as `factrove.example.com` for `app.factrove.example.com` and `api.factrove.example.com`. The browser sends that cookie to every subdomain of the value. Startup rejects an IP address, a public suffix, and a domain that does not cover both origins. Set `TRUSTED_PROXIES` to the IP addresses or CIDR ranges of reverse proxies that may send `X-Forwarded-For`. Leave it unset when the API sees the client socket directly. Sign-in limits follow that client address, and an incoming `X-Forwarded-For` from an untrusted peer does not choose the bucket.
 
 ### Start, stop, and upload
 

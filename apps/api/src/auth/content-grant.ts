@@ -29,7 +29,11 @@ export function contentGrantAllows(token: string, artifactId: string, secret: st
   if (!timingSafeEqual(expectedBytes, givenBytes)) {
     return false;
   }
-  return exp > Math.floor(nowMs / 1000);
+  const nowSeconds = Math.floor(nowMs / 1000);
+  if (exp > nowSeconds + CONTENT_GRANT_TTL_SECONDS + WINDOW_SECONDS) {
+    return false;
+  }
+  return exp > nowSeconds;
 }
 
 export function artifactContentUrl(origin: string, artifactId: string): string {

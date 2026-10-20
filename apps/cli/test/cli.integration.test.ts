@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { chmod, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -463,6 +463,45 @@ describe("factrove configure", () => {
     expect((await stat(credentials)).mode & 0o777).toBe(0o600);
     const names = await readdir(directory);
     expect(names.filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+
+  it("writes through a credentials symlink to the existing target", async () => {
+    const directory = await makeTemp();
+    const targetDirectory = await makeTemp();
+    const target = join(targetDirectory, "credentials");
+    await writeFile(target, "[default]\nfactrove_api_key = ftrv_old\n", { mode: 0o644 });
+    const link = join(directory, "credentials");
+    await symlink(target, link);
+    const key = "ftrv_symlink_secret";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: link,
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    const text = await readFile(target, "utf8");
+    expect(text).toContain(key);
+    expect(text).not.toContain("ftrv_old");
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
+  });
+
+  it("writes through a dangling credentials symlink", async () => {
+    const directory = await makeTemp();
+    const link = join(directory, "credentials");
+    await symlink("stored-credentials", link);
+    const key = "ftrv_dangling_symlink";
+    const result = await runCliInput(["configure"], `${key}\nhttp://127.0.0.1:3999\n`, {
+      FACTROVE_SHARED_CREDENTIALS_FILE: link,
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(result.code).toBe(0);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    const target = join(directory, "stored-credentials");
+    expect((await lstat(target)).isSymbolicLink()).toBe(false);
+    expect(await readFile(target, "utf8")).toContain(key);
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
   });
 
   it("keeps the mode of an existing directory that holds a custom credentials file", async () => {

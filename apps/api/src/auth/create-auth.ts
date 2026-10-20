@@ -3,6 +3,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { PrismaClient } from "@prisma/client";
 import { factroveApiKey } from "./api-key-plugin.js";
+import { CLIENT_IP_HEADER } from "./client-ip.js";
 
 export type CreateAuthInput = {
   prisma: PrismaClient;
@@ -50,6 +51,9 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
       },
     },
     advanced: {
+      ipAddress: {
+        ipAddressHeaders: [CLIENT_IP_HEADER],
+      },
       defaultCookieAttributes: {
         sameSite: "lax",
         secure: input.baseURL.startsWith("https://"),

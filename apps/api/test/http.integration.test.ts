@@ -42,6 +42,7 @@ const config: ApiConfig = {
   apiPublicOrigin: "http://localhost:3001",
   authSecret: TEST_AUTH_SECRET,
   authCookieDomain: null,
+  trustedProxies: [],
 };
 
 let ownerApiKey = "";
@@ -123,17 +124,47 @@ describe("API configuration", () => {
     expect(defaults.apiPublicOrigin).toBe("http://localhost:3001");
     expect(defaults.authSecret).toBe(TEST_AUTH_SECRET);
     expect(defaults.authCookieDomain).toBeNull();
+    expect(defaults.trustedProxies).toEqual([]);
   });
 
-  it("accepts a parent domain for the session cookie", () => {
+  it("accepts a parent domain that covers both origins", () => {
     expect(readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      AUTH_COOKIE_DOMAIN: ".Example.com",
-    }).authCookieDomain).toBe("example.com");
+      AUTH_COOKIE_DOMAIN: ".Factrove.Example.com",
+      WEB_ORIGIN: "https://app.factrove.example.com",
+      API_PUBLIC_ORIGIN: "https://api.factrove.example.com",
+    }).authCookieDomain).toBe("factrove.example.com");
+    expect(readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      TRUSTED_PROXIES: " 10.0.0.0/8, 192.168.1.10 ",
+    }).trustedProxies).toEqual(["10.0.0.0/8", "192.168.1.10"]);
+  });
+
+  it("rejects a cookie domain or proxy list the browser or limiter would mishandle", () => {
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
       AUTH_COOKIE_DOMAIN: "https://example.com",
     })).toThrow(/AUTH_COOKIE_DOMAIN/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      AUTH_COOKIE_DOMAIN: "127.0.0.1",
+      WEB_ORIGIN: "http://127.0.0.1:3000",
+      API_PUBLIC_ORIGIN: "http://127.0.0.1:3001",
+    })).toThrow(/IP address/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      AUTH_COOKIE_DOMAIN: "co.uk",
+      WEB_ORIGIN: "https://app.co.uk",
+      API_PUBLIC_ORIGIN: "https://api.co.uk",
+    })).toThrow(/public suffix/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      AUTH_COOKIE_DOMAIN: "example.com",
+    })).toThrow(/WEB_ORIGIN/);
+    expect(() => readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      TRUSTED_PROXIES: "10.0.0.0/99",
+    })).toThrow(/TRUSTED_PROXIES/);
   });
 
   it("rejects a short auth secret", () => {

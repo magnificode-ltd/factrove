@@ -8,7 +8,6 @@ type ContentStatus = "checking" | "ready" | "failed";
 
 export function ArtifactFrame({ contentUrl }: { contentUrl: string }) {
   const [status, setStatus] = useState<ContentStatus>("checking");
-  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -26,7 +25,7 @@ export function ArtifactFrame({ contentUrl }: { contentUrl: string }) {
       }
     );
     return () => controller.abort();
-  }, [attempt, contentUrl]);
+  }, [contentUrl]);
 
   if (status === "checking") {
     return (
@@ -42,7 +41,7 @@ export function ArtifactFrame({ contentUrl }: { contentUrl: string }) {
         <p role="alert" className="banner error">
           {CONTENT_LOAD_FAILURE}
         </p>
-        <button className="action" type="button" onClick={() => setAttempt((value) => value + 1)}>
+        <button className="action" type="button" onClick={() => window.location.reload()}>
           Try again
         </button>
       </>

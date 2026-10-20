@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CliError } from "./cli-error.js";
 
 const KEY_FIELD = "factrove_api_key";
@@ -144,13 +144,14 @@ export function parseIni(text: string): Map<string, Map<string, string>> {
 }
 
 async function writeIniKey(path: string, section: string, key: string, value: string): Promise<void> {
-  const existing = await readIni(path);
+  const destination = await resolveWritablePath(path);
+  const existing = await readIni(destination);
   const bucket = existing.get(section) ?? new Map<string, string>();
   bucket.set(key, value);
   existing.set(section, bucket);
-  const directory = dirname(path);
+  const directory = dirname(destination);
   const created = await mkdir(directory, { recursive: true, mode: 0o700 });
-  const temporary = join(directory, `.${basename(path)}.${randomBytes(8).toString("hex")}.tmp`);
+  const temporary = join(directory, `.${basename(destination)}.${randomBytes(8).toString("hex")}.tmp`);
   const handle = await open(temporary, "wx", 0o600);
   try {
     await handle.writeFile(serializeIni(existing));
@@ -162,7 +163,7 @@ async function writeIniKey(path: string, section: string, key: string, value: st
   }
   await handle.close();
   try {
-    await rename(temporary, path);
+    await rename(temporary, destination);
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
@@ -170,6 +171,27 @@ async function writeIniKey(path: string, section: string, key: string, value: st
   if (typeof created === "string" && created.length > 0) {
     await restrictCreatedDirectories(created, directory);
   }
+}
+
+async function resolveWritablePath(path: string): Promise<string> {
+  let current = path;
+  for (let hop = 0; hop < 8; hop += 1) {
+    let info;
+    try {
+      info = await lstat(current);
+    } catch (error) {
+      if (isMissing(error)) {
+        return current;
+      }
+      throw error;
+    }
+    if (!info.isSymbolicLink()) {
+      return current;
+    }
+    const link = await readlink(current);
+    current = isAbsolute(link) ? link : resolve(dirname(current), link);
+  }
+  throw new CliError("INVALID_INPUT", "The credentials path is a symlink loop.");
 }
 
 async function restrictCreatedDirectories(firstCreated: string, leaf: string): Promise<void> {

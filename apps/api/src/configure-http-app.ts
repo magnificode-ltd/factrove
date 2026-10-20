@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { toNodeHandler } from "better-auth/node";
 import { AuthService } from "./auth/auth.service.js";
+import { assignClientIp } from "./auth/client-ip.js";
 import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
@@ -34,9 +35,12 @@ export function configureHttpApp(app: INestApplication): void {
     }
     next();
   });
-  // The only Better Auth mount. Registered after CORS so the browser can call
-  // /api/auth from the web origin. The handler is resolved per request because
-  // Better Auth is created in onModuleInit.
+  // Replace any caller-supplied client IP, then mount Better Auth once.
+  // The handler is resolved per request because Better Auth is created in onModuleInit.
+  app.use("/api/auth", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIp(request, config.trustedProxies);
+    next();
+  });
   app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
     void toNodeHandler(auth.handler())(request, response);
   });
