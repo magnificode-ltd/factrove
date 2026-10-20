@@ -2,6 +2,7 @@ import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
+import { ToastHost } from "@/components/toast-host";
 import { Button } from "@/components/ui/button";
 import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
@@ -18,6 +19,7 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
           : "Artifact unavailable";
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      <ToastHost />
       <ViewerBar
         title={title}
         meta={state.status === "ready" ? <ViewerFacts state={state} /> : null}
@@ -51,13 +53,6 @@ function ViewerTools({ artifact }: { artifact: ArtifactDto }) {
     <div className="flex flex-wrap items-center gap-2">
       <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={artifact.viewerUrl} />
       <CopyButton label="Copy ID" copiedLabel="Copied" message="Artifact ID copied" value={artifact.id} />
-      {isEmbeddableContentUrl(artifact.contentUrl) ? (
-        <Button asChild variant="outline" className="h-10">
-          <a href={artifact.contentUrl} target="_blank" rel="noreferrer">
-            Open raw
-          </a>
-        </Button>
-      ) : null}
     </div>
   );
 }

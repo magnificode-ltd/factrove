@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Wordmark } from "@/components/wordmark";
 import { Button } from "@/components/ui/button";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import type { LibraryView } from "@/library/load-library";
 
 export function AppBar({ children, clear = false }: { children?: ReactNode; clear?: boolean }) {
@@ -68,7 +68,7 @@ export function LibraryTabs({ view }: { view: LibraryView | "none" }) {
 
 function tabClass(current: boolean) {
   return cn(
-    "relative z-10 rounded-full px-4 py-2 text-center text-sm font-semibold no-underline",
+    "relative z-10 rounded-full px-4 py-2 text-center text-sm font-semibold no-underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d",
     current ? "text-ink" : "text-muted-foreground hover:text-ink"
   );
 }

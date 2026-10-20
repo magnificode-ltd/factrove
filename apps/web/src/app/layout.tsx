@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
@@ -15,7 +14,6 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en" className={cn(sans.variable, mono.variable, "font-sans")}>
       <body>
         {children}
-        <Toaster />
       </body>
     </html>
   );

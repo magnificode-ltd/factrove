@@ -93,11 +93,8 @@ export function supervise(specs, hooks = {}) {
     });
   }
 
-  for (const spec of specs) {
-    start(spec);
-  }
-
   // Detached children are in their own sessions, so a terminal hangup reaches only this process.
+  // Register before the children start so a hangup during startup is not the default kill.
   process.on("SIGHUP", () => {
     shutdown("SIGTERM", 0);
   });
@@ -119,4 +116,8 @@ export function supervise(specs, hooks = {}) {
       // A failed restore should not replace the shutdown exit code.
     }
   });
+
+  for (const spec of specs) {
+    start(spec);
+  }
 }

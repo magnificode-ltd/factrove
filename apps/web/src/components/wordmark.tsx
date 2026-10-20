@@ -1,8 +1,8 @@
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 
-export function Wordmark({ className, large = false }: { className?: string; large?: boolean }) {
+export function Wordmark({ className }: { className?: string }) {
   return (
-    <a href="/" className={cn("wm", large ? "wm-lg" : "wm-mark", className)}>
+    <a href="/" className={cn("wm wm-mark", className)}>
       fac<b>t</b>rove
     </a>
   );

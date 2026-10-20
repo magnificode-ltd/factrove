@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 
 export function CopyButton({
   value,
@@ -20,13 +20,28 @@ export function CopyButton({
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current !== null) {
+        window.clearTimeout(resetTimer.current);
+      }
+    };
+  }, []);
 
   async function onCopy() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
       toast.success(message);
-      window.setTimeout(() => setCopied(false), 1800);
+      if (resetTimer.current !== null) {
+        window.clearTimeout(resetTimer.current);
+      }
+      resetTimer.current = window.setTimeout(() => {
+        resetTimer.current = null;
+        setCopied(false);
+      }, 1800);
     } catch {
       toast.error("Could not copy. Select the text and copy it manually.");
     }

@@ -28,7 +28,7 @@ export function ArtifactCard({ artifact, now }: { artifact: ArtifactDto; now: nu
     <li className="ft-card relative" onPointerMove={onMove} onPointerLeave={onLeave} onPointerCancel={onLeave}>
       <div className="relative grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <a
-          className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px]"
+          className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
         >
           {artifact.filename}
@@ -47,7 +47,7 @@ export function ArtifactCard({ artifact, now }: { artifact: ArtifactDto; now: nu
           <Badge variant={artifact.accessType === "private" ? "secondary" : "default"} className="h-6">
             {accessLabel(artifact.accessType)}
           </Badge>
-          <time dateTime={artifact.uploadedAt} title={uploaded} suppressHydrationWarning>
+          <time dateTime={artifact.uploadedAt} title={uploaded}>
             <span className="sr-only">{uploaded}</span>
             <span aria-hidden="true">{formatRelativeTime(artifact.uploadedAt, now)}</span>
           </time>

@@ -51,7 +51,7 @@ function LoginForm() {
       }
     >
       <form className="grid gap-5" onSubmit={onSubmit}>
-        <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required autoFocus />
+        <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required />
         <AuthField
           id="password"
           name="password"

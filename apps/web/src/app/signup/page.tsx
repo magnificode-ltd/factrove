@@ -52,7 +52,7 @@ function SignupForm() {
       }
     >
       <form className="grid gap-5" onSubmit={onSubmit}>
-        <AuthField id="name" name="name" label="Name" autoComplete="name" required autoFocus />
+        <AuthField id="name" name="name" label="Name" autoComplete="name" required />
         <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required />
         <AuthField
           id="password"
