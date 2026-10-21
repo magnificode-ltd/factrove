@@ -164,6 +164,8 @@ describe("password attempt throttling", () => {
     const limiter = new PasswordAttemptLimiter(100, 100, 60_000, () => now);
     expect(limiter.shareIsCooling(firstHash)).toBe(false);
     limiter.noteShareFailure(firstHash);
+    expect(limiter.shareIsCooling(firstHash)).toBe(false);
+    limiter.noteShareFailure(firstHash);
     expect(limiter.shareIsCooling(firstHash)).toBe(true);
     now = SHARE_BACKOFF_BASE_MS - 1;
     expect(limiter.shareIsCooling(firstHash)).toBe(true);

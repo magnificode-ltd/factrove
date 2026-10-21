@@ -79,10 +79,10 @@ export class PasswordAttemptLimiter {
     }
     const previous = this.backoffs.get(shareTokenHash);
     const failures = (previous?.failures ?? 0) + 1;
-    const delay = Math.min(
-      SHARE_BACKOFF_MAX_MS,
-      this.backoffBaseMs * 2 ** Math.min(failures - 1, 10),
-    );
+    // The first miss stays free so a typo and the correct password can follow immediately.
+    const delay = failures < 2
+      ? 0
+      : Math.min(SHARE_BACKOFF_MAX_MS, this.backoffBaseMs * 2 ** Math.min(failures - 2, 10));
     if (!this.backoffs.has(shareTokenHash) && this.backoffs.size >= PASSWORD_ATTEMPT_MAX_KEYS) {
       const oldest = this.backoffs.keys().next().value;
       if (oldest !== undefined) {
