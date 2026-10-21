@@ -1344,6 +1344,12 @@ describe("HTTP API", () => {
     });
     const unreadable = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
     expect(unreadable).toEqual({ share: { shared: false, shareUrl: null } });
+    const unreadableDetail = artifactEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`)).json());
+    expect(unreadableDetail.artifact.shared).toBe(false);
+    const hiddenDetail = await globalThis.fetch(publicPath(baseUrl, artifact.id, token));
+    const hiddenContent = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+    expect(hiddenDetail.status).toBe(404);
+    expect(hiddenContent.status).toBe(404);
 
     const swapped = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
       method: "POST",
@@ -1365,6 +1371,48 @@ describe("HTTP API", () => {
     expect(renewed.share.shared).toBe(true);
     const opened = await globalThis.fetch(publicPath(baseUrl, artifact.id, renewedToken));
     expect(opened.status).toBe(200);
+  });
+
+  it("revokes the old public link when the share token key rotates", async () => {
+    const artifact = await upload(baseUrl, "key-rotation.html", new TextEncoder().encode("<p>rotated key</p>"));
+    const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+    })).json());
+    const token = created.share.shareUrl?.split("/").at(-1) ?? "";
+    expect((await globalThis.fetch(publicPath(baseUrl, artifact.id, token))).status).toBe(200);
+
+    config.shareTokenKey = "rotated-share-token-key-value-here";
+    try {
+      const ownerShare = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(ownerShare).toEqual({ share: { shared: false, shareUrl: null } });
+      const detail = artifactEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`)).json());
+      expect(detail.artifact.shared).toBe(false);
+      const listed = artifactListEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts`)).json());
+      expect(listed.items.find((item) => item.id === artifact.id)?.shared).toBe(false);
+
+      const oldDetail = await globalThis.fetch(publicPath(baseUrl, artifact.id, token));
+      const oldContent = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+      expect(oldDetail.status).toBe(404);
+      expect(oldContent.status).toBe(404);
+      const oldError = await errorOf(oldDetail);
+      expect(oldError).toEqual({ code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." });
+      expect(await errorOf(oldContent)).toEqual(oldError);
+      expect(JSON.stringify(oldError)).not.toContain(token);
+
+      const renewed = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+        method: "POST",
+      })).json());
+      const renewedToken = renewed.share.shareUrl?.split("/").at(-1) ?? "";
+      expect(renewed.share.shared).toBe(true);
+      expect(renewedToken).not.toBe(token);
+      expect((await globalThis.fetch(publicPath(baseUrl, artifact.id, renewedToken))).status).toBe(200);
+      expect((await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${renewedToken}/content`)).status).toBe(200);
+      expect((await globalThis.fetch(publicPath(baseUrl, artifact.id, token))).status).toBe(404);
+      const after = artifactEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`)).json());
+      expect(after.artifact.shared).toBe(true);
+    } finally {
+      config.shareTokenKey = null;
+    }
   });
 
   it("lets only the owner share, including an organization member who can already read", async () => {

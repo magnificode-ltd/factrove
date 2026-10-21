@@ -8,7 +8,7 @@ const HKDF_SALT = "factrove-share-token-v1";
 const HKDF_INFO = "factrove share token";
 
 // SHARE_TOKEN_KEY when set, otherwise BETTER_AUTH_SECRET. Rotating the chosen input
-// makes stored links unreadable. Share the artifact again after a rotation.
+// revokes stored links: public lookup decrypts with the current key. Share again afterward.
 export function deriveShareTokenKey(material: string): Buffer {
   return Buffer.from(hkdfSync("sha256", material, HKDF_SALT, HKDF_INFO, KEY_BYTES));
 }

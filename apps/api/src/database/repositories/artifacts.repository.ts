@@ -88,7 +88,7 @@ export class ArtifactsRepository {
   }
 
   // Public lookup uses the unique hash alone, then compares the id in memory.
-  // The raw token is not selected and is not a query argument.
+  // The ciphertext is selected so the caller can require decryption with the current key.
   async findShared(id: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
     const row = await this.prisma.artifact.findUnique({
       where: { shareTokenHash },
@@ -102,16 +102,14 @@ export class ArtifactsRepository {
         createdAt: true,
         updatedAt: true,
         uploadedAt: true,
+        shareToken: true,
         shareTokenHash: true,
       },
     });
     if (!row || row.id !== id) {
       return null;
     }
-    return {
-      ...row,
-      shareToken: null,
-    };
+    return row;
   }
 
   async list(input: ListArtifactsInput): Promise<ArtifactRecord[]> {

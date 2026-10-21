@@ -358,7 +358,7 @@ describe("PostgreSQL artifact persistence", () => {
 
     const shared = await repository.findShared(created.id, hash);
     expect(shared?.id).toBe(created.id);
-    expect(shared?.shareToken).toBeNull();
+    expect(shared?.shareToken).toBe(token);
     expect(shared?.shareTokenHash).toBe(hash);
     expect(await repository.findShared(created.id, "b".repeat(64))).toBeNull();
     expect(await repository.findShared(randomUUID(), hash)).toBeNull();

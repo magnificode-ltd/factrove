@@ -114,6 +114,16 @@ describe("public view limiter", () => {
     now += 30_001;
     expect(limiter.allowContent("203.0.113.8")).toBe(false);
   });
+
+  it("keeps a charged visitor when the clock steps backwards", () => {
+    let now = 120_000;
+    const limiter = new PublicViewLimiter(1, 60_000, () => now);
+    expect(limiter.allow("203.0.113.1")).toBe(true);
+    expect(limiter.allow("203.0.113.1")).toBe(false);
+    now -= 30_000;
+    expect(limiter.allow("203.0.113.1")).toBe(false);
+    expect(limiter.size).toBe(1);
+  });
 });
 
 describe("public API paths", () => {

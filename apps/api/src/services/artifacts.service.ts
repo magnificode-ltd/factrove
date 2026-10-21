@@ -274,7 +274,12 @@ export class ArtifactsService {
       throw artifactNotFound();
     }
     const record = await this.artifacts.findShared(id, hashShareToken(token));
-    if (!record || record.mimeType !== "text/html" || record.uploadedAt === null) {
+    if (
+      !record
+      || record.mimeType !== "text/html"
+      || record.uploadedAt === null
+      || this.readShareToken(record) !== token
+    ) {
       throw artifactNotFound();
     }
     return { ...record, uploadedAt: record.uploadedAt };
@@ -352,7 +357,7 @@ export class ArtifactsService {
       updatedAt: record.updatedAt.toISOString(),
       uploadedAt: record.uploadedAt.toISOString(),
       viewerUrl: artifactViewerUrl(this.config.publicBaseUrl, record.id),
-      shared: record.shareTokenHash !== null,
+      shared: this.readShareToken(record) !== null,
       contentUrl: includeGrant
         ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
         : artifactContentUrl(this.config.apiPublicOrigin, record.id),

@@ -6,8 +6,15 @@ import { Injectable } from "@nestjs/common";
 // TRUSTED_PROXIES or every visitor shares the proxy address.
 //
 // Counts live in the current window and the previous window. Advancing a window
-// rotates those maps, so a request does not scan every visitor. When the current
-// map is full, the oldest key is dropped and the new visitor is counted.
+// rotates those maps, so a request does not scan every visitor. The clock is
+// monotonic, and a backward step does not clear the counters.
+// When the current map is full, the oldest key is dropped and the new visitor
+// is counted. Oldest means first inserted in this window, not least recently
+// used, so a busy early visitor is dropped before a later one. A caller who can
+// present more than maxKeys addresses can cycle keys and exceed the per-address
+// limit. The cap bounds memory. It is not a defence against a large set of
+// source addresses. Share tokens are 256 bits, so this limit is for abuse and
+// enumeration hygiene.
 // allow() charges one view and includes two content loads for 30 seconds.
 // allowContent() uses that grant, and charges only when the grant is spent.
 export const PUBLIC_VIEW_RATE_MAX = 60;
@@ -33,7 +40,7 @@ export class PublicViewLimiter {
   constructor(
     private readonly max = PUBLIC_VIEW_RATE_MAX,
     private readonly windowMs = PUBLIC_VIEW_RATE_WINDOW_MS,
-    private readonly now: () => number = Date.now,
+    private readonly now: () => number = () => performance.now(),
     private readonly maxKeys = PUBLIC_VIEW_RATE_MAX_KEYS,
   ) {
     this.windowStart = this.windowOf(this.now());
@@ -71,6 +78,8 @@ export class PublicViewLimiter {
     if (estimate >= this.max) {
       return false;
     }
+    // Insertion order, not recency. Evicting the oldest admits the new visitor
+    // and lets a large set of addresses cycle past the per-address limit.
     if (!this.current.has(key) && this.current.size >= this.maxKeys) {
       const oldest = this.current.keys().next().value;
       if (oldest !== undefined) {
@@ -112,7 +121,8 @@ export class PublicViewLimiter {
 
   private rotate(at: number): void {
     const start = this.windowOf(at);
-    if (start === this.windowStart) {
+    // A backward step keeps the budgets already charged in this window.
+    if (start <= this.windowStart) {
       return;
     }
     const steps = (start - this.windowStart) / this.windowMs;
