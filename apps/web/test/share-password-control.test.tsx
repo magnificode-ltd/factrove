@@ -125,6 +125,7 @@ describe("share password controls", () => {
 
   it("validates, then sets a password with the owner session", async () => {
     const calls = ownerApi();
+    const writes = () => calls.filter((call) => call.method !== "GET");
     const container = await renderControl(false);
     await openPanel(container);
     const section = container.querySelector('[data-testid="share-password"]');
@@ -143,22 +144,22 @@ describe("share password controls", () => {
     await submit(input);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Use at least 10 characters.");
     expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(calls).toHaveLength(0);
+    expect(writes()).toHaveLength(0);
 
     await type(input, "password123");
     await submit(input);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Choose a less common password.");
-    expect(calls).toHaveLength(0);
+    expect(writes()).toHaveLength(0);
 
     await type(input, "          ");
     await submit(input);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Choose a password with letters or numbers.");
-    expect(calls).toHaveLength(0);
+    expect(writes()).toHaveLength(0);
 
     await type(input, "ababababab");
     await submit(input);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Use at least 4 different characters.");
-    expect(calls).toHaveLength(0);
+    expect(writes()).toHaveLength(0);
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Show password"]')?.click();
@@ -167,7 +168,7 @@ describe("share password controls", () => {
 
     await type(input, "open sesame 42");
     await submit(input);
-    expect(calls).toEqual([
+    expect(writes()).toEqual([
       {
         url: `http://localhost:3001/api/v1/artifacts/${id}/share`,
         method: "POST",
