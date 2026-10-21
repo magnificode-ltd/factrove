@@ -124,8 +124,13 @@ describe("share password controls", () => {
 
     await type(input, "short");
     await submit(input);
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Use at least 8 characters.");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Use at least 10 characters.");
     expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(calls).toHaveLength(0);
+
+    await type(input, "password123");
+    await submit(input);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Choose a less common password.");
     expect(calls).toHaveLength(0);
 
     await act(async () => {
@@ -149,6 +154,7 @@ describe("share password controls", () => {
     expect(container.querySelector('input[name="share-password"]')).toBeNull();
     expect(container.textContent).not.toContain("open sesame 42");
     expect(container.textContent).toContain("Anyone with this link and its password");
+    expect(container.textContent).toContain("stop sharing and share again to mint a new link");
   });
 
   it("changes and removes an existing password", async () => {

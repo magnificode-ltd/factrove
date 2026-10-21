@@ -598,7 +598,9 @@ describe("factrove share", () => {
     }));
     const result = await runCliInput(["share", artifactId, "--password-stdin", "--api-url", stub.url], `${password}\n`);
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(`${shareUrl}\nThis link is password protected.\n`);
+    expect(result.stdout).toBe(
+      `${shareUrl}\nThis link is password protected.\nIf visitors are locked out after too many unlock attempts, share again to mint a new link.\n`,
+    );
     expect(result.stdout).not.toContain(password);
     expect(result.stderr).toBe("");
     expect(stub.requests).toHaveLength(1);
@@ -626,9 +628,23 @@ describe("factrove share", () => {
     const result = await runCliInput(["share", artifactId, "--password-stdin", "--api-url", stub.url, "--json"], "short\n");
     expect(result.code).not.toBe(0);
     expect(JSON.parse(result.stderr)).toEqual({
-      error: { code: "INVALID_INPUT", message: "The password must be at least 8 characters." },
+      error: { code: "INVALID_INPUT", message: "The password must be at least 10 characters." },
     });
     expect(result.stderr).not.toContain("short\n");
+    expect(stub.requests).toHaveLength(0);
+  });
+
+  it("rejects a common stdin password before calling the API", async () => {
+    const stub = await startStub(() => ({ status: 500, body: {} }));
+    const result = await runCliInput(
+      ["share", artifactId, "--password-stdin", "--api-url", stub.url, "--json"],
+      "password123\n",
+    );
+    expect(result.code).not.toBe(0);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: "INVALID_INPUT", message: "Choose a less common password." },
+    });
+    expect(result.stderr).not.toContain("password123");
     expect(stub.requests).toHaveLength(0);
   });
 

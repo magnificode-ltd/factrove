@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { PasswordAttemptLimiter, PASSWORD_ATTEMPT_WINDOW_MS } from "../src/sharing/password-attempt-limit.js";
+import { Argon2VerifyGate } from "../src/sharing/argon2-gate.js";
+import {
+  PasswordAttemptLimiter,
+  PASSWORD_ATTEMPT_WINDOW_MS,
+  SHARE_BACKOFF_BASE_MS,
+} from "../src/sharing/password-attempt-limit.js";
+import { RateWindow } from "../src/sharing/rate-window.js";
 import { PublicViewLimiter } from "../src/sharing/public-view-limit.js";
 import { ARGON2_UNAVAILABLE_MESSAGE, assertSharePasswordSupport } from "../src/sharing/share-password.js";
 import {
@@ -114,37 +120,61 @@ describe("password attempt throttling", () => {
   it("limits each client address and keeps clients apart, including by IPv6 /64", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(3, 100, 60_000, () => now);
-    expect(limiter.hasClientRoom("198.51.100.1")).toBe(true);
-    expect(limiter.hasClientRoom("198.51.100.1")).toBe(true);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.chargeClient("198.51.100.1")).toBe(true);
+      expect(limiter.reserveClient("198.51.100.1")).toBe(true);
     }
-    expect(limiter.hasClientRoom("198.51.100.1")).toBe(false);
-    expect(limiter.chargeClient("198.51.100.1")).toBe(false);
-    expect(limiter.chargeClient("198.51.100.2")).toBe(true);
+    expect(limiter.reserveClient("198.51.100.1")).toBe(false);
+    expect(limiter.reserveClient("198.51.100.2")).toBe(true);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.chargeClient(`2001:db8:1:2::${attempt + 1}`)).toBe(true);
+      expect(limiter.reserveClient(`2001:db8:1:2::${attempt + 1}`)).toBe(true);
     }
-    expect(limiter.chargeClient("2001:db8:1:2:ffff::9")).toBe(false);
-    expect(limiter.chargeClient("2001:db8:1:3::1")).toBe(true);
+    expect(limiter.reserveClient("2001:db8:1:2:ffff::9")).toBe(false);
+    expect(limiter.reserveClient("2001:db8:1:3::1")).toBe(true);
     now = 120_001;
-    expect(limiter.chargeClient("198.51.100.1")).toBe(true);
+    expect(limiter.reserveClient("198.51.100.1")).toBe(true);
+  });
+
+  it("refunds a client slot so a later reserve can succeed", () => {
+    let now = 0;
+    const limiter = new PasswordAttemptLimiter(1, 100, 60_000, () => now);
+    expect(limiter.reserveClient("198.51.100.9")).toBe(true);
+    expect(limiter.reserveClient("198.51.100.9")).toBe(false);
+    limiter.refundClient("198.51.100.9");
+    expect(limiter.reserveClient("198.51.100.9")).toBe(true);
   });
 
   it("limits each share token hash independently of the client budget", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, 4, 60_000, () => now);
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      expect(limiter.chargeClient(`203.0.113.${attempt}`)).toBe(true);
-      expect(limiter.chargeShare(firstHash)).toBe(true);
+      expect(limiter.reserveClient(`203.0.113.${attempt}`)).toBe(true);
+      expect(limiter.reserveShare(firstHash)).toBe(true);
     }
-    expect(limiter.chargeClient("203.0.113.200")).toBe(true);
-    expect(limiter.chargeShare(firstHash)).toBe(false);
-    expect(limiter.chargeShare(secondHash)).toBe(true);
+    expect(limiter.reserveClient("203.0.113.200")).toBe(true);
+    expect(limiter.reserveShare(firstHash)).toBe(false);
+    expect(limiter.reserveShare(secondHash)).toBe(true);
     now = 30_000;
-    expect(limiter.chargeShare(firstHash)).toBe(false);
+    expect(limiter.reserveShare(firstHash)).toBe(false);
     now = 120_001;
-    expect(limiter.chargeShare(firstHash)).toBe(true);
+    expect(limiter.reserveShare(firstHash)).toBe(true);
+  });
+
+  it("backs off a share exponentially after failures and clears on success", () => {
+    let now = 0;
+    const limiter = new PasswordAttemptLimiter(100, 100, 60_000, () => now);
+    expect(limiter.shareIsCooling(firstHash)).toBe(false);
+    limiter.noteShareFailure(firstHash);
+    expect(limiter.shareIsCooling(firstHash)).toBe(true);
+    now = SHARE_BACKOFF_BASE_MS - 1;
+    expect(limiter.shareIsCooling(firstHash)).toBe(true);
+    now = SHARE_BACKOFF_BASE_MS;
+    expect(limiter.shareIsCooling(firstHash)).toBe(false);
+    limiter.noteShareFailure(firstHash);
+    now = SHARE_BACKOFF_BASE_MS + (SHARE_BACKOFF_BASE_MS * 2) - 1;
+    expect(limiter.shareIsCooling(firstHash)).toBe(true);
+    limiter.clearShareBackoff(firstHash);
+    expect(limiter.shareIsCooling(firstHash)).toBe(false);
+    expect(limiter.shareIsCooling(secondHash)).toBe(false);
   });
 
   it("uses a ten minute window by default", () => {
@@ -152,24 +182,46 @@ describe("password attempt throttling", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(undefined, undefined, undefined, () => now);
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      expect(limiter.chargeClient("192.0.2.10")).toBe(true);
+      expect(limiter.reserveClient("192.0.2.10")).toBe(true);
     }
-    expect(limiter.chargeClient("192.0.2.10")).toBe(false);
+    expect(limiter.reserveClient("192.0.2.10")).toBe(false);
     now = 600_000 * 2 + 1;
-    expect(limiter.chargeClient("192.0.2.10")).toBe(true);
+    expect(limiter.reserveClient("192.0.2.10")).toBe(true);
   });
 
   it("does not share buckets with the public view limit", () => {
     const now = () => 0;
     const views = new PublicViewLimiter(2, 60_000, now);
     const attempts = new PasswordAttemptLimiter(2, 2, 60_000, now);
-    expect(attempts.chargeClient("192.0.2.1")).toBe(true);
-    expect(attempts.chargeClient("192.0.2.1")).toBe(true);
-    expect(attempts.chargeClient("192.0.2.1")).toBe(false);
+    expect(attempts.reserveClient("192.0.2.1")).toBe(true);
+    expect(attempts.reserveClient("192.0.2.1")).toBe(true);
+    expect(attempts.reserveClient("192.0.2.1")).toBe(false);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(false);
-    expect(attempts.chargeShare(firstHash)).toBe(true);
+    expect(attempts.reserveShare(firstHash)).toBe(true);
+  });
+});
+
+describe("rate window refunds", () => {
+  it("returns a taken slot in the current window", () => {
+    const window = new RateWindow(1, 60_000, 10, 0);
+    expect(window.take("one", 0)).toBe(true);
+    expect(window.take("one", 0)).toBe(false);
+    window.refund("one", 0);
+    expect(window.take("one", 0)).toBe(true);
+  });
+});
+
+describe("Argon2 verify gate", () => {
+  it("fails fast when saturated and releases a slot", () => {
+    const gate = new Argon2VerifyGate(2);
+    expect(gate.tryAcquire()).toBe(true);
+    expect(gate.tryAcquire()).toBe(true);
+    expect(gate.tryAcquire()).toBe(false);
+    gate.release();
+    expect(gate.tryAcquire()).toBe(true);
+    expect(gate.used).toBe(2);
   });
 });
 

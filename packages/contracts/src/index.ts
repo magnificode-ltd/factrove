@@ -9,8 +9,47 @@ export const contentMediaTypes = {
   markdown: "text/markdown"
 } as const;
 
-export const SHARE_PASSWORD_MIN_LENGTH = 8;
+export const SHARE_PASSWORD_MIN_LENGTH = 10;
 export const SHARE_PASSWORD_MAX_LENGTH = 128;
+const COMMON_SHARE_PASSWORDS = new Set([
+  "password10",
+  "password12",
+  "password123",
+  "password1234",
+  "1234567890",
+  "123456789",
+  "qwerty1234",
+  "qwertyuiop",
+  "letmein123",
+  "welcome123",
+  "admin12345",
+  "iloveyou12",
+  "monkey1234",
+  "dragon1234",
+  "baseball12",
+  "football12",
+  "abcdefghij",
+  "0000000000",
+  "1111111111",
+  "sunshine12",
+  "princess12",
+  "whatever12",
+  "trustno123",
+  "passw0rd12",
+  "password1!",
+  "qwerty12345",
+  "iloveyou123",
+  "letmein1234",
+  "welcome1234",
+  "abc1234567",
+  "1q2w3e4r5t",
+  "zxcvbnm123",
+  "asdfghjkl1"
+]);
+
+export function isCommonSharePassword(password: string): boolean {
+  return COMMON_SHARE_PASSWORDS.has(password.normalize("NFC").toLowerCase());
+}
 // The visitor sends an unlock grant in this header. It is never a cookie or part of a URL.
 export const SHARE_GRANT_HEADER = "x-factrove-share-grant";
 
@@ -44,7 +83,10 @@ export const shareEnvelopeSchema = z.object({
 export const sharePasswordSchema = z
   .string()
   .min(SHARE_PASSWORD_MIN_LENGTH, `Use at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`)
-  .max(SHARE_PASSWORD_MAX_LENGTH, `Use at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`);
+  .max(SHARE_PASSWORD_MAX_LENGTH, `Use at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`)
+  .refine((value) => !isCommonSharePassword(value), {
+    message: "Choose a less common password."
+  });
 
 export const createShareRequestSchema = z
   .object({

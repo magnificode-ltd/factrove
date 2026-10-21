@@ -13,6 +13,7 @@ export type ApiErrorCode =
   | "RATE_LIMITED"
   | "STORAGE_UNAVAILABLE"
   | "CONVERSION_UNAVAILABLE"
+  | "UNLOCK_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export class ApiErrorException extends Error {

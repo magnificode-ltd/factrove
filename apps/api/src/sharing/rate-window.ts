@@ -44,6 +44,14 @@ export class RateWindow {
     return true;
   }
 
+  refund(key: string, at: number): void {
+    this.rotate(at);
+    if (decrementMap(this.current, key)) {
+      return;
+    }
+    decrementMap(this.previous, key);
+  }
+
   private estimate(key: string, at: number): number {
     const elapsed = at - this.windowStart;
     const previousWeight = Math.min(1, Math.max(0, this.windowMs - elapsed) / this.windowMs);
@@ -68,3 +76,17 @@ export class RateWindow {
     return Math.floor(at / this.windowMs) * this.windowMs;
   }
 }
+
+function decrementMap(counts: Map<string, number>, key: string): boolean {
+  const count = counts.get(key);
+  if (count === undefined || count <= 0) {
+    return false;
+  }
+  if (count === 1) {
+    counts.delete(key);
+  } else {
+    counts.set(key, count - 1);
+  }
+  return true;
+}
+

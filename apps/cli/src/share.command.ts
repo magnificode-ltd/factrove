@@ -1,13 +1,11 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
+import { isCommonSharePassword, SHARE_PASSWORD_MAX_LENGTH, SHARE_PASSWORD_MIN_LENGTH } from "@factrove/contracts";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { safeApiOrigin, type ShareInvocation } from "./parse-args.js";
 import { promptSecret, readAllStdin } from "./secret-input.js";
-
-const PASSWORD_MIN_LENGTH = 8;
-const PASSWORD_MAX_LENGTH = 128;
 
 @Injectable()
 export class ShareCommand {
@@ -45,7 +43,7 @@ export class ShareCommand {
       process.stdout.write(`${envelope.share.shareUrl}\n`);
       process.stdout.write(
         envelope.share.passwordProtected
-          ? "This link is password protected.\n"
+          ? "This link is password protected.\nIf visitors are locked out after too many unlock attempts, share again to mint a new link.\n"
           : "This link is not password protected.\n",
       );
     } catch (error) {
@@ -97,11 +95,14 @@ async function readPassword(source: "prompt" | "stdin"): Promise<string> {
 }
 
 function checkPassword(value: string): string {
-  if (value.length < PASSWORD_MIN_LENGTH) {
-    throw new CliError("INVALID_INPUT", `The password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+  if (value.length < SHARE_PASSWORD_MIN_LENGTH) {
+    throw new CliError("INVALID_INPUT", `The password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`);
   }
-  if (value.length > PASSWORD_MAX_LENGTH) {
-    throw new CliError("INVALID_INPUT", `The password must be at most ${PASSWORD_MAX_LENGTH} characters.`);
+  if (value.length > SHARE_PASSWORD_MAX_LENGTH) {
+    throw new CliError("INVALID_INPUT", `The password must be at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`);
+  }
+  if (isCommonSharePassword(value)) {
+    throw new CliError("INVALID_INPUT", "Choose a less common password.");
   }
   return value;
 }

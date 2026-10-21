@@ -32,7 +32,13 @@ export function configureHttpApp(app: INestApplication): void {
   });
   // Session writes are accepted from the owner app and from PUBLIC_BASE_URL.
   // API-key calls send Authorization and skip this check. This runs before the body parser.
+  // Public unlock is anonymous JSON and ignores a leftover session cookie, so a visitor
+  // with a cookie from another origin is not blocked. Owner writes still need a matching origin.
   app.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
+    if (isPublicUnlockPath(requestPath(request))) {
+      next();
+      return;
+    }
     if (rejectCookieAuthenticatedWrite(request, response, browserOrigins(config.webOrigin, config.publicBaseUrl))) {
       return;
     }

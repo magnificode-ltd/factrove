@@ -109,6 +109,9 @@ importers:
       '@factrove/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@factrove/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@nestjs/common':
         specifier: 11.1.9
         version: 11.1.9(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)

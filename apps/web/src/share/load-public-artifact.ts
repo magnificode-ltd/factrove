@@ -54,7 +54,7 @@ export async function unlockPublicArtifact(
     if (error instanceof FactroveApiError && (error.status === 401 || error.status === 400)) {
       return { status: "incorrect", message: INCORRECT_MESSAGE };
     }
-    if (error instanceof FactroveApiError && error.status === 429) {
+    if (error instanceof FactroveApiError && (error.status === 429 || error.status === 503)) {
       return { status: "throttled", message: THROTTLED_MESSAGE };
     }
     if (error instanceof FactroveApiError && error.status === 404) {

@@ -237,7 +237,7 @@ function SharePassword({
     event.preventDefault();
     const parsed = sharePasswordSchema.safeParse(password);
     if (!parsed.success) {
-      setInvalid(parsed.error.issues[0]?.message ?? "Use 8 to 128 characters.");
+      setInvalid(parsed.error.issues[0]?.message ?? "Use 10 to 128 characters.");
       inputRef.current?.focus();
       return;
     }
@@ -292,7 +292,7 @@ function SharePassword({
           <span className="font-semibold">{protectedLink ? "Password protected" : "No password"}</span>
           <span className="block text-muted-foreground">
             {protectedLink
-              ? "Visitors unlock it once per tab. Access lasts 15 minutes."
+              ? "Visitors unlock it once per tab. Access lasts 15 minutes. If they are locked out after too many attempts, stop sharing and share again to mint a new link."
               : "Add one so only people you tell can open it."}
           </span>
         </p>
@@ -347,7 +347,7 @@ function SharePassword({
             }}
           />
           <p id={hintId} className="text-xs text-muted-foreground">
-            8 to 128 characters. Share it separately from the link. Factrove stores only a hash.
+            10 to 128 characters. Avoid common passwords. Share it separately from the link. Factrove stores only a hash.
           </p>
           {invalid ? (
             <p id={errorId} role="alert" className="text-sm text-destructive">

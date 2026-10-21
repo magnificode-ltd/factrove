@@ -31,7 +31,13 @@ import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-c
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
 import { withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
 import { markdownContentSecurityPolicy, MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
-import { PASSWORD_ATTEMPTS_PER_CLIENT, PASSWORD_ATTEMPTS_PER_SHARE } from "../src/sharing/password-attempt-limit.js";
+import {
+  PasswordAttemptLimiter,
+  PASSWORD_ATTEMPT_MAX_KEYS,
+  PASSWORD_ATTEMPT_WINDOW_MS,
+  PASSWORD_ATTEMPTS_PER_CLIENT,
+  PASSWORD_ATTEMPTS_PER_SHARE,
+} from "../src/sharing/password-attempt-limit.js";
 import { browserOrigins } from "../src/sharing/public-origin.js";
 import { SHARE_TICKET_MAX_USES } from "../src/sharing/share-grant.js";
 import { createShareToken } from "../src/sharing/share-link.js";
@@ -1829,13 +1835,13 @@ describe("HTTP API", () => {
         expect((await unlock(visitorIp(), target.id, targetShare.token, `distributed guess ${attempt}`)).status).toBe(401);
       }
       const fresh = visitorIp();
-      const shareStillOpen = await unlock(fresh, target.id, targetShare.token, password);
-      expect(shareStillOpen.status).toBe(200);
+      const shareStillClosed = await unlock(fresh, target.id, targetShare.token, password);
+      expect(shareStillClosed.status).toBe(429);
+      expect((await errorOf(shareStillClosed)).code).toBe("RATE_LIMITED");
       const shareWrong = await unlock(visitorIp(), target.id, targetShare.token, "still the wrong guess");
       expect(shareWrong.status).toBe(429);
       expect((await errorOf(shareWrong)).code).toBe("RATE_LIMITED");
       expect((await unlock(fresh, bystander.id, bystanderShare.token, password)).status).toBe(200);
-      expect((await openWithGrant(fresh, target.id, targetShare.token, publicUnlockEnvelopeSchema.parse(await shareStillOpen.json()).grant?.token)).status).toBe(200);
     });
 
     it("does not charge a bucket for a non-JSON unlock body", async () => {
@@ -1864,20 +1870,23 @@ describe("HTTP API", () => {
       expect((await unlock(ip, artifact.id, token, password)).status).toBe(200);
     });
 
-    it("lets the 31st correct visitor in and resets the share bucket after a re-share", async () => {
+    it("refuses the 31st attempt even with the correct password and resets after a re-share", async () => {
       const artifact = await upload(baseUrl, "meeting.html", new TextEncoder().encode("<p>meeting</p>"));
       const password = "meeting password";
       const first = await shareWithPassword(artifact.id, password);
-      for (let visitor = 0; visitor < PASSWORD_ATTEMPTS_PER_SHARE + 1; visitor += 1) {
+      for (let visitor = 0; visitor < PASSWORD_ATTEMPTS_PER_SHARE; visitor += 1) {
         expect((await unlock(visitorIp(), artifact.id, first.token, password)).status).toBe(200);
       }
+      const locked = await unlock(visitorIp(), artifact.id, first.token, password);
+      expect(locked.status).toBe(429);
+      expect((await errorOf(locked)).code).toBe("RATE_LIMITED");
 
       const exhausted = await upload(baseUrl, "reshare.html", new TextEncoder().encode("<p>reshare</p>"));
       const oldShare = await shareWithPassword(exhausted.id, password);
       for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
         expect((await unlock(visitorIp(), exhausted.id, oldShare.token, `old wrong ${attempt}`)).status).toBe(401);
       }
-      expect((await unlock(visitorIp(), exhausted.id, oldShare.token, "another wrong guess")).status).toBe(429);
+      expect((await unlock(visitorIp(), exhausted.id, oldShare.token, password)).status).toBe(429);
 
       const revoked = await ownerFetch(`${baseUrl}/api/v1/artifacts/${exhausted.id}/share`, { method: "DELETE" });
       expect(revoked.status).toBe(200);
@@ -1885,6 +1894,40 @@ describe("HTTP API", () => {
       expect(next.token).not.toBe(oldShare.token);
       expect((await unlock(visitorIp(), exhausted.id, next.token, "first wrong on the new link")).status).toBe(401);
       expect((await unlock(visitorIp(), exhausted.id, next.token, "brand new password")).status).toBe(200);
+    });
+
+    it("caps 65 parallel unlocks from one address before Argon2", async () => {
+      const artifact = await upload(baseUrl, "parallel-ip.html", new TextEncoder().encode("<p>parallel ip</p>"));
+      const password = "parallel ip password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      const ip = visitorIp();
+      const responses = await Promise.all(
+        Array.from({ length: 65 }, (_, attempt) => unlock(ip, artifact.id, token, `wrong parallel ${attempt}`)),
+      );
+      const statuses = responses.map((response) => response.status);
+      expect(statuses.filter((status) => status === 200)).toHaveLength(0);
+      expect(statuses.filter((status) => status === 401).length).toBeLessThanOrEqual(PASSWORD_ATTEMPTS_PER_CLIENT);
+      expect(statuses.filter((status) => status === 401 || status === 503).length).toBeLessThanOrEqual(
+        PASSWORD_ATTEMPTS_PER_CLIENT,
+      );
+      expect(statuses.filter((status) => status === 429).length).toBeGreaterThanOrEqual(55);
+      expect(statuses).toHaveLength(65);
+      await Promise.all(responses.map((response) => response.arrayBuffer()));
+    });
+
+    it("caps rotated addresses against one share before Argon2", async () => {
+      const artifact = await upload(baseUrl, "rotated-ip.html", new TextEncoder().encode("<p>rotated ip</p>"));
+      const password = "rotated ip password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      const responses = await Promise.all(
+        Array.from({ length: 65 }, (_, attempt) => unlock(visitorIp(), artifact.id, token, `rotated guess ${attempt}`)),
+      );
+      const statuses = responses.map((response) => response.status);
+      expect(statuses.filter((status) => status === 200)).toHaveLength(0);
+      expect(statuses.filter((status) => status === 401).length).toBeLessThanOrEqual(PASSWORD_ATTEMPTS_PER_SHARE);
+      expect(statuses.filter((status) => status === 429 || status === 503).length).toBeGreaterThanOrEqual(35);
+      expect(statuses).toHaveLength(65);
+      await Promise.all(responses.map((response) => response.arrayBuffer()));
     });
 
     it("validates owner password changes and keeps the unlock route credential-free", async () => {
@@ -1899,7 +1942,10 @@ describe("HTTP API", () => {
 
       const short = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "short" }) });
       expect(short.status).toBe(400);
-      expect(await errorOf(short)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Use at least 8 characters." });
+      expect(await errorOf(short)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Use at least 10 characters." });
+      const common = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "password123" }) });
+      expect(common.status).toBe(400);
+      expect(await errorOf(common)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Choose a less common password." });
       const long = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "p".repeat(129) }) });
       expect(long.status).toBe(400);
       const extra = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "long enough", note: 1 }) });
@@ -1979,6 +2025,25 @@ describe("HTTP API", () => {
       const postDetail = await globalThis.fetch(publicPath(baseUrl, artifact.id, token), { method: "POST" });
       expect(postDetail.status).toBe(404);
       expect((await errorOf(postDetail)).code).toBe("ARTIFACT_NOT_FOUND");
+
+      const cookieUnlock = await globalThis.fetch(`${publicPath(baseUrl, artifact.id, token)}/unlock`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: owner.cookie,
+          origin: "https://evil.example",
+        },
+        body: JSON.stringify({ password: "long enough" }),
+      });
+      expect(cookieUnlock.status).toBe(200);
+    });
+
+    it("returns the public 404 for a malformed percent-encoded share path", async () => {
+      const artifact = await upload(baseUrl, "percent.html", new TextEncoder().encode("<p>percent</p>"));
+      const { token } = await shareWithPassword(artifact.id, "percent path password");
+      const broken = await rawPublicGet(baseUrl, `/api/v1/public/artifacts/${artifact.id}/%ZZ${token.slice(2)}`);
+      expect(broken.status).toBe(404);
+      expect(broken.json).toEqual({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } });
     });
   });
 });
@@ -1991,6 +2056,17 @@ async function createApp(appConfig: ApiConfig, store: BlobStore): Promise<INestA
     .useValue(appConfig)
     .overrideProvider(BLOB_STORE)
     .useValue(store)
+    .overrideProvider(PasswordAttemptLimiter)
+    .useValue(
+      new PasswordAttemptLimiter(
+        PASSWORD_ATTEMPTS_PER_CLIENT,
+        PASSWORD_ATTEMPTS_PER_SHARE,
+        PASSWORD_ATTEMPT_WINDOW_MS,
+        () => performance.now(),
+        PASSWORD_ATTEMPT_MAX_KEYS,
+        0,
+      ),
+    )
     .compile();
   const application = moduleRef.createNestApplication({ logger: false, bodyParser: false });
   configureHttpApp(application);
@@ -2077,6 +2153,32 @@ function expectHtmlHeaders(headers: Headers): void {
   expect(policy).toContain("base-uri 'none'");
   expect(policy).toContain("frame-ancestors http://localhost:3000");
   expect(policy).not.toContain("*");
+}
+
+function rawPublicGet(root: string, path: string): Promise<{ status: number; json: unknown }> {
+  const target = new URL(root);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path,
+        method: "GET",
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({ status: res.statusCode ?? 0, json: JSON.parse(text) as unknown });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 function getWithHost(url: string, host: string): Promise<{ status: number; json: unknown }> {

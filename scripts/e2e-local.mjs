@@ -949,6 +949,7 @@ async function checkPasswordShare(id, fixture, configDir) {
     protectedShare.code !== 0
     || !shareLinkPattern(id).test(shareUrl)
     || !protectedShare.stdout.includes("This link is password protected.")
+    || !protectedShare.stdout.includes("share again to mint a new link")
   ) {
     throw new Error(`share --password-stdin failed.\n${protectedShare.stdout}\n${protectedShare.stderr}`);
   }
@@ -1161,6 +1162,9 @@ async function ownerPasswordChange(id, password) {
     const region = await openOwnerSharePanel(page);
     const controls = region.getByRole("region", { name: "Link password" });
     await controls.getByText("Password protected").waitFor();
+    if (!(await controls.getByText("share again to mint a new link").count())) {
+      throw new Error("The owner panel did not explain how to recover from a lockout.");
+    }
     await controls.getByRole("button", { name: "Change password" }).click();
     const field = controls.getByLabel("New link password");
     await field.fill(password);

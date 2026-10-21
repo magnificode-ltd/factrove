@@ -22,6 +22,7 @@ import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markd
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
+import { argon2VerifyGate } from "../sharing/argon2-gate.js";
 import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
 import { browserOrigins } from "../sharing/public-origin.js";
 import { PublicViewLimiter } from "../sharing/public-view-limit.js";
@@ -255,9 +256,10 @@ export class ArtifactsService {
     return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
   }
 
-  // Invalid bodies are rejected before any bucket is touched. Failures spend the client
-  // budget, and a matching token's wrong guesses also spend that share's budget. A correct
-  // password never charges either, so it succeeds unless this address is already exhausted.
+  // Invalid bodies are rejected before any bucket is touched. Client and share slots are
+  // reserved before Argon2, including a correct password. Exhausted or cooling shares are
+  // 429 with no hash work. A match refunds the client slot and keeps the share charge.
+  // The owner recovers by sharing again, which mints a new token hash and a fresh budget.
   async unlockPublic(
     id: string,
     token: string,
@@ -265,31 +267,38 @@ export class ArtifactsService {
     readBody: () => unknown,
   ): Promise<PublicUnlockEnvelope> {
     const password = readUnlockPassword(readBody());
-    if (!this.passwordAttempts.hasClientRoom(clientIp)) {
+    if (!this.passwordAttempts.reserveClient(clientIp)) {
       throw tooManyPasswordAttempts();
     }
-    let record: ArtifactRecord & { uploadedAt: Date };
-    try {
-      record = await this.findPublic(id, token);
-    } catch (error) {
-      if (error instanceof ApiErrorException && error.status === 404) {
-        this.passwordAttempts.chargeClient(clientIp);
-      }
-      throw error;
-    }
+    const record = await this.findPublic(id, token);
     const scope = this.grantScope(record);
     if (!scope || !record.sharePasswordHash || !record.shareTokenHash) {
+      this.passwordAttempts.refundClient(clientIp);
       return { grant: null };
     }
-    if (!(await verifySharePassword(password, record.sharePasswordHash))) {
-      this.passwordAttempts.chargeClient(clientIp);
-      if (!this.passwordAttempts.chargeShare(record.shareTokenHash)) {
-        throw tooManyPasswordAttempts();
-      }
-      throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
+    if (this.passwordAttempts.shareIsCooling(record.shareTokenHash)) {
+      throw tooManyPasswordAttempts();
     }
-    const grant = mintShareGrant(scope, this.grantKey());
-    return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+    if (!this.passwordAttempts.reserveShare(record.shareTokenHash)) {
+      throw tooManyPasswordAttempts();
+    }
+    if (!argon2VerifyGate.tryAcquire()) {
+      this.passwordAttempts.refundClient(clientIp);
+      this.passwordAttempts.refundShare(record.shareTokenHash);
+      throw unlockBusy();
+    }
+    try {
+      if (!(await verifySharePassword(password, record.sharePasswordHash))) {
+        this.passwordAttempts.noteShareFailure(record.shareTokenHash);
+        throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
+      }
+      this.passwordAttempts.refundClient(clientIp);
+      this.passwordAttempts.clearShareBackoff(record.shareTokenHash);
+      const grant = mintShareGrant(scope, this.grantKey());
+      return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+    } finally {
+      argon2VerifyGate.release();
+    }
   }
 
   framingOrigins(): readonly string[] {
@@ -524,6 +533,10 @@ function passwordRequired(): ApiErrorException {
 
 function tooManyPasswordAttempts(): ApiErrorException {
   return new ApiErrorException(429, "RATE_LIMITED", "Too many password attempts. Try again later.");
+}
+
+function unlockBusy(): ApiErrorException {
+  return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.");
 }
 
 function readCreateShareInput(body: unknown): CreateShareRequest {

@@ -81,6 +81,9 @@ function mapException(exception: unknown, publicApi: boolean): ErrorBody {
       };
     }
     if (status === 400) {
+      if (publicApi && isUriDecodeFailure(exception)) {
+        return { status: 404, code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." };
+      }
       return { status: 400, code: "INVALID_REQUEST", message: invalidRequestMessage(exception) };
     }
     if (status === 404) {
@@ -90,8 +93,11 @@ function mapException(exception: unknown, publicApi: boolean): ErrorBody {
       return { status: 404, code: "INVALID_REQUEST", message: "Not found." };
     }
   }
-  const clientStatus = readClientStatus(exception);
-  if (clientStatus === 413) {
+    if (publicApi && isUriDecodeFailure(exception)) {
+      return { status: 404, code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." };
+    }
+    const clientStatus = readClientStatus(exception);
+    if (clientStatus === 413) {
     return {
       status: 413,
       code: "FILE_TOO_LARGE",
@@ -129,6 +135,18 @@ function readClientStatus(exception: unknown): number | undefined {
     return undefined;
   }
   return status;
+}
+
+function isUriDecodeFailure(exception: unknown): boolean {
+  if (exception instanceof URIError) {
+    return true;
+  }
+  const message = exception instanceof Error
+    ? exception.message
+    : typeof exception === "object" && exception !== null && "message" in exception && typeof exception.message === "string"
+      ? exception.message
+      : "";
+  return /failed to decode param|uri malformed|invalid uri/i.test(message);
 }
 
 function exceptionText(exception: HttpException): string {
