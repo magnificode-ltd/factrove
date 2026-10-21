@@ -1,10 +1,6 @@
-import { readFileSync } from "node:fs";
+import { COMMON_SHARE_PASSWORD_LIST } from "./common-password-list.js";
 
-const COMMON_SHARE_PASSWORDS = new Set(
-  readFileSync(new URL("./common-passwords.txt", import.meta.url), "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0),
-);
+const COMMON_SHARE_PASSWORDS = new Set(COMMON_SHARE_PASSWORD_LIST);
 
 export function isCommonSharePassword(password: string): boolean {
   return COMMON_SHARE_PASSWORDS.has(password.normalize("NFC").toLowerCase());

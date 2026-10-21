@@ -91,7 +91,7 @@ const unlockedArtifact = {
   passwordProtected: true
 };
 
-function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
+function json(body: unknown, status = 200, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json", ...extraHeaders }
@@ -115,7 +115,7 @@ function lockedApi(options: { password?: string; throttle?: boolean; busy?: bool
     };
     calls.push(call);
     if (call.url === `${apiBase}/unlock`) {
-      const retryAfter = options.retryAfter === undefined ? {} : { "retry-after": options.retryAfter };
+      const retryAfter = options.retryAfter === undefined ? undefined : { "retry-after": options.retryAfter };
       if (options.busy) {
         return json(
           { error: { code: "UNLOCK_UNAVAILABLE", message: "Password verification is busy. Try again." } },
