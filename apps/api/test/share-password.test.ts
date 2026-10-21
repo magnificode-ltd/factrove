@@ -147,44 +147,104 @@ describe("password attempt throttling", () => {
     expect(limiter.reserveClient("198.51.100.9")).toBeTruthy();
   });
 
-  it("reserves share failures atomically and keeps shares apart", () => {
+  it("records confirmed share failures atomically and keeps shares apart", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, 4, 60_000, () => now);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       expect(limiter.reserveClient(`203.0.113.${attempt}`)).toBeTruthy();
       expect(limiter.shareHasRoom(firstHash)).toBe(true);
-      expect(limiter.reserveShare(firstHash)).toBeTruthy();
+      expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+      limiter.confirmShareFailure(firstHash);
     }
     expect(limiter.reserveClient("203.0.113.200")).toBeTruthy();
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
-    expect(limiter.reserveShare(firstHash)).toBeNull();
+    expect(limiter.beginShareCheck(firstHash)).toBe("locked");
     expect(limiter.shareHasRoom(secondHash)).toBe(true);
-    expect(limiter.reserveShare(secondHash)).toBeTruthy();
+    expect(limiter.beginShareCheck(secondHash)).toBe("admitted");
+    limiter.confirmShareFailure(secondHash);
     now = 30_000;
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
     now = 120_001;
     expect(limiter.shareHasRoom(firstHash)).toBe(true);
   });
 
-  it("refunds a share reservation so a correct unlock does not spend the cap", () => {
+  it("releases an in-flight check so a correct unlock does not spend the cap", () => {
     const limiter = new PasswordAttemptLimiter(100, 1, 60_000, () => 0);
-    const charge = limiter.reserveShare(firstHash);
-    expect(charge).toBeTruthy();
-    expect(limiter.reserveShare(firstHash)).toBeNull();
-    limiter.refundShare(charge!);
-    expect(limiter.reserveShare(firstHash)).toBeTruthy();
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    expect(limiter.beginShareCheck(firstHash)).toBe("busy");
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    limiter.releaseShareCheck(firstHash);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    limiter.confirmShareFailure(firstHash);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
+    expect(limiter.beginShareCheck(firstHash)).toBe("locked");
   });
 
-  it("delays a share from recent failures without rejecting, and the delay decays", () => {
+  it("keeps pending checks out of delay, lockout, and Retry-After", () => {
+    const limiter = new PasswordAttemptLimiter(100, PASSWORD_ATTEMPTS_PER_SHARE, 60_000, () => 0, 10_000, SHARE_DELAY_MAX_MS);
+    const admissions = Array.from({ length: 40 }, () => limiter.beginShareCheck(firstHash));
+    expect(admissions.filter((status) => status === "admitted")).toHaveLength(PASSWORD_ATTEMPTS_PER_SHARE);
+    expect(admissions.filter((status) => status === "busy")).toHaveLength(10);
+    expect(admissions).not.toContain("locked");
+    expect(limiter.sharePending(firstHash)).toBe(PASSWORD_ATTEMPTS_PER_SHARE);
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    expect(limiter.shareDelayMs(firstHash)).toBe(0);
+    expect(limiter.shareRetryAfterSeconds(firstHash)).toBe(0);
+    limiter.releaseShareCheck(firstHash);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    expect(limiter.sharePending(firstHash)).toBe(PASSWORD_ATTEMPTS_PER_SHARE);
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+  });
+
+  it("admits one more check after twenty-nine failures and treats extra in-flight as busy", () => {
+    const limiter = new PasswordAttemptLimiter();
+    for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE - 1; attempt += 1) {
+      expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+      limiter.confirmShareFailure(firstHash);
+    }
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    expect(limiter.sharePending(firstHash)).toBe(1);
+    for (let extra = 0; extra < 15; extra += 1) {
+      expect(limiter.beginShareCheck(firstHash)).toBe("busy");
+    }
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    expect(limiter.shareDelayMs(firstHash)).toBeGreaterThan(0);
+    limiter.releaseShareCheck(firstHash);
+    expect(limiter.sharePending(firstHash)).toBe(0);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    limiter.confirmShareFailure(firstHash);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
+    expect(limiter.beginShareCheck(firstHash)).toBe("locked");
+  });
+
+  it("converts a pending check to a confirmed failure only after a wrong guess", () => {
+    const limiter = new PasswordAttemptLimiter(100, 2, 60_000, () => 0, 10_000, SHARE_DELAY_MAX_MS);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    limiter.confirmShareFailure(firstHash);
+    expect(limiter.sharePending(firstHash)).toBe(0);
+    expect(limiter.shareDelayMs(firstHash)).toBeGreaterThan(0);
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    expect(limiter.beginShareCheck(firstHash)).toBe("busy");
+    limiter.confirmShareFailure(firstHash);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
+    expect(limiter.beginShareCheck(firstHash)).toBe("locked");
+    expect(limiter.shareRetryAfterSeconds(firstHash)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("delays a share from confirmed failures without rejecting, and the delay decays", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, PASSWORD_ATTEMPTS_PER_SHARE, 60_000, () => now, 10_000, SHARE_DELAY_MAX_MS);
     expect(limiter.shareDelayMs(firstHash)).toBe(0);
-    expect(limiter.reserveShare(firstHash)).toBeTruthy();
+    expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+    limiter.confirmShareFailure(firstHash);
     expect(limiter.shareDelayMs(firstHash)).toBeGreaterThan(0);
     expect(limiter.shareDelayMs(firstHash)).toBeLessThanOrEqual(SHARE_DELAY_MAX_MS);
     expect(limiter.shareHasRoom(firstHash)).toBe(true);
     for (let attempt = 1; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
-      expect(limiter.reserveShare(firstHash)).toBeTruthy();
+      expect(limiter.beginShareCheck(firstHash)).toBe("admitted");
+      limiter.confirmShareFailure(firstHash);
     }
     expect(limiter.shareDelayMs(firstHash)).toBe(SHARE_DELAY_MAX_MS);
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
@@ -242,7 +302,8 @@ describe("password attempt throttling", () => {
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(false);
-    expect(attempts.reserveShare(firstHash)).toBeTruthy();
+    expect(attempts.beginShareCheck(firstHash)).toBe("admitted");
+    attempts.confirmShareFailure(firstHash);
   });
 });
 

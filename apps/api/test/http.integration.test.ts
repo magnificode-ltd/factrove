@@ -1577,6 +1577,21 @@ describe("HTTP API", () => {
       });
     }
 
+    async function unlockUntilReady(ip: string, id: string, token: string, password: string): Promise<Response> {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        const response = await unlock(ip, id, token, password);
+        if (response.status === 503) {
+          expect(expectRetryAfter(response)).toBe(1);
+          expect((await errorOf(response)).code).toBe("UNLOCK_UNAVAILABLE");
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          continue;
+        }
+        expect(response.status).not.toBe(429);
+        return response;
+      }
+      throw new Error("unlock stayed busy");
+    }
+
     async function grantFor(ip: string, id: string, token: string, password: string): Promise<string> {
       const response = await unlock(ip, id, token, password);
       expect(response.status).toBe(200);
@@ -1952,15 +1967,48 @@ describe("HTTP API", () => {
         expect((await unlock(visitorIp(), artifact.id, token, `old miss ${attempt}`)).status).toBe(401);
       }
       const responses = await Promise.all(
-        Array.from({ length: 4 }, (_, attempt) => unlock(visitorIp(), artifact.id, token, `parallel miss ${attempt}`)),
+        Array.from({ length: 16 }, (_, attempt) => unlock(visitorIp(), artifact.id, token, `parallel miss ${attempt}`)),
       );
       const statuses = responses.map((response) => response.status);
       expect(statuses.filter((status) => status === 401)).toHaveLength(1);
-      expect(statuses.filter((status) => status === 429)).toHaveLength(3);
+      expect(statuses.filter((status) => status === 200)).toHaveLength(0);
+      expect(statuses.filter((status) => status === 429 || status === 503)).toHaveLength(15);
       await Promise.all(responses.map((response) => response.arrayBuffer()));
       const locked = await unlock(visitorIp(), artifact.id, token, password);
       expect(locked.status).toBe(429);
       expectRetryAfter(locked);
+      const lockedState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(lockedState.share.guessesLockedOut).toBe(true);
+    });
+
+    it("lets forty concurrent correct visitors through without locking the share", async () => {
+      const artifact = await upload(baseUrl, "crowd.html", new TextEncoder().encode("<p>crowd</p>"));
+      const password = "crowd password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      const pending = Array.from({ length: 40 }, () => unlockUntilReady(visitorIp(), artifact.id, token, password));
+      const during = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(during.share.guessesLockedOut).toBeUndefined();
+      const responses = await Promise.all(pending);
+      expect(responses.map((response) => response.status)).toEqual(Array.from({ length: 40 }, () => 200));
+      const after = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(after.share.guessesLockedOut).toBeUndefined();
+    });
+
+    it("does not lock out concurrent correct visitors after twenty-nine failures", async () => {
+      const artifact = await upload(baseUrl, "almost.html", new TextEncoder().encode("<p>almost</p>"));
+      const password = "almost password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE - 1; attempt += 1) {
+        expect((await unlock(visitorIp(), artifact.id, token, `seed miss ${attempt}`)).status).toBe(401);
+      }
+      const openState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(openState.share.guessesLockedOut).toBeUndefined();
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, () => unlockUntilReady(visitorIp(), artifact.id, token, password)),
+      );
+      expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+      const after = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(after.share.guessesLockedOut).toBeUndefined();
     });
 
     it("does not hold the Argon2 gate while a share is in backoff", async () => {

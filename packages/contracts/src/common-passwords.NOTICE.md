@@ -3,8 +3,8 @@
 `common-passwords.txt` is based on SecLists
 `Passwords/Common-Credentials/10k-most-common.txt`:
 
-- Upstream file: https://github.com/danielmiessler/SecLists/blob/master/Passwords/Common-Credentials/10k-most-common.txt
-- Raw URL: https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10k-most-common.txt
+- Upstream file: https://github.com/danielmiessler/SecLists/blob/788cdb889c84aec5afd24845cf7202fe65fcab10/Passwords/Common-Credentials/10k-most-common.txt
+- Raw URL: https://raw.githubusercontent.com/danielmiessler/SecLists/788cdb889c84aec5afd24845cf7202fe65fcab10/Passwords/Common-Credentials/10k-most-common.txt
 - Repository: https://github.com/danielmiessler/SecLists
 - License: MIT (`788cdb889c84aec5afd24845cf7202fe65fcab10`, 2017-12-19; LICENSE text dated 2018)
 

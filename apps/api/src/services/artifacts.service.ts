@@ -257,11 +257,14 @@ export class ArtifactsService {
   }
 
   // Invalid bodies are rejected before any bucket is touched. The client failure budget is
-  // reserved before lookup and refunded after a match or an infrastructure error. The share
-  // failure slot is reserved before Argon2 so concurrent wrongs cannot overshoot; a match
-  // refunds it. Exhausted shares are 429 with no hash work. Every verify spends a separate
-  // per-IP budget; a saturated gate keeps that charge. Recent share failures add a short
-  // delay before verify, not a rejection. The process-wide gate is held only around Argon2.
+  // reserved before lookup and refunded after a match or an infrastructure error. An in-flight
+  // share check is reserved before Argon2 so concurrent wrongs cannot overshoot the confirmed
+  // cap; a match or server error releases it, and a wrong password converts it to a confirmed
+  // failure. Exhausted confirmed failures are 429 with no hash work. When the cap still has
+  // room but every remaining slot is in flight, unlock is 503 like a saturated gate and still
+  // spends the per-IP verify budget. Every verify spends that budget; a saturated gate keeps
+  // the charge. Recent confirmed failures add a short delay before verify, not a rejection.
+  // The process-wide gate is held only around Argon2.
   async unlockPublic(
     id: string,
     token: string,
@@ -287,14 +290,23 @@ export class ArtifactsService {
       this.passwordAttempts.refundClient(clientCharge);
       return { grant: null };
     }
-    const delayMs = this.passwordAttempts.shareDelayMs(record.shareTokenHash);
-    const shareCharge = this.passwordAttempts.reserveShare(record.shareTokenHash);
-    if (!shareCharge) {
+    const shareTokenHash = record.shareTokenHash;
+    const delayMs = this.passwordAttempts.shareDelayMs(shareTokenHash);
+    const admission = this.passwordAttempts.beginShareCheck(shareTokenHash);
+    if (admission === "locked") {
       this.passwordAttempts.refundClient(clientCharge);
-      throw tooManyPasswordAttempts(this.passwordAttempts.shareRetryAfterSeconds(record.shareTokenHash));
+      throw tooManyPasswordAttempts(this.passwordAttempts.shareRetryAfterSeconds(shareTokenHash));
+    }
+    if (admission === "busy") {
+      if (!this.passwordAttempts.reserveVerify(clientIp)) {
+        this.passwordAttempts.refundClient(clientCharge);
+        throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
+      }
+      this.passwordAttempts.refundClient(clientCharge);
+      throw unlockBusy();
     }
     if (!this.passwordAttempts.reserveVerify(clientIp)) {
-      this.passwordAttempts.refundShare(shareCharge);
+      this.passwordAttempts.releaseShareCheck(shareTokenHash);
       this.passwordAttempts.refundClient(clientCharge);
       throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
     }
@@ -313,7 +325,7 @@ export class ArtifactsService {
           if (!(await verifySharePassword(password, record.sharePasswordHash))) {
             throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
           }
-          this.passwordAttempts.refundShare(shareCharge);
+          this.passwordAttempts.releaseShareCheck(shareTokenHash);
           this.passwordAttempts.refundClient(clientCharge);
           const grant = mintShareGrant(scope, this.grantKey());
           return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
@@ -324,8 +336,10 @@ export class ArtifactsService {
         this.passwordAttempts.endVerify(clientIp);
       }
     } catch (error) {
-      if (!(error instanceof ApiErrorException && (error.status === 401 || error.status === 404))) {
-        this.passwordAttempts.refundShare(shareCharge);
+      if (error instanceof ApiErrorException && error.status === 401) {
+        this.passwordAttempts.confirmShareFailure(shareTokenHash);
+      } else {
+        this.passwordAttempts.releaseShareCheck(shareTokenHash);
         this.passwordAttempts.refundClient(clientCharge);
       }
       throw error;
