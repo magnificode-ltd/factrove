@@ -98,10 +98,10 @@ function checkPassword(value: string): string {
   const parsed = sharePasswordSchema.safeParse(value);
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message ?? "The password is invalid.";
-    if (message.startsWith("Use at least")) {
+    if (message === `Use at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`) {
       throw new CliError("INVALID_INPUT", `The password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`);
     }
-    if (message.startsWith("Use at most")) {
+    if (message === `Use at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`) {
       throw new CliError("INVALID_INPUT", `The password must be at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`);
     }
     throw new CliError("INVALID_INPUT", message);
