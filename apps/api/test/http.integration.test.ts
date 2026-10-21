@@ -69,10 +69,27 @@ let ownerApiKey = "";
 class MemoryBlobStore implements BlobStore {
   readonly objects = new Map<string, Uint8Array>();
   failPut = false;
+  putThenFail = false;
   putError: Error | undefined;
   failGet = false;
   throwBeforeChunk = false;
   interruptAfterFirstChunk = false;
+  pauseAfterFirstByte = false;
+  bodyPaused: Promise<void> = Promise.resolve();
+  private releasePausedBody: (() => void) | null = null;
+  private markBodyPaused: (() => void) | null = null;
+
+  armBodyPause(): void {
+    this.pauseAfterFirstByte = true;
+    this.bodyPaused = new Promise((resolve) => {
+      this.markBodyPaused = resolve;
+    });
+  }
+
+  continueBody(): void {
+    this.releasePausedBody?.();
+    this.releasePausedBody = null;
+  }
 
   async put(input: { objectKey: string; body: Uint8Array; contentType: string }): Promise<void> {
     if (this.putError) {
@@ -82,6 +99,9 @@ class MemoryBlobStore implements BlobStore {
       throw new BlobStoreUnavailableError("Object storage is unavailable");
     }
     this.objects.set(input.objectKey, Uint8Array.from(input.body));
+    if (this.putThenFail) {
+      throw new BlobStoreUnavailableError("Object storage is unavailable");
+    }
   }
 
   async get(objectKey: string): Promise<{ body: AsyncIterable<Uint8Array> }> {
@@ -107,6 +127,26 @@ class MemoryBlobStore implements BlobStore {
         })(),
       };
     }
+    if (this.pauseAfterFirstByte) {
+      this.pauseAfterFirstByte = false;
+      const snapshot = Uint8Array.from(stored);
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      this.releasePausedBody = release;
+      const mark = this.markBodyPaused;
+      return {
+        body: (async function* paused() {
+          yield snapshot.subarray(0, 1);
+          mark?.();
+          await gate;
+          if (snapshot.byteLength > 1) {
+            yield snapshot.subarray(1);
+          }
+        })(),
+      };
+    }
     const midpoint = Math.ceil(stored.byteLength / 2);
     const head = stored.subarray(0, midpoint);
     const tail = stored.subarray(midpoint);
@@ -125,12 +165,19 @@ class MemoryBlobStore implements BlobStore {
   }
 
   reset(): void {
+    this.continueBody();
+    this.markBodyPaused?.();
     this.objects.clear();
     this.failPut = false;
+    this.putThenFail = false;
     this.putError = undefined;
     this.failGet = false;
     this.throwBeforeChunk = false;
     this.interruptAfterFirstChunk = false;
+    this.pauseAfterFirstByte = false;
+    this.releasePausedBody = null;
+    this.markBodyPaused = null;
+    this.bodyPaused = Promise.resolve();
   }
 }
 
@@ -370,7 +417,11 @@ describe("HTTP API", () => {
     expect(body.artifact.sizeBytes).toBe(bytes.byteLength);
     expect(body.artifact.viewerUrl).toBe(`http://localhost:3000/artifacts/${body.artifact.id}`);
     expectPlainContentUrl(body.artifact.contentUrl, body.artifact.id);
-    expect(store.objects.has(`${body.artifact.id}.html`)).toBe(true);
+    const storedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: body.artifact.id } });
+    expect(storedRow.objectKey.startsWith(`${body.artifact.id}/`)).toBe(true);
+    expect(storedRow.objectKey.endsWith(".html")).toBe(true);
+    expect(storedRow.contentRevision).toBe(0);
+    expect(Buffer.from(store.objects.get(storedRow.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(bytes));
 
     const listed = await ownerFetch(`${baseUrl}/api/v1/artifacts`);
     expect(listed.status).toBe(200);
@@ -439,7 +490,11 @@ describe("HTTP API", () => {
     const response = await postFile(baseUrl, "hello.htm", bytes);
     expect(response.status).toBe(201);
     const artifact = artifactEnvelopeSchema.parse(await response.json()).artifact;
-    expect([...store.objects.keys()]).toEqual([`${artifact.id}.html`]);
+    expect(artifact.filename).toBe(`${artifact.id}.html`);
+    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(stored.objectKey.startsWith(`${artifact.id}/`)).toBe(true);
+    expect(stored.objectKey.endsWith(".html")).toBe(true);
+    expect([...store.objects.keys()]).toEqual([stored.objectKey]);
     const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
   });
@@ -482,6 +537,7 @@ describe("HTTP API", () => {
         accessType: "private",
         mimeType: "text/html",
         sizeBytes: 5,
+        objectKey: `${legacyPrivateId}.html`,
         createdAt: new Date("2026-01-02T00:00:00.000Z"),
         uploadedAt: new Date("2026-01-02T00:00:00.000Z"),
       },
@@ -494,6 +550,7 @@ describe("HTTP API", () => {
         accessType: "org_shared",
         mimeType: "text/html",
         sizeBytes: 6,
+        objectKey: `${legacySharedId}.html`,
         createdAt: new Date("2026-01-03T00:00:00.000Z"),
         uploadedAt: new Date("2026-01-03T00:00:00.000Z"),
       },
@@ -738,7 +795,8 @@ describe("HTTP API", () => {
     exact.fill("b".charCodeAt(0));
     const accepted = await upload(baseUrl, "exact.html", exact);
     expect(accepted.sizeBytes).toBe(MAX_HTML_BYTES);
-    expect(store.objects.get(`${accepted.id}.html`)?.byteLength).toBe(MAX_HTML_BYTES);
+    const exactRow = await prisma.artifact.findUniqueOrThrow({ where: { id: accepted.id } });
+    expect(store.objects.get(exactRow.objectKey)?.byteLength).toBe(MAX_HTML_BYTES);
   });
 
   it("loads content for an uppercase id using the stored object key", async () => {
@@ -799,7 +857,8 @@ describe("HTTP API", () => {
 
     store.putError = undefined;
     const artifact = await upload(baseUrl, "stored.html", new TextEncoder().encode("<p>stored</p>"));
-    store.objects.delete(`${artifact.id}.html`);
+    const storedKey = (await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).objectKey;
+    store.objects.delete(storedKey);
     const missingObject = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
     expect(missingObject.status).toBe(404);
     expect((await errorOf(missingObject)).code).toBe("ARTIFACT_NOT_FOUND");
@@ -810,6 +869,403 @@ describe("HTTP API", () => {
     const getFailure = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
     expect(getFailure.status).toBe(503);
     expect((await errorOf(getFailure)).code).toBe("STORAGE_UNAVAILABLE");
+  });
+
+  it("replaces an artifact's content for the owner and keeps the same id", async () => {
+    const original = new TextEncoder().encode("<p>original</p>");
+    const next = new TextEncoder().encode("<h1>replaced</h1>");
+    const artifact = await upload(baseUrl, "original.html", original, { accessType: "org_shared" });
+    const response = await putContent(baseUrl, artifact.id, "next.html", next);
+    expect(response.status).toBe(200);
+    const replaced = artifactEnvelopeSchema.parse(await response.json()).artifact;
+    expect(replaced.id).toBe(artifact.id);
+    expect(replaced.accessType).toBe("org_shared");
+    expect(replaced.creatorUserId).toBe(artifact.creatorUserId);
+    expect(replaced.organizationId).toBe(artifact.organizationId);
+    expect(replaced.createdAt).toBe(artifact.createdAt);
+    expect(replaced.sizeBytes).toBe(next.byteLength);
+    expect(replaced.shared).toBe(false);
+    expect(replaced.filename).toBe(`${artifact.id}.html`);
+    const replacedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(replacedRow.objectKey.startsWith(`${artifact.id}/`)).toBe(true);
+    expect(replacedRow.contentRevision).toBe(1);
+    expect(replacedRow.sizeBytes).toBe(next.byteLength);
+    expect(store.objects.size).toBe(1);
+    expect(Buffer.from(store.objects.get(replacedRow.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(content.headers.get("content-length")).toBe(String(next.byteLength));
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
+    expect(await prisma.artifact.count()).toBe(1);
+  });
+
+  it("refuses a content replace when the caller cannot write that artifact", async () => {
+    const original = new TextEncoder().encode("<p>keep-private</p>");
+    const artifact = await upload(baseUrl, "private.html", original);
+    const stranger = await signUpWithApiKey(baseUrl, {
+      email: "replace-stranger@example.invalid",
+      password: "stranger-password-1",
+      name: "Stranger",
+      keyName: "replace-stranger",
+    });
+    const denied = await putContent(baseUrl, artifact.id, "next.html", new TextEncoder().encode("<p>no</p>"), {}, stranger.apiKey);
+    const missing = await putContent(
+      baseUrl,
+      "00000000-0000-4000-8000-000000000099",
+      "next.html",
+      new TextEncoder().encode("<p>no</p>"),
+      {},
+      stranger.apiKey,
+    );
+    expect(denied.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await errorOf(denied)).toEqual(await errorOf(missing));
+
+    const shared = await upload(baseUrl, "org.html", new TextEncoder().encode("<p>org</p>"), { accessType: "org_shared" });
+    const member = await signUpWithApiKey(baseUrl, {
+      email: "replace-member@example.invalid",
+      password: "member-password-1",
+      name: "Member",
+      keyName: "replace-member",
+    });
+    await addMembership(prisma, member.userId, localOrganizationFixture.id);
+    const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${shared.id}`, {
+      headers: { authorization: `Bearer ${member.apiKey}` },
+    });
+    expect(readable.status).toBe(200);
+    const memberDenied = await putContent(
+      baseUrl,
+      shared.id,
+      "next.html",
+      new TextEncoder().encode("<p>member</p>"),
+      {},
+      member.apiKey,
+    );
+    expect(memberDenied.status).toBe(404);
+    expect(await errorOf(memberDenied)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    const anonymous = await putContent(baseUrl, artifact.id, "next.html", new TextEncoder().encode("<p>anon</p>"), {}, null);
+    expect(anonymous.status).toBe(401);
+    expect(await errorOf(anonymous)).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
+    });
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
+    const sharedContent = await ownerFetch(`${baseUrl}/api/v1/artifacts/${shared.id}/content`);
+    expect(new TextDecoder().decode(await sharedContent.arrayBuffer())).toBe("<p>org</p>");
+  });
+
+  it("returns the same not-found response when replacing a missing artifact", async () => {
+    const missing = await putContent(
+      baseUrl,
+      "00000000-0000-4000-8000-000000000000",
+      "next.html",
+      new TextEncoder().encode("<p>missing</p>"),
+    );
+    expect(missing.status).toBe(404);
+    expect(await errorOf(missing)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+    expect(await prisma.artifact.count()).toBe(0);
+    expect(store.objects.size).toBe(0);
+  });
+
+  it("rejects an invalid replacement file and leaves the stored bytes in place", async () => {
+    const original = new TextEncoder().encode("<p>still-here</p>");
+    const artifact = await upload(baseUrl, "keep.html", original);
+    const textFile = await putContent(baseUrl, artifact.id, "notes.txt", new TextEncoder().encode("plain"));
+    expect(textFile.status).toBe(415);
+    expect(await errorOf(textFile)).toEqual({
+      code: "UNSUPPORTED_FILE_TYPE",
+      message: "Only .html and .htm files are supported.",
+    });
+
+    const empty = await putContent(baseUrl, artifact.id, "empty.html", new Uint8Array());
+    expect(empty.status).toBe(400);
+    expect((await errorOf(empty)).message).toBe("The HTML file is empty.");
+
+    const binary = await putContent(baseUrl, artifact.id, "binary.html", Uint8Array.from([0xff, 0xfe]));
+    expect(binary.status).toBe(400);
+    expect((await errorOf(binary)).message).toBe("The file is not valid UTF-8.");
+
+    const access = await putContent(baseUrl, artifact.id, "next.html", new TextEncoder().encode("<p>next</p>"), {
+      accessType: "private",
+    });
+    expect(access.status).toBe(400);
+    expect((await errorOf(access)).message).toBe("accessType cannot be changed when replacing content.");
+
+    store.failPut = true;
+    const unavailable = await putContent(baseUrl, artifact.id, "next.html", new TextEncoder().encode("<p>next</p>"));
+    expect(unavailable.status).toBe(503);
+    expect(await errorOf(unavailable)).toEqual({
+      code: "STORAGE_UNAVAILABLE",
+      message: "Object storage is unavailable.",
+    });
+    store.failPut = false;
+
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.sizeBytes).toBe(original.byteLength);
+    expect(row.accessType).toBe("private");
+  });
+
+  it("serves the new bytes from an existing share link", async () => {
+    const original = new TextEncoder().encode("<p>before</p>");
+    const next = new TextEncoder().encode("<p>after</p>");
+    const artifact = await upload(baseUrl, "shared.html", original);
+    const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+    })).json());
+    const token = created.share.shareUrl?.split("/").at(-1) ?? "";
+    expect(token.length).toBeGreaterThan(10);
+    const before = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+    expect(before.status).toBe(200);
+    expect(Buffer.from(await before.arrayBuffer())).toEqual(Buffer.from(original));
+
+    const replaced = await putContent(baseUrl, artifact.id, "after.html", next);
+    expect(replaced.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await replaced.json()).artifact.shared).toBe(true);
+
+    const again = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+    expect(again.share.shareUrl).toBe(created.share.shareUrl);
+    expect(again.share.passwordProtected).toBe(false);
+    const after = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+    expect(after.status).toBe(200);
+    expect(after.headers.get("content-length")).toBe(String(next.byteLength));
+    expect(Buffer.from(await after.arrayBuffer())).toEqual(Buffer.from(next));
+  });
+
+  it("accepts an owner browser session and rejects a cross-site cookie write", async () => {
+    const original = new TextEncoder().encode("<p>session-original</p>");
+    const next = new TextEncoder().encode("<p>session-next</p>");
+    const artifact = await upload(baseUrl, "session-replace.html", original);
+    const denied = await putCookieContent(baseUrl, owner.cookie, artifact.id, "evil.html", next, {
+      origin: "https://evil.example",
+    });
+    expect(denied.status).toBe(403);
+    expect((await errorOf(denied)).code).toBe("FORBIDDEN");
+    const missingOrigin = await putCookieContent(baseUrl, owner.cookie, artifact.id, "missing.html", next);
+    expect(missingOrigin.status).toBe(403);
+
+    const replaced = await putCookieContent(baseUrl, owner.cookie, artifact.id, "next.html", next, {
+      origin: "http://localhost:3000",
+    });
+    expect(replaced.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await replaced.json()).artifact.id).toBe(artifact.id);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(content.headers.get("content-length")).toBe(String(next.byteLength));
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
+    const unchangedUntilAllowed = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(unchangedUntilAllowed.sizeBytes).toBe(next.byteLength);
+    expect(store.objects.get(unchangedUntilAllowed.objectKey)?.byteLength).toBe(next.byteLength);
+  });
+
+  it("rejects a content grant and leaves the stored bytes in place", async () => {
+    const original = new TextEncoder().encode("<p>grant</p>");
+    const artifact = await upload(baseUrl, "grant.html", original);
+    const grant = mintContentGrant(artifact.id, TEST_AUTH_SECRET);
+    const form = new FormData();
+    form.append("file", new Blob(["<p>stolen</p>"]), "stolen.html");
+    const denied = await globalThis.fetch(
+      `${baseUrl}/api/v1/artifacts/${artifact.id}/content?access=${encodeURIComponent(grant)}`,
+      { method: "PUT", body: form },
+    );
+    expect(denied.status).toBe(401);
+    expect(await errorOf(denied)).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
+    });
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
+  });
+
+  it("keeps the new object when a content commit drops its connection", async () => {
+    const original = new TextEncoder().encode("<p>before-drop</p>");
+    const next = new TextEncoder().encode("<p>after-drop</p>");
+    const artifact = await upload(baseUrl, "drop.html", original);
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const repository = app.get(ArtifactsRepository);
+    const originalCommit = repository.commitContent.bind(repository);
+    let releaseCommit = (): void => undefined;
+    const hold = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let commitDone = Promise.resolve();
+
+    repository.commitContent = async (input) => {
+      let markUpdateStarted = (): void => undefined;
+      const updateStarted = new Promise<void>((resolve) => {
+        markUpdateStarted = resolve;
+      });
+      commitDone = prisma.$transaction(async (tx) => {
+        await tx.artifact.updateMany({
+          where: { id: input.id, contentRevision: input.expectedRevision },
+          data: {
+            objectKey: input.objectKey,
+            sizeBytes: input.sizeBytes,
+            uploadedAt: input.uploadedAt,
+            contentRevision: { increment: 1 },
+          },
+        });
+        markUpdateStarted();
+        await hold;
+      }, { maxWait: 5_000, timeout: 20_000 });
+      commitDone.catch(() => undefined);
+      await updateStarted;
+      throw new Error("Connection dropped before commit acknowledgement");
+    };
+
+    try {
+      const failed = await putContent(baseUrl, artifact.id, "dropped.html", next);
+      expect(failed.status).toBe(500);
+      expect(await errorOf(failed)).toEqual({
+        code: "INTERNAL_ERROR",
+        message: "An unexpected error occurred.",
+      });
+      const during = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(during.objectKey).toBe(before.objectKey);
+      expect(during.sizeBytes).toBe(original.byteLength);
+      expect(during.contentRevision).toBe(before.contentRevision);
+      const newKeys = [...store.objects.keys()].filter((key) => key !== before.objectKey);
+      expect(newKeys).toHaveLength(1);
+      const newKey = newKeys[0] ?? "";
+      expect(Buffer.from(store.objects.get(newKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
+
+      releaseCommit();
+      await commitDone;
+
+      const after = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(after.objectKey).toBe(newKey);
+      expect(after.sizeBytes).toBe(next.byteLength);
+      expect(after.contentRevision).toBe(before.contentRevision + 1);
+      expect(Buffer.from(store.objects.get(after.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
+      const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+      expect(content.status).toBe(200);
+      expect(content.headers.get("content-length")).toBe(String(next.byteLength));
+      expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
+    } finally {
+      releaseCommit();
+      await commitDone.catch(() => undefined);
+      repository.commitContent = originalCommit;
+    }
+  });
+
+  it("leaves the live object unchanged when storage loses the put acknowledgement", async () => {
+    const original = new TextEncoder().encode("<p>acked</p>");
+    const artifact = await upload(baseUrl, "acked.html", original);
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    store.putThenFail = true;
+    const failed = await putContent(baseUrl, artifact.id, "lost.html", new TextEncoder().encode("<p>lost-ack</p>"));
+    expect(failed.status).toBe(503);
+    expect((await errorOf(failed)).code).toBe("STORAGE_UNAVAILABLE");
+    store.putThenFail = false;
+    const after = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(after.objectKey).toBe(before.objectKey);
+    expect(after.sizeBytes).toBe(original.byteLength);
+    expect(after.contentRevision).toBe(before.contentRevision);
+    expect(store.objects.size).toBe(1);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(content.headers.get("content-length")).toBe(String(original.byteLength));
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
+  });
+
+  it("keeps an in-flight read aligned with the object it opened", async () => {
+    const original = new TextEncoder().encode(`<p>${"a".repeat(4000)}</p>`);
+    const next = new TextEncoder().encode(`<p>${"b".repeat(1800)}</p>`);
+    const artifact = await upload(baseUrl, "inflight.html", original);
+    const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+    })).json());
+    const token = created.share.shareUrl?.split("/").at(-1) ?? "";
+
+    store.armBodyPause();
+    const privateRead = readPausedContent(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    await settledWithin(store.bodyPaused, 2000);
+    const replaced = await putContent(baseUrl, artifact.id, "during.html", next);
+    expect(replaced.status).toBe(200);
+    store.continueBody();
+    const privateBody = await privateRead;
+    expect(privateBody.status).toBe(200);
+    expect(privateBody.bytes.byteLength).toBe(Number(privateBody.contentLength));
+    expect(Buffer.from(privateBody.bytes)).toEqual(Buffer.from(original));
+
+    store.armBodyPause();
+    const publicRead = readPausedContent(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`, false);
+    await settledWithin(store.bodyPaused, 2000);
+    const second = new TextEncoder().encode("<p>second-pass</p>");
+    const replacedAgain = await putContent(baseUrl, artifact.id, "during-public.html", second);
+    expect(replacedAgain.status).toBe(200);
+    store.continueBody();
+    const publicBody = await publicRead;
+    expect(publicBody.status).toBe(200);
+    expect(publicBody.bytes.byteLength).toBe(Number(publicBody.contentLength));
+    expect(Buffer.from(publicBody.bytes)).toEqual(Buffer.from(next));
+
+    const settled = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(settled.headers.get("content-length")).toBe(String(second.byteLength));
+    expect(Buffer.from(await settled.arrayBuffer())).toEqual(Buffer.from(second));
+    const publicSettled = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
+    expect(publicSettled.headers.get("content-length")).toBe(String(second.byteLength));
+    expect(Buffer.from(await publicSettled.arrayBuffer())).toEqual(Buffer.from(second));
+  });
+
+  it("ends parallel replaces with one object whose size matches the row", async () => {
+    const artifact = await upload(baseUrl, "race.html", new TextEncoder().encode("<p>seed</p>"));
+    const bodies = Array.from({ length: 20 }, (_, index) => {
+      const marker = String(index).padStart(2, "0");
+      return new TextEncoder().encode(`<p>${marker}${"x".repeat(80 + index)}</p>`);
+    });
+    const responses = await Promise.all(
+      bodies.map((bytes, index) => putContent(baseUrl, artifact.id, `race-${index}.html`, bytes)),
+    );
+    const statuses = responses.map((response) => response.status);
+    expect(statuses.every((status) => status === 200 || status === 409)).toBe(true);
+    expect(statuses).toContain(200);
+    for (const response of responses) {
+      if (response.status === 409) {
+        expect((await errorOf(response)).code).toBe("CONTENT_CONFLICT");
+      } else {
+        await response.arrayBuffer();
+      }
+    }
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const stored = store.objects.get(row.objectKey);
+    expect(stored?.byteLength).toBe(row.sizeBytes);
+    const winner = bodies.find((bytes) => stored && Buffer.from(stored).equals(Buffer.from(bytes)));
+    expect(winner).toBeDefined();
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(content.headers.get("content-length")).toBe(String(row.sizeBytes));
+    const received = Buffer.from(await content.arrayBuffer());
+    expect(received.byteLength).toBe(row.sizeBytes);
+    expect(received.equals(Buffer.from(stored ?? new Uint8Array()))).toBe(true);
+  });
+
+  it("reads a legacy object from the key stored on its row", async () => {
+    const id = "123e4567-e89b-42d3-a456-426614174111";
+    const bytes = new TextEncoder().encode("<p>legacy-object</p>");
+    const objectKey = `${id}.html`;
+    store.objects.set(objectKey, bytes);
+    await prisma.artifact.create({
+      data: {
+        id,
+        creatorUserId: owner.userId,
+        organizationId: localOrganizationFixture.id,
+        accessType: "private",
+        mimeType: "text/html",
+        sizeBytes: bytes.byteLength,
+        objectKey,
+        uploadedAt: new Date(),
+      },
+    });
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${id}/content`);
+    expect(content.status).toBe(200);
+    expect(content.headers.get("content-length")).toBe(String(bytes.byteLength));
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
   });
 
   it("returns json when content streaming fails before any bytes are sent", async () => {
@@ -877,7 +1333,8 @@ describe("HTTP API", () => {
 
     const stored = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
     expect(Buffer.from(await stored.arrayBuffer())).toEqual(Buffer.from(bytes));
-    expect(store.objects.get(`${artifact.id}.html`)).toEqual(bytes);
+    const notesKey = (await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).objectKey;
+    expect(store.objects.get(notesKey)).toEqual(bytes);
     expect(await prisma.artifact.count()).toBe(1);
 
     const upper = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id.toUpperCase()}/content?format=markdown`);
@@ -1732,6 +2189,54 @@ describe("HTTP API", () => {
       expect((await errorOf(crossed)).code).toBe("PASSWORD_REQUIRED");
     });
 
+    it("serves replaced HTML from a password-protected link and rejects the unlock grant", async () => {
+      const original = new TextEncoder().encode("<p>locked-before</p>");
+      const next = new TextEncoder().encode("<p>locked-after</p>");
+      const artifact = await upload(baseUrl, "locked-replace.html", original);
+      const password = "correct horse battery";
+      const shared = await shareWithPassword(artifact.id, password);
+      const ip = visitorIp();
+      const grant = await grantFor(ip, artifact.id, shared.token, password);
+      const opened = publicArtifactEnvelopeSchema.parse(
+        await (await openWithGrant(ip, artifact.id, shared.token, grant)).json(),
+      ).artifact;
+      const before = await asVisitor(ip, contentPath(opened.contentUrl));
+      expect(before.status).toBe(200);
+      expect(Buffer.from(await before.arrayBuffer())).toEqual(Buffer.from(original));
+
+      const form = new FormData();
+      form.append("file", new Blob(["<p>from-grant</p>"]), "grant.html");
+      const denied = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`, {
+        method: "PUT",
+        headers: { "x-factrove-share-grant": grant },
+        body: form,
+      });
+      expect(denied.status).toBe(401);
+      expect(await errorOf(denied)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const unchanged = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+      expect(Buffer.from(await unchanged.arrayBuffer())).toEqual(Buffer.from(original));
+
+      const replaced = await putContent(baseUrl, artifact.id, "locked-after.html", next);
+      expect(replaced.status).toBe(200);
+      const again = shareEnvelopeSchema.parse(
+        await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json(),
+      );
+      expect(again.share).toEqual({ shared: true, shareUrl: shared.shareUrl, passwordProtected: true });
+
+      const reader = visitorIp();
+      const nextGrant = await grantFor(reader, artifact.id, shared.token, password);
+      const reopened = publicArtifactEnvelopeSchema.parse(
+        await (await openWithGrant(reader, artifact.id, shared.token, nextGrant)).json(),
+      ).artifact;
+      const after = await asVisitor(reader, contentPath(reopened.contentUrl));
+      expect(after.status).toBe(200);
+      expect(after.headers.get("content-length")).toBe(String(next.byteLength));
+      expect(Buffer.from(await after.arrayBuffer())).toEqual(Buffer.from(next));
+    });
+
     it("invalidates grants when the password changes, is removed, the share is revoked, or the key rotates", async () => {
       const artifact = await upload(baseUrl, "rotating.html", new TextEncoder().encode("<p>rotating</p>"));
       const ip = visitorIp();
@@ -2259,6 +2764,82 @@ function postFile(
   }
   return globalThis.fetch(`${url}/api/v1/artifacts`, {
     method: "POST",
+    body: form,
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+  });
+}
+
+function putCookieContent(
+  url: string,
+  cookie: string,
+  id: string,
+  filename: string,
+  bytes: Uint8Array,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const form = new FormData();
+  form.append("file", new Blob([Uint8Array.from(bytes)]), filename);
+  return globalThis.fetch(`${url}/api/v1/artifacts/${id}/content`, {
+    method: "PUT",
+    body: form,
+    headers: { cookie, ...headers },
+  });
+}
+
+function readPausedContent(
+  url: string,
+  auth = true,
+): Promise<{ status: number; contentLength: string | null; bytes: Uint8Array }> {
+  const target = new URL(url);
+  const headers: Record<string, string> = {};
+  if (auth && ownerApiKey) {
+    headers.authorization = `Bearer ${ownerApiKey}`;
+  }
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: "GET",
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          const lengthHeader = res.headers["content-length"];
+          resolve({
+            status: res.statusCode ?? 0,
+            contentLength: typeof lengthHeader === "string" ? lengthHeader : null,
+            bytes: new Uint8Array(Buffer.concat(chunks)),
+          });
+        });
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function putContent(
+  url: string,
+  id: string,
+  filename: string,
+  bytes: Uint8Array,
+  fields: Record<string, string> = {},
+  apiKey: string | null = ownerApiKey,
+): Promise<Response> {
+  const form = new FormData();
+  form.append("file", new Blob([Uint8Array.from(bytes)]), filename);
+  for (const [key, value] of Object.entries(fields)) {
+    form.append(key, value);
+  }
+  return globalThis.fetch(`${url}/api/v1/artifacts/${id}/content`, {
+    method: "PUT",
     body: form,
     headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
   });

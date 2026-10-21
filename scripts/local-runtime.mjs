@@ -82,7 +82,16 @@ export function webLaunchEnv(parent, apiEnv) {
 }
 
 const cliDevEnvKeys = ["FACTROVE_API_URL", "FACTROVE_PROFILE"];
-const optionsWithValues = new Set(["--access", "--api-url", "--api-key", "--format", "--profile"]);
+const optionsWithValues = new Set([
+  "--access",
+  "--api-url",
+  "--api-key",
+  "--artifactId",
+  "--endpoint-url",
+  "--format",
+  "--output",
+  "--profile",
+]);
 
 export function cliEnvFilePath(env) {
   const override = env.FACTROVE_CLI_ENV_FILE?.trim() ?? "";
@@ -142,6 +151,7 @@ export function launcherSkipsEnvFile(argv) {
 
 export function launcherWantsJson(argv) {
   let json = false;
+  let explicitJson = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") {
@@ -149,6 +159,20 @@ export function launcherWantsJson(argv) {
     }
     if (arg === "--json") {
       json = true;
+      explicitJson = true;
+      continue;
+    }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = inline ? arg.slice("--output=".length) : argv[index + 1];
+      if (!inline && value !== undefined && !value.startsWith("-")) {
+        index += 1;
+      }
+      if (value === "json") {
+        json = true;
+      } else if (value === "text" && !explicitJson) {
+        json = false;
+      }
       continue;
     }
     if (optionsWithValues.has(arg)) {

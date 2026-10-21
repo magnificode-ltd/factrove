@@ -87,9 +87,20 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
   });
 
   afterAll(async () => {
-    if (app && uploadedId) {
-      const blobs = app.get<BlobStore>(BLOB_STORE);
-      await blobs.delete(`${uploadedId}.html`);
+    if (uploadedId) {
+      const lookup = new PrismaClient();
+      try {
+        const row = await lookup.artifact.findUnique({
+          where: { id: uploadedId },
+          select: { objectKey: true },
+        });
+        if (app && row) {
+          const blobs = app.get<BlobStore>(BLOB_STORE);
+          await blobs.delete(row.objectKey);
+        }
+      } finally {
+        await lookup.$disconnect();
+      }
     }
     if (app) {
       await app.close();

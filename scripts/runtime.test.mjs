@@ -126,6 +126,14 @@ describe("local runtime", () => {
     assert.equal(launcherWantsJson(["upload", "report.html", "--json"]), true);
     assert.equal(launcherWantsJson(["upload", "report.html", "--api-url", "http://127.0.0.1:9", "--json"]), true);
     assert.equal(launcherWantsJson(["upload", "--", "--json"]), false);
+    assert.equal(launcherWantsJson(["upload", "--output", "json", "a.html"]), true);
+    assert.equal(launcherWantsJson(["upload", "--output=text", "a.html"]), false);
+    assert.equal(launcherWantsJson(["upload", "--json", "--output", "text", "a.html"]), true);
+    assert.equal(launcherWantsJson(["upload", "--output", "text", "--json", "a.html"]), true);
+    assert.equal(launcherWantsJson(["upload", "--json", "--", "--output", "text"]), true);
+    assert.equal(launcherWantsJson(["upload", "--artifactId", "123e4567-e89b-42d3-a456-426614174000", "--json", "a.html"]), true);
+    assert.equal(launcherSkipsEnvFile(["s3", "help"]), false);
+    assert.equal(launcherSkipsEnvFile(["get", "--help"]), true);
 
     const blocked = readCliEnvFile(directory);
     assert.equal(blocked.ok, false);

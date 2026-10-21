@@ -5,25 +5,29 @@ export const DEFAULT_API_URL = "http://localhost:3001";
 
 export type AccessType = "private" | "org_shared";
 export type ContentFormat = "html" | "markdown";
+export type OutputFormat = "json" | "text";
+export type HelpCommand = "upload" | "get" | "share" | "configure";
 
-export type UploadInvocation = {
-  kind: "upload";
-  path: string;
-  access: AccessType;
+type CommandOptions = {
   json: boolean;
+  output: OutputFormat;
+  quiet: boolean;
   apiUrl: string;
   profile: string;
   profileExplicit: boolean;
 };
 
-export type GetInvocation = {
+export type UploadInvocation = CommandOptions & {
+  kind: "upload";
+  path: string;
+  access: AccessType;
+  artifactId: string | null;
+};
+
+export type GetInvocation = CommandOptions & {
   kind: "get";
   id: string;
   format: ContentFormat;
-  json: boolean;
-  apiUrl: string;
-  profile: string;
-  profileExplicit: boolean;
 };
 
 export type ConfigureInvocation = {
@@ -36,104 +40,134 @@ export type ConfigureInvocation = {
 
 export type SharePasswordSource = "prompt" | "stdin";
 
-export type ShareInvocation = {
+export type ShareInvocation = CommandOptions & {
   kind: "share";
   id: string;
   revoke: boolean;
   password: SharePasswordSource | null;
   removePassword: boolean;
-  json: boolean;
-  apiUrl: string;
-  profile: string;
-  profileExplicit: boolean;
 };
 
-export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | { kind: "help" };
+export type HelpInvocation = {
+  kind: "help";
+  command: HelpCommand | null;
+};
 
-const HELP = `Upload HTML and print artifact content.
+export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | HelpInvocation;
 
-Usage:
-  pnpm factrove upload <path> [--access private|org_shared] [--api-url <origin>] [--profile <name>] [--json]
-  pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>] [--profile <name>]
-  pnpm factrove share <id> [--password | --password-stdin | --remove-password | --revoke] [--json] [--api-url <origin>] [--profile <name>]
-  pnpm factrove configure [--profile <name>] [--api-key <key>] [--api-url <origin>]
+const TOP_LEVEL_HELP = `Usage: factrove <command> [options]
 
 Commands:
-  upload      Upload a local HTML file and print its viewer URL.
-  get         Print an artifact's stored HTML, or Markdown converted from that HTML.
-  share       Create a public link, set or remove its password, or revoke it with --revoke.
-  configure   Save an API key and API URL for a profile.
+  upload <file>                    Upload an HTML file as a new artifact and print its id.
+  upload <file> --artifactId <id>  Replace the content of an existing artifact.
+  get <id>                         Print an artifact's content (HTML, or --format markdown).
+  share <id>                       Create a public link. Add --password, --remove-password or --revoke.
+  configure                        Save your API key and API URL.
 
-Options:
-  --access <private|org_shared>  upload only. Defaults to private.
-  --format <html|markdown>       get only. Defaults to html.
-  --revoke                       share only. Remove the public link and its password.
-  --password                     share only. Prompt twice for a link password without echoing it. Needs a terminal.
-  --password-stdin               share only. Read the link password from stdin. One trailing newline is removed.
-  --remove-password              share only. Keep the link and remove its password.
-  --api-url <origin>             API origin. Overrides FACTROVE_API_URL and the profile.
-  --api-key <key>                configure only. Prefer a prompt or stdin so the key stays out of shell history.
-  --profile <name>               Credentials profile. Overrides FACTROVE_PROFILE. Defaults to default.
-  --json                         Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content. share prints the share envelope.
-  -h, --help                     Show this help.
-
-The API key is read from FACTROVE_API_KEY, then the selected profile in ~/.factrove/credentials.
-An explicit --profile uses that profile's key and ignores FACTROVE_API_KEY. The API key is not printed.
-pnpm factrove reads apps/cli/.env for unset FACTROVE_API_URL and FACTROVE_PROFILE. The built CLI does not read that file.
-A URL from that file is used only when the environment and the selected profile have no API URL.
-Precedence is flags, then environment variables, then profile files, then that file, then the default origin.
+Global options:
+  --api-url <origin>   API origin (alias: --endpoint-url)
+  --json               Print one JSON line (alias: --output json)
+  -h, --help           Show help. Run \`factrove <command> --help\` for details.
 
 Examples:
-  pnpm factrove configure --profile default
-  pnpm factrove upload ./fixtures/hello.html
-  pnpm factrove upload ./report.html --access org_shared --json
-  pnpm factrove upload ./report.html --profile dev --api-url http://localhost:3001 --json
-  pnpm factrove get 123e4567-e89b-42d3-a456-426614174000
-  pnpm factrove get 123e4567-e89b-42d3-a456-426614174000 --format markdown --json
-  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000
-  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --password
-  printf '%s' "$LINK_PASSWORD" | pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --password-stdin
-  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --remove-password
-  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --revoke
-
-Relative upload paths resolve from the directory where you ran pnpm.
-Plain upload success prints only the viewer URL and a newline.
-Plain share success prints the public link, whether it is password protected, and a newline.
-Plain share --revoke prints a confirmation and does not print the old link.
-Plain share --remove-password prints a confirmation. Passwords are 10 to 128 NFC characters and are never printed.
-Plain get success prints the content with no extra bytes.
-JSON success prints one line.
-Errors go to stderr and the process exits nonzero.
-With --json, errors use {"error":{"code":"...","message":"..."}}.
-Local error codes are FILE_NOT_FOUND, INVALID_INPUT, and NETWORK_ERROR.
-API error codes are passed through.
+  factrove upload ./hey.html
+  factrove upload ./hey.html --artifactId <artifact-id>
+  factrove get <artifact-id> --format markdown
+  factrove share <artifact-id> --password
+  factrove configure
 `;
 
-const OPTIONS_WITH_VALUES = new Set(["--access", "--api-url", "--api-key", "--format", "--profile"]);
+const UPLOAD_HELP = `Usage: factrove upload <file> [--artifactId <id>] [--access private|org_shared] [--json]
+
+Uploads an HTML file. Without --artifactId it creates a new artifact and prints
+only its id. With --artifactId it replaces that artifact's content and prints the same id.
+
+Options:
+  --artifactId <id>              Replace this artifact instead of creating a new one.
+  --access <private|org_shared>  Who can see a new artifact (default: private).
+  --json                         Print one JSON line.
+`;
+
+const GET_HELP = `Usage: factrove get <id> [--format html|markdown] [--json]
+
+Prints an artifact's content. HTML by default, or Markdown with --format markdown.
+
+Options:
+  --format <html|markdown>  Content to print (default: html).
+  --json                    Print one JSON line.
+`;
+
+const SHARE_HELP = `Usage: factrove share <id> [--password | --password-stdin | --remove-password | --revoke] [--json]
+
+Creates a public link, or prints the existing one.
+
+Options:
+  --password         Prompt twice for a link password. Needs a terminal.
+  --password-stdin   Read the link password from a pipe.
+  --remove-password  Keep the link and remove its password.
+  --revoke           Remove the public link and its password.
+  --json             Print one JSON line.
+`;
+
+const CONFIGURE_HELP = `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
+
+Saves an API key and API URL for a profile.
+
+Options:
+  --api-key <key>     API key. A prompt keeps it out of shell history.
+  --api-url <origin>  API origin (alias: --endpoint-url).
+  --profile <name>    Credentials profile (default: default).
+`;
+
+const HELP_PAGES: Record<HelpCommand, string> = {
+  upload: UPLOAD_HELP,
+  get: GET_HELP,
+  share: SHARE_HELP,
+  configure: CONFIGURE_HELP,
+};
+
+const OPTIONS_WITH_VALUES = new Set([
+  "--access",
+  "--api-url",
+  "--api-key",
+  "--artifactId",
+  "--endpoint-url",
+  "--format",
+  "--output",
+  "--profile",
+]);
 
 // Same shape as the API UUID check: RFC 4122 versions 1-8, plus the nil and max UUIDs.
 const ARTIFACT_ID =
   /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
 
-export function helpText(): string {
-  return HELP;
+export function helpText(command: HelpCommand | null = null): string {
+  if (command === null) {
+    return TOP_LEVEL_HELP;
+  }
+  return HELP_PAGES[command];
 }
 
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
-  if (requestsHelp(argv)) {
-    return { kind: "help" };
+  const help = requestedHelp(argv);
+  if (help) {
+    return { kind: "help", command: help.command };
   }
 
   const positionals: string[] = [];
   let json = false;
+  let quiet = false;
   let revoke: boolean | undefined;
   let password: SharePasswordSource | undefined;
   let removePassword: boolean | undefined;
   let access: AccessType | undefined;
   let format: ContentFormat | undefined;
+  let outputFlag: OutputFormat | undefined;
   let apiUrlFlag: string | undefined;
+  let endpointFlag: string | undefined;
   let apiKeyFlag: string | undefined;
   let profileFlag: string | undefined;
+  let artifactId: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -144,8 +178,18 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       positionals.push(...argv.slice(index + 1));
       break;
     }
+    if (arg === "-") {
+      throw new CliError("INVALID_INPUT", "Unknown option '-'. Run: factrove --help");
+    }
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--quiet") {
+      if (quiet) {
+        throw new CliError("INVALID_INPUT", "--quiet was provided more than once.");
+      }
+      quiet = true;
       continue;
     }
     if (arg === "--revoke") {
@@ -187,6 +231,15 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       format = assignOnce(format, parseFormat(value), "--format");
       continue;
     }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = readOption(argv, arg, "--output", index);
+      if (!inline) {
+        index += 1;
+      }
+      outputFlag = assignOnce(outputFlag, parseOutput(value), "--output");
+      continue;
+    }
     if (arg === "--api-url" || arg.startsWith("--api-url=")) {
       const inline = arg.startsWith("--api-url=");
       const value = readOption(argv, arg, "--api-url", index);
@@ -194,6 +247,15 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
         index += 1;
       }
       apiUrlFlag = assignOnce(apiUrlFlag, value, "--api-url");
+      continue;
+    }
+    if (arg === "--endpoint-url" || arg.startsWith("--endpoint-url=")) {
+      const inline = arg.startsWith("--endpoint-url=");
+      const value = readOption(argv, arg, "--endpoint-url", index);
+      if (!inline) {
+        index += 1;
+      }
+      endpointFlag = assignOnce(endpointFlag, value, "--endpoint-url");
       continue;
     }
     if (arg === "--api-key" || arg.startsWith("--api-key=")) {
@@ -214,34 +276,64 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       profileFlag = assignOnce(profileFlag, value, "--profile");
       continue;
     }
+    if (arg === "--artifactId" || arg.startsWith("--artifactId=")) {
+      const inline = arg.startsWith("--artifactId=");
+      const value = readOption(argv, arg, "--artifactId", index);
+      if (!inline) {
+        index += 1;
+      }
+      artifactId = assignOnce(artifactId, value, "--artifactId");
+      continue;
+    }
     if (arg.startsWith("-")) {
-      throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: pnpm factrove --help`);
+      throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: factrove --help`);
     }
     positionals.push(arg);
   }
 
+  if (json && outputFlag !== undefined && outputFlag !== "json") {
+    throw new CliError("INVALID_INPUT", `--json conflicts with --output ${outputFlag}.`);
+  }
+  if (apiUrlFlag !== undefined && endpointFlag !== undefined && apiUrlFlag !== endpointFlag) {
+    throw new CliError("INVALID_INPUT", "--endpoint-url and --api-url were given different values.");
+  }
+
   const command = positionals[0];
+  const args = positionals.slice(1);
   if (command === undefined) {
-    throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+    throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
   }
   if (command !== "share" && (password !== undefined || removePassword !== undefined)) {
     throw new CliError("INVALID_INPUT", "Password options are only valid for the share command.");
   }
+  if (command !== "upload" && artifactId !== undefined) {
+    throw new CliError("INVALID_INPUT", "--artifactId is only valid for the upload command.");
+  }
   const profile = selectedProfile(profileFlag, env);
   const stored = readStoredProfileSync(profile, env);
-  const apiUrl = resolveApiUrl(apiUrlFlag, env, stored.apiUrl);
+  const originFlag = apiUrlFlag ?? endpointFlag;
+  const apiUrl = resolveApiUrl(originFlag, env, stored.apiUrl);
+  const options: CommandOptions = {
+    json: json || outputFlag === "json",
+    output: json || outputFlag === "json" ? "json" : "text",
+    quiet,
+    apiUrl,
+    profile,
+    profileExplicit: profileFlag !== undefined,
+  };
+
   if (command === "configure") {
-    if (positionals.length > 1) {
+    if (args.length > 0) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    if (access !== undefined || format !== undefined || json || revoke !== undefined) {
-      throw new CliError("INVALID_INPUT", "configure accepts --profile, --api-key, and --api-url.");
+    if (access !== undefined || format !== undefined || json || outputFlag !== undefined || quiet || revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "configure accepts --profile, --api-key, --api-url, and --endpoint-url.");
     }
     return {
       kind: "configure",
       profile,
       apiKey: apiKeyFlag,
-      apiUrl: apiUrlFlag,
+      apiUrl: originFlag,
       suggestedApiUrl: apiUrl,
     };
   }
@@ -255,22 +347,23 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (revoke !== undefined) {
       throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
     }
-    const filePath = positionals[1];
-    if (filePath === undefined) {
-      throw new CliError("INVALID_INPUT", "Missing file path. Run: pnpm factrove upload <path>");
+    if (artifactId !== undefined && access !== undefined) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "--access cannot be used with --artifactId. Replacing content keeps the current access.",
+      );
     }
-    if (positionals.length > 2) {
+    if (artifactId !== undefined && !ARTIFACT_ID.test(artifactId)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    const filePath = args[0];
+    if (filePath === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing file path. Run: factrove upload <file>");
+    }
+    if (args.length > 1) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    return {
-      kind: "upload",
-      path: filePath,
-      access: access ?? "private",
-      json,
-      apiUrl,
-      profile,
-      profileExplicit: profileFlag !== undefined,
-    };
+    return { kind: "upload", path: filePath, access: access ?? "private", artifactId: artifactId ?? null, ...options };
   }
   if (command === "get") {
     if (access !== undefined) {
@@ -279,25 +372,17 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (revoke !== undefined) {
       throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
     }
-    const id = positionals[1];
+    const id = args[0];
     if (id === undefined) {
-      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove get <id>");
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove get <id>");
     }
-    if (positionals.length > 2) {
+    if (args.length > 1) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
     if (!ARTIFACT_ID.test(id)) {
       throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
     }
-    return {
-      kind: "get",
-      id,
-      format: format ?? "html",
-      json,
-      apiUrl,
-      profile,
-      profileExplicit: profileFlag !== undefined,
-    };
+    return { kind: "get", id, format: format ?? "html", ...options };
   }
   if (command === "share") {
     if (access !== undefined) {
@@ -306,11 +391,11 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (format !== undefined) {
       throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
     }
-    const id = positionals[1];
+    const id = args[0];
     if (id === undefined) {
-      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove share <id>");
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove share <id>");
     }
-    if (positionals.length > 2) {
+    if (args.length > 1) {
       throw new CliError(
         "INVALID_INPUT",
         password === "prompt"
@@ -334,13 +419,10 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       revoke: revoke ?? false,
       password: password ?? null,
       removePassword: removePassword ?? false,
-      json,
-      apiUrl,
-      profile,
-      profileExplicit: profileFlag !== undefined,
+      ...options,
     };
   }
-  throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: pnpm factrove --help`);
+  throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: factrove --help`);
 }
 
 export function apiKeyForInvocation(invocation: CliInvocation, env: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -352,6 +434,7 @@ export function apiKeyForInvocation(invocation: CliInvocation, env: NodeJS.Proce
 
 export function cliWantsJson(argv: readonly string[]): boolean {
   let json = false;
+  let explicitJson = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -362,6 +445,20 @@ export function cliWantsJson(argv: readonly string[]): boolean {
     }
     if (arg === "--json") {
       json = true;
+      explicitJson = true;
+      continue;
+    }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = inline ? arg.slice("--output=".length) : argv[index + 1];
+      if (!inline && value !== undefined && !value.startsWith("-")) {
+        index += 1;
+      }
+      if (value === "json") {
+        json = true;
+      } else if (value === "text" && !explicitJson) {
+        json = false;
+      }
       continue;
     }
     if (OPTIONS_WITH_VALUES.has(arg)) {
@@ -386,7 +483,8 @@ export function safeApiOrigin(value: string): string {
   }
 }
 
-function requestsHelp(argv: readonly string[]): boolean {
+function requestedHelp(argv: readonly string[]): HelpInvocation | undefined {
+  let sawHelp = false;
   const positionals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -397,7 +495,8 @@ function requestsHelp(argv: readonly string[]): boolean {
       break;
     }
     if (arg === "--help" || arg === "-h") {
-      return true;
+      sawHelp = true;
+      continue;
     }
     if (OPTIONS_WITH_VALUES.has(arg)) {
       const next = argv[index + 1];
@@ -411,7 +510,18 @@ function requestsHelp(argv: readonly string[]): boolean {
     }
     positionals.push(arg);
   }
-  return positionals[0] === "help";
+  if (positionals[0] === "help") {
+    sawHelp = true;
+    positionals.shift();
+  }
+  if (!sawHelp) {
+    return undefined;
+  }
+  const command = positionals[0];
+  if (command === "upload" || command === "get" || command === "share" || command === "configure") {
+    return { kind: "help", command };
+  }
+  return { kind: "help", command: null };
 }
 
 function readOption(argv: readonly string[], arg: string, name: string, index: number): string {
@@ -441,6 +551,13 @@ function parseFormat(value: string): ContentFormat {
   throw new CliError("INVALID_INPUT", "format must be html or markdown.");
 }
 
+function parseOutput(value: string): OutputFormat {
+  if (value === "json" || value === "text") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "output must be json or text.");
+}
+
 function assignOnce<T>(current: T | undefined, next: T, name: string): T {
   if (current !== undefined) {
     throw new CliError("INVALID_INPUT", `${name} was provided more than once.`);
@@ -455,6 +572,10 @@ function resolveApiUrl(flag: string | undefined, env: NodeJS.ProcessEnv, stored:
   const fromEnv = env.FACTROVE_API_URL?.trim();
   if (fromEnv) {
     return fromEnv;
+  }
+  const fromEndpoint = env.FACTROVE_ENDPOINT_URL?.trim();
+  if (fromEndpoint) {
+    return fromEndpoint;
   }
   if (stored) {
     return stored;

@@ -49,7 +49,7 @@ export function readStoredProfileSync(profile: string, env: NodeJS.ProcessEnv): 
   const credentials = readIniSync(credentialsPath(env));
   const config = readIniSync(configPath(env));
   const apiKey = credentials.get(profile)?.get(KEY_FIELD);
-  const apiUrl = config.get(configSection(profile))?.get(URL_FIELD) ?? config.get(profile)?.get(URL_FIELD);
+  const apiUrl = readProfileUrl(config, profile);
   return {
     apiKey: apiKey && apiKey.length > 0 ? apiKey : undefined,
     apiUrl: apiUrl && apiUrl.length > 0 ? apiUrl : undefined,
@@ -86,6 +86,23 @@ export async function saveProfile(input: {
 
 function configSection(profile: string): string {
   return profile === "default" ? "default" : `profile ${profile}`;
+}
+
+function readProfileUrl(config: Map<string, Map<string, string>>, profile: string): string | undefined {
+  const sections = [config.get(configSection(profile)), config.get(profile)];
+  for (const section of sections) {
+    const apiUrl = section?.get(URL_FIELD);
+    if (apiUrl && apiUrl.length > 0) {
+      return apiUrl;
+    }
+  }
+  for (const section of sections) {
+    const endpoint = section?.get("endpoint_url");
+    if (endpoint && endpoint.length > 0) {
+      return endpoint;
+    }
+  }
+  return undefined;
 }
 
 function readIniSync(path: string): Map<string, Map<string, string>> {

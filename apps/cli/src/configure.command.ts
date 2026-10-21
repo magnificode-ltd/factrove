@@ -12,7 +12,7 @@ export class ConfigureCommand {
   async execute(): Promise<void> {
     const invocation = this.config.load();
     if (invocation.kind !== "configure") {
-      throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+      throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
     }
     const answers = await readAnswers(invocation.apiKey, invocation.apiUrl, invocation.suggestedApiUrl);
     const apiKey = answers.apiKey;

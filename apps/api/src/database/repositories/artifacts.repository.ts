@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { Artifact } from "@prisma/client";
+import { type Artifact } from "@prisma/client";
 import type {
   ArtifactRecord,
   CreateArtifactInput,
@@ -16,6 +16,8 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     accessType: row.accessType,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
+    objectKey: row.objectKey,
+    contentRevision: row.contentRevision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     uploadedAt: row.uploadedAt,
@@ -38,10 +40,32 @@ export class ArtifactsRepository {
         accessType: input.accessType,
         mimeType: input.mimeType,
         sizeBytes: input.sizeBytes,
+        objectKey: input.objectKey ?? `${input.id}.html`,
         uploadedAt: input.uploadedAt ?? null,
       },
     });
     return toArtifactRecord(row);
+  }
+
+  // Commits one immutable object. Share columns, access, and createdAt stay as they are.
+  // The update matches the revision the caller read, so a concurrent replace cannot share this write.
+  async commitContent(input: {
+    id: string;
+    expectedRevision: number;
+    objectKey: string;
+    sizeBytes: number;
+    uploadedAt: Date;
+  }): Promise<boolean> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id: input.id, contentRevision: input.expectedRevision },
+      data: {
+        objectKey: input.objectKey,
+        sizeBytes: input.sizeBytes,
+        uploadedAt: input.uploadedAt,
+        contentRevision: { increment: 1 },
+      },
+    });
+    return updated.count === 1;
   }
 
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
@@ -131,6 +155,8 @@ export class ArtifactsRepository {
         accessType: true,
         mimeType: true,
         sizeBytes: true,
+        objectKey: true,
+        contentRevision: true,
         createdAt: true,
         updatedAt: true,
         uploadedAt: true,

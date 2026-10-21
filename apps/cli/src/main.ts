@@ -22,7 +22,7 @@ async function run(): Promise<void> {
     });
     const invocation = app.get(CliConfigService).load();
     if (invocation.kind === "help") {
-      process.stdout.write(helpText());
+      process.stdout.write(helpText(invocation.command));
     } else if (invocation.kind === "configure") {
       await app.get(ConfigureCommand).execute();
     } else if (invocation.kind === "get") {
