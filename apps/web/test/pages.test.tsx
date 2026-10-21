@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FactroveApiError } from "@factrove/api-client";
 import type { ArtifactDto } from "@factrove/contracts";
 import { artifactReturnPath, authPageHref } from "../src/auth/return-path";
-import Loading from "../src/app/loading";
-import LoadingArtifact from "../src/app/artifacts/[id]/loading";
+import Loading from "../src/app/(browse)/loading";
+import LoadingArtifact from "../src/app/(browse)/artifacts/[id]/loading";
 import LibraryError from "../src/app/error";
-import HomePage from "../src/app/page";
-import ArtifactPage from "../src/app/artifacts/[id]/page";
+import HomePage from "../src/app/(browse)/page";
+import ArtifactPage from "../src/app/(browse)/artifacts/[id]/page";
 
 const api = vi.hoisted(() => ({
   getContext: vi.fn(),

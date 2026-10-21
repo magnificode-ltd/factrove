@@ -43,7 +43,7 @@ export function ShareControl({
   }, [expanded, pending, share.shared]);
 
   async function onShare() {
-    if (share.shared && share.shareUrl) {
+    if (share.shareUrl) {
       setExpanded((open) => !open);
       setError(null);
       return;
@@ -52,9 +52,7 @@ export function ShareControl({
     setError(null);
     try {
       const client = createWebClient();
-      const envelope = share.shared
-        ? await client.getArtifactShare(artifactId)
-        : await client.createArtifactShare(artifactId);
+      const envelope = await client.createArtifactShare(artifactId);
       setShare(envelope.share);
       setExpanded(Boolean(envelope.share.shareUrl));
       if (!share.shared && envelope.share.shared) {

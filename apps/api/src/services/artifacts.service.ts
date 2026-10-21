@@ -119,16 +119,20 @@ export class ArtifactsService {
 
   async createShare(request: HeaderSource, id: string): Promise<ShareState> {
     const record = await this.requireOwner(request, id);
-    if (record.shareToken && record.shareTokenHash && this.readShareToken(record.shareToken)) {
+    if (this.readShareToken(record)) {
       return this.toShareState(record);
     }
-    if (record.shareTokenHash && !this.readShareToken(record.shareToken)) {
+    if (record.shareTokenHash) {
       await this.artifacts.clearShare(record.id);
     }
     const token = createShareToken();
     let saved: ArtifactRecord | null;
     try {
-      saved = await this.artifacts.saveShare(record.id, encryptShareToken(token, this.shareKey()), hashShareToken(token));
+      saved = await this.artifacts.saveShare(
+        record.id,
+        encryptShareToken(token, this.shareKey(), record.id),
+        hashShareToken(token),
+      );
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
       this.logger.error(`Could not store a public share (${code}).`);
@@ -153,10 +157,8 @@ export class ArtifactsService {
   }
 
   async openPublic(id: string, token: string, clientIp: string | null): Promise<PublicArtifact> {
-    const record = await this.requirePublic(id, token, clientIp);
-    if (record.uploadedAt === null) {
-      throw artifactNotFound();
-    }
+    this.chargePublicView(clientIp, "view");
+    const record = await this.findPublic(id, token);
     return publicArtifactSchema.parse({
       id: record.id,
       filename: artifactObjectKey(record.id),
@@ -172,7 +174,8 @@ export class ArtifactsService {
     token: string,
     clientIp: string | null,
   ): Promise<Extract<OpenedArtifactContent, { format: "html" }>> {
-    const record = await this.requirePublic(id, token, clientIp);
+    this.chargePublicView(clientIp, "content");
+    const record = await this.findPublic(id, token);
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
       stored = await this.blobs.get(artifactObjectKey(record.id));
@@ -259,10 +262,14 @@ export class ArtifactsService {
     return record;
   }
 
-  private async requirePublic(id: string, token: string, clientIp: string | null): Promise<ArtifactRecord> {
-    if (!this.publicViews.allow(clientIp)) {
+  private chargePublicView(clientIp: string | null, kind: "view" | "content"): void {
+    const allowed = kind === "view" ? this.publicViews.allow(clientIp) : this.publicViews.allowContent(clientIp);
+    if (!allowed) {
       throw new ApiErrorException(429, "RATE_LIMITED", "Too many requests. Try again later.");
     }
+  }
+
+  private async findPublic(id: string, token: string): Promise<ArtifactRecord & { uploadedAt: Date }> {
     if (!isArtifactId(id) || !isShareToken(token)) {
       throw artifactNotFound();
     }
@@ -270,27 +277,27 @@ export class ArtifactsService {
     if (!record || record.mimeType !== "text/html" || record.uploadedAt === null) {
       throw artifactNotFound();
     }
-    return record;
+    return { ...record, uploadedAt: record.uploadedAt };
   }
 
   private shareKey(): Buffer {
     return deriveShareTokenKey(this.config.shareTokenKey ?? this.config.authSecret);
   }
 
-  private readShareToken(stored: string | null): string | null {
-    if (!stored) {
+  private readShareToken(record: ArtifactRecord): string | null {
+    if (!record.shareToken || !record.shareTokenHash) {
       return null;
     }
-    const token = decryptShareToken(stored, this.shareKey());
-    return token && isShareToken(token) ? token : null;
+    const token = decryptShareToken(record.shareToken, this.shareKey(), record.id);
+    if (!token || !isShareToken(token) || hashShareToken(token) !== record.shareTokenHash) {
+      return null;
+    }
+    return token;
   }
 
   private toShareState(record: ArtifactRecord): ShareState {
-    const token = this.readShareToken(record.shareToken);
-    if (!record.shareTokenHash || !token) {
-      if (record.shareTokenHash) {
-        throw new ApiErrorException(500, "INTERNAL_ERROR", "The public link could not be read.");
-      }
+    const token = this.readShareToken(record);
+    if (!token) {
       return shareStateSchema.parse({ shared: false, shareUrl: null });
     }
     return shareStateSchema.parse({

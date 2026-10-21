@@ -4,55 +4,128 @@ import { Injectable } from "@nestjs/common";
 // In-memory public HTML views per API process. Processes do not share buckets.
 // Keyed by x-factrove-client-ip after assignClientIp. Behind a proxy, set
 // TRUSTED_PROXIES or every visitor shares the proxy address.
+//
+// Counts live in the current window and the previous window. Advancing a window
+// rotates those maps, so a request does not scan every visitor. When the current
+// map is full, the oldest key is dropped and the new visitor is counted.
+// allow() charges one view and includes two content loads for 30 seconds.
+// allowContent() uses that grant, and charges only when the grant is spent.
 export const PUBLIC_VIEW_RATE_MAX = 60;
 export const PUBLIC_VIEW_RATE_WINDOW_MS = 60_000;
 export const PUBLIC_VIEW_RATE_MAX_KEYS = 10_000;
+export const PUBLIC_VIEW_CONTENT_GRANTS = 2;
+export const PUBLIC_VIEW_CONTENT_GRANT_MS = 30_000;
 
 const UNKNOWN_CLIENT = "unknown";
 
+type ContentGrant = {
+  left: number;
+  until: number;
+};
+
 @Injectable()
 export class PublicViewLimiter {
-  private readonly hits = new Map<string, number[]>();
+  private windowStart: number;
+  private current = new Map<string, number>();
+  private previous = new Map<string, number>();
+  private readonly companions = new Map<string, ContentGrant>();
 
   constructor(
     private readonly max = PUBLIC_VIEW_RATE_MAX,
     private readonly windowMs = PUBLIC_VIEW_RATE_WINDOW_MS,
     private readonly now: () => number = Date.now,
     private readonly maxKeys = PUBLIC_VIEW_RATE_MAX_KEYS,
-  ) {}
+  ) {
+    this.windowStart = this.windowOf(this.now());
+  }
 
   get size(): number {
-    return this.hits.size;
+    return this.current.size;
   }
 
   allow(clientIp: string | null): boolean {
     const at = this.now();
-    this.sweep(at);
+    this.rotate(at);
     const key = rateLimitKey(clientIp);
-    const recent = this.hits.get(key) ?? [];
-    if (recent.length >= this.max) {
-      this.hits.set(key, recent);
+    if (!this.charge(key, at)) {
       return false;
     }
-    if (!this.hits.has(key) && this.hits.size >= this.maxKeys) {
-      return false;
-    }
-    recent.push(at);
-    this.hits.set(key, recent);
+    this.grantCompanions(key, at);
     return true;
   }
 
-  private sweep(at: number): void {
-    for (const [key, stamps] of this.hits) {
-      const recent = stamps.filter((stamp) => at - stamp < this.windowMs);
-      if (recent.length === 0) {
-        this.hits.delete(key);
-        continue;
-      }
-      if (recent.length !== stamps.length) {
-        this.hits.set(key, recent);
+  allowContent(clientIp: string | null): boolean {
+    const at = this.now();
+    this.rotate(at);
+    const key = rateLimitKey(clientIp);
+    if (this.takeCompanion(key, at)) {
+      return true;
+    }
+    return this.charge(key, at);
+  }
+
+  private charge(key: string, at: number): boolean {
+    const elapsed = at - this.windowStart;
+    const previousWeight = Math.min(1, Math.max(0, this.windowMs - elapsed) / this.windowMs);
+    const estimate = (this.previous.get(key) ?? 0) * previousWeight + (this.current.get(key) ?? 0);
+    if (estimate >= this.max) {
+      return false;
+    }
+    if (!this.current.has(key) && this.current.size >= this.maxKeys) {
+      const oldest = this.current.keys().next().value;
+      if (oldest !== undefined) {
+        this.current.delete(oldest);
       }
     }
+    this.current.set(key, (this.current.get(key) ?? 0) + 1);
+    return true;
+  }
+
+  private grantCompanions(key: string, at: number): void {
+    this.companions.delete(key);
+    if (this.companions.size >= this.maxKeys) {
+      const oldest = this.companions.keys().next().value;
+      if (oldest !== undefined) {
+        this.companions.delete(oldest);
+      }
+    }
+    this.companions.set(key, {
+      left: PUBLIC_VIEW_CONTENT_GRANTS,
+      until: at + PUBLIC_VIEW_CONTENT_GRANT_MS,
+    });
+  }
+
+  private takeCompanion(key: string, at: number): boolean {
+    const grant = this.companions.get(key);
+    if (!grant || grant.until < at || grant.left <= 0) {
+      if (grant) {
+        this.companions.delete(key);
+      }
+      return false;
+    }
+    grant.left -= 1;
+    if (grant.left === 0) {
+      this.companions.delete(key);
+    }
+    return true;
+  }
+
+  private rotate(at: number): void {
+    const start = this.windowOf(at);
+    if (start === this.windowStart) {
+      return;
+    }
+    const steps = (start - this.windowStart) / this.windowMs;
+    this.previous = steps === 1 ? this.current : new Map();
+    this.current = new Map();
+    this.windowStart = start;
+  }
+
+  private windowOf(at: number): number {
+    if (!Number.isFinite(at) || this.windowMs <= 0) {
+      return 0;
+    }
+    return Math.floor(at / this.windowMs) * this.windowMs;
   }
 }
 

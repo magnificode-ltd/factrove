@@ -789,6 +789,12 @@ function shareLinkPattern(id) {
 }
 
 async function checkPublicShare(plainId, fixture, configDir) {
+  const malformed = await fetch(`${webOrigin}/share/not-an-id/short`);
+  await malformed.arrayBuffer();
+  if (malformed.status !== 404) {
+    throw new Error(`A malformed share URL returned ${malformed.status}.`);
+  }
+
   const guessed = await fetch(`${apiOrigin}/api/v1/public/artifacts/${plainId}/${"a".repeat(43)}`);
   const guessedBody = await guessed.json();
   if (guessed.status !== 404 || guessedBody.error?.code !== "ARTIFACT_NOT_FOUND") {

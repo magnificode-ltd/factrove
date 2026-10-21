@@ -6,6 +6,7 @@ import { assignClientIp } from "./auth/client-ip.js";
 import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
+import { assignClientIpForPublicPath, isPublicApiPath, requestPath } from "./sharing/public-api-path.js";
 import { browserOrigins } from "./sharing/public-origin.js";
 
 type HeaderResponse = {
@@ -42,8 +43,9 @@ export function configureHttpApp(app: INestApplication): void {
     next();
   });
   // Public views use the same client-IP header. Drop any caller-supplied value first.
-  app.use("/api/v1/public", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
-    assignClientIp(request, config.trustedProxies);
+  // The check is case-insensitive so a mixed-case path cannot keep a spoofed address.
+  app.use((request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIpForPublicPath(request, config.trustedProxies);
     next();
   });
   app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
@@ -57,8 +59,7 @@ export function configureHttpApp(app: INestApplication): void {
 }
 
 function applyCors(request: IncomingMessage, response: ServerResponse, origins: readonly string[]): boolean {
-  const path = requestPath(request);
-  const publicApi = path === "/api/v1/public" || path.startsWith("/api/v1/public/");
+  const publicApi = isPublicApiPath(requestPath(request));
   if (publicApi) {
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Robots-Tag", "noindex");
@@ -82,12 +83,6 @@ function applyCors(request: IncomingMessage, response: ServerResponse, origins: 
   response.statusCode = 204;
   response.end();
   return true;
-}
-
-function requestPath(request: IncomingMessage): string {
-  const withOriginal = request as IncomingMessage & { originalUrl?: string };
-  const raw = withOriginal.originalUrl ?? request.url ?? "";
-  return raw.split("?")[0] ?? raw;
 }
 
 function headerValue(headers: IncomingHttpHeaders, name: string): string | undefined {

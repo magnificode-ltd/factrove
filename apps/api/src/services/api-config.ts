@@ -109,6 +109,11 @@ function readCookieDomain(
   const publicHost = new URL(publicBaseUrl).hostname;
   if (raw.length === 0) {
     if (webHost.toLowerCase() !== publicHost.toLowerCase()) {
+      if (cookieDomainCannotCover(webHost) || cookieDomainCannotCover(publicHost)) {
+        throw new Error(
+          "Use the same host for WEB_ORIGIN and PUBLIC_BASE_URL. A cookie domain cannot cover localhost or an IP address.",
+        );
+      }
       throw new Error(
         "Set AUTH_COOKIE_DOMAIN to a parent of WEB_ORIGIN and PUBLIC_BASE_URL when those hosts differ.",
       );
@@ -134,6 +139,10 @@ function readCookieDomain(
     throw new Error("AUTH_COOKIE_DOMAIN must cover WEB_ORIGIN, API_PUBLIC_ORIGIN, and PUBLIC_BASE_URL");
   }
   return domain;
+}
+
+function cookieDomainCannotCover(host: string): boolean {
+  return host.toLowerCase() === "localhost" || isIP(host) !== 0;
 }
 
 function hostIsAtOrUnder(host: string, domain: string): boolean {
