@@ -283,7 +283,14 @@ function SharePassword({
       data-protected={protectedLink ? "true" : "false"}
       className="mt-4 rounded-[12px] border border-line bg-white p-3"
     >
-      <div className="flex flex-wrap items-center gap-3">
+      <div
+        data-testid="share-password-layout"
+        className={
+          protectedLink
+            ? "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3"
+            : "flex flex-wrap items-center gap-3"
+        }
+      >
         <span
           key={protectedLink ? "locked" : "open"}
           aria-hidden="true"
@@ -294,7 +301,11 @@ function SharePassword({
         >
           {protectedLink ? <LockKeyhole className="size-4" /> : <LockKeyholeOpen className="size-4" />}
         </span>
-        <p className="min-w-0 flex-1 text-sm" role={share.guessesLockedOut ? "alert" : "status"}>
+        <p
+          data-testid="share-password-copy"
+          className="min-w-0 flex-1 text-sm"
+          role={share.guessesLockedOut ? "alert" : "status"}
+        >
           <span className="font-semibold">{protectedLink ? "Password protected" : "No password"}</span>
           <span className={share.guessesLockedOut ? "block text-destructive" : "block text-muted-foreground"}>
             {share.guessesLockedOut
@@ -305,7 +316,10 @@ function SharePassword({
           </span>
         </p>
         {editing ? null : (
-          <div className="flex flex-wrap gap-2">
+          <div
+            data-testid="share-password-actions"
+            className={cn("flex flex-wrap gap-2", protectedLink && "col-start-2")}
+          >
             <Button
               ref={editRef}
               type="button"
