@@ -1,3 +1,4 @@
+import { ARTIFACT_NAME_MESSAGE, normalizeArtifactName } from "@factrove/contracts";
 import { CliError } from "./cli-error.js";
 import { ARTIFACT_ID, helpPage, type HelpCommand } from "./command-spec.js";
 import { readStoredProfileSync, resolveApiKey, selectedProfile } from "./credentials.js";
@@ -23,6 +24,7 @@ export type UploadInvocation = CommandOptions & {
   path: string;
   access: AccessType;
   artifactId: string | null;
+  name: string | null;
 };
 
 export type GetInvocation = CommandOptions & {
@@ -62,6 +64,7 @@ const OPTIONS_WITH_VALUES = new Set([
   "--api-key",
   "--artifactId",
   "--endpoint-url",
+  "--name",
   "--format",
   "--output",
   "--profile",
@@ -91,6 +94,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   let apiKeyFlag: string | undefined;
   let profileFlag: string | undefined;
   let artifactId: string | undefined;
+  let name: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -199,6 +203,19 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       profileFlag = assignOnce(profileFlag, value, "--profile");
       continue;
     }
+    if (arg === "--name" || arg.startsWith("--name=")) {
+      const inline = arg.startsWith("--name=");
+      const value = readOption(argv, arg, "--name", index);
+      if (!inline) {
+        index += 1;
+      }
+      const normalized = normalizeArtifactName(value);
+      if (normalized === null) {
+        throw new CliError("INVALID_INPUT", ARTIFACT_NAME_MESSAGE);
+      }
+      name = assignOnce(name, normalized, "--name");
+      continue;
+    }
     if (arg === "--artifactId" || arg.startsWith("--artifactId=")) {
       const inline = arg.startsWith("--artifactId=");
       const value = readOption(argv, arg, "--artifactId", index);
@@ -231,6 +248,9 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   }
   if (command !== "upload" && artifactId !== undefined) {
     throw new CliError("INVALID_INPUT", "--artifactId is only valid for the upload command.");
+  }
+  if (command !== "upload" && name !== undefined) {
+    throw new CliError("INVALID_INPUT", "--name is only valid for the upload command.");
   }
   const profile = selectedProfile(profileFlag, env);
   const stored = readStoredProfileSync(profile, env);
@@ -286,7 +306,14 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (args.length > 1) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    return { kind: "upload", path: filePath, access: access ?? "private", artifactId: artifactId ?? null, ...options };
+    return {
+      kind: "upload",
+      path: filePath,
+      access: access ?? "private",
+      artifactId: artifactId ?? null,
+      name: name ?? null,
+      ...options,
+    };
   }
   if (command === "get") {
     if (access !== undefined) {

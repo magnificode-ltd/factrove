@@ -30,6 +30,7 @@ function artifact(id: string, accessType: ArtifactDto["accessType"], creatorUser
     organizationId: "local-org",
     accessType,
     filename: `${id}.html`,
+    name: null,
     mimeType: "text/html",
     sizeBytes: id === mineId ? 13 : 2048,
     createdAt: "2026-10-11T10:00:00.000Z",

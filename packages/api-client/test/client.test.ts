@@ -7,6 +7,7 @@ const artifact = {
   organizationId: "local-org",
   accessType: "private",
   filename: "hello.html",
+  name: null,
   mimeType: "text/html",
   sizeBytes: 13,
   createdAt: "2026-10-11T10:00:00.000Z",
@@ -223,6 +224,7 @@ describe("Factrove API client", () => {
           artifact: {
             id: artifact.id,
             filename: `${artifact.id}.html`,
+            name: null,
             mimeType: "text/html",
             sizeBytes: 13,
             uploadedAt: artifact.uploadedAt,
@@ -272,6 +274,7 @@ describe("Factrove API client", () => {
           artifact: {
             id: artifact.id,
             filename: `${artifact.id}.html`,
+            name: null,
             mimeType: "text/html",
             sizeBytes: 13,
             uploadedAt: artifact.uploadedAt,

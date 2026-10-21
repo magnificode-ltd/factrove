@@ -4,13 +4,13 @@ import { ViewerBar } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
 import { ShareControl } from "@/components/share-control";
 import { Button } from "@/components/ui/button";
-import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
+import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
 
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const title =
     state.status === "ready"
-      ? state.artifact.filename
+      ? artifactLabel(state.artifact)
       : state.status === "missing"
         ? "Artifact not found"
         : state.status === "signed-out"

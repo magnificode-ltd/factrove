@@ -18,6 +18,7 @@ describe("CLI argument parsing", () => {
       path: file,
       access: "private",
       artifactId: null,
+      name: null,
       json: false,
       ...plainCommand(),
     });
@@ -49,6 +50,29 @@ describe("CLI argument parsing", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("accepts a library name and keeps it with a replace", () => {
+    expect(upload(["upload", file, "--name", "X launch calendar"])).toMatchObject({
+      name: "X launch calendar",
+      artifactId: null,
+    });
+    expect(upload(["upload", file, "--name=Hello", "--artifactId", artifactId])).toMatchObject({
+      name: "Hello",
+      artifactId,
+    });
+    expect(upload(["upload", "--name", "  padded  ", file]).name).toBe("padded");
+    expect(upload(["upload", file, "--name", "e\u0301"]).name).toBe("\u00e9");
+    expect(failure(["upload", file, "--name", "a".repeat(121)], {}).message).toBe(
+      "name must be one line of 1 to 120 characters.",
+    );
+    expect(failure(["upload", file, "--name", "hello\nthere"], {}).message).toBe(
+      "name must be one line of 1 to 120 characters.",
+    );
+    expect(failure(["upload", file, "--name", "   "], {}).message).toBe("Missing value for --name.");
+    expect(failure(["upload", file, "--name"], {}).message).toBe("Missing value for --name.");
+    expect(failure(["upload", file, "--name", "One", "--name", "Two"], {}).message).toMatch(/more than once/);
+    expect(failure(["get", artifactId, "--name", "Nope"], {}).message).toBe("--name is only valid for the upload command.");
   });
 
   it("accepts org_shared, json, and flags around the path", () => {
@@ -371,17 +395,21 @@ Global options:
 
 Examples:
   factrove upload ./hey.html
+  factrove upload ./hey.html --name "X launch calendar"
   factrove upload ./hey.html --artifactId <artifact-id>
   factrove get <artifact-id> --format markdown
   factrove share <artifact-id> --password
   factrove configure
 `,
-  upload: `Usage: factrove upload <file> [--artifactId <id>] [--access private|org_shared] [--json]
+  upload: `Usage: factrove upload <file> [--name <name>] [--artifactId <id>] [--access private|org_shared] [--json]
 
 Uploads an HTML file. Without --artifactId it creates a new artifact and prints
 only its id. With --artifactId it replaces that artifact's content and prints the same id.
+--name sets the name shown in the library. Omit it and the name is the file name
+without .html or .htm. On replace, omit --name to keep the current name.
 
 Options:
+  --name <name>                  Name shown in the library. One line, up to 120 characters.
   --artifactId <id>              Replace this artifact instead of creating a new one.
   --access <private|org_shared>  Who can see a new artifact (default: private).
   --json                         Print one JSON line.

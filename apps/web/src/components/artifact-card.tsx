@@ -5,7 +5,7 @@ import type { ArtifactDto } from "@factrove/contracts";
 import { CopyButton } from "@/components/copy-button";
 import { ShareControl } from "@/components/share-control";
 import { Badge } from "@/components/ui/badge";
-import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt } from "@/format";
+import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUploadedAt } from "@/format";
 
 export function ArtifactCard({
   artifact,
@@ -40,7 +40,7 @@ export function ArtifactCard({
           className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
         >
-          {artifact.filename}
+          {artifactLabel(artifact)}
         </a>
         <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
           <code className="font-mono text-[13px] tracking-tight text-ink">{artifact.id}</code>

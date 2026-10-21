@@ -130,6 +130,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261020143000_pair_artifact_share_columns",
       "20261021090000_add_share_password",
       "20261021170000_add_artifact_object_key",
+      "20261021193000_add_artifact_name",
     ]);
   });
 
@@ -345,6 +346,61 @@ describe("PostgreSQL artifact persistence", () => {
     expect(await repository.findById(created.id)).toBeNull();
     await expect(repository.update(created.id, { sizeBytes: 1 })).rejects.toMatchObject({ code: "P2025" });
     await expect(repository.delete(created.id)).rejects.toMatchObject({ code: "P2025" });
+  });
+
+  it("stores a nullable name and changes it only in the revision update that sets it", async () => {
+    const column = await prisma.$queryRaw<{ data_type: string; character_maximum_length: number; is_nullable: string }[]>`
+      SELECT data_type, character_maximum_length, is_nullable
+      FROM information_schema.columns
+      WHERE table_name = 'artifact' AND column_name = 'name'
+    `;
+    expect(column).toHaveLength(1);
+    expect(column[0]?.data_type).toBe("character varying");
+    expect(Number(column[0]?.character_maximum_length)).toBe(120);
+    expect(column[0]?.is_nullable).toBe("YES");
+
+    const unnamed = await repository.create(artifactInput());
+    expect(unnamed.name).toBeNull();
+    const named = await repository.create(artifactInput({ name: "X launch calendar" }));
+    expect(named.name).toBe("X launch calendar");
+
+    const uploadedAt = new Date("2026-10-21T12:00:00.000Z");
+    const kept = await repository.commitContent({
+      id: named.id,
+      expectedRevision: named.contentRevision,
+      objectKey: `${named.id}/${randomUUID()}.html`,
+      sizeBytes: 20,
+      uploadedAt,
+    });
+    expect(kept).toBe(true);
+    expect((await repository.findById(named.id))?.name).toBe("X launch calendar");
+
+    const current = await repository.findById(named.id);
+    const renamedKey = `${named.id}/${randomUUID()}.html`;
+    const renamed = await repository.commitContent({
+      id: named.id,
+      expectedRevision: current?.contentRevision ?? -1,
+      objectKey: renamedKey,
+      sizeBytes: 21,
+      uploadedAt,
+      name: "Renamed calendar",
+    });
+    expect(renamed).toBe(true);
+    const stale = await repository.commitContent({
+      id: named.id,
+      expectedRevision: current?.contentRevision ?? -1,
+      objectKey: `${named.id}/${randomUUID()}.html`,
+      sizeBytes: 22,
+      uploadedAt,
+      name: "Lost the race",
+    });
+    expect(stale).toBe(false);
+    const stored = await repository.findById(named.id);
+    expect(stored?.name).toBe("Renamed calendar");
+    expect(stored?.objectKey).toBe(renamedKey);
+    const shared = await repository.saveShare(named.id, "share-token-value", "c".repeat(64));
+    expect((await repository.findShared(named.id, "c".repeat(64)))?.name).toBe("Renamed calendar");
+    expect(shared?.name).toBe("Renamed calendar");
   });
 
   it("commits a new object key only while the revision still matches", async () => {

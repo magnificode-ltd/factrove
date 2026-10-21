@@ -1,7 +1,7 @@
 import { LockKeyhole } from "lucide-react";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
-import { isEmbeddableContentUrl } from "@/format";
+import { artifactLabel, isEmbeddableContentUrl } from "@/format";
 import type { PublicShareModel } from "@/share/load-public-artifact";
 import { LockedShare, type UnlockFeedback } from "@/share/locked-share";
 
@@ -34,7 +34,7 @@ export function PublicShareScreen({
 
 function shareTitle(state: PublicShareModel): string {
   if (state.status === "ready") {
-    return state.artifact.filename;
+    return artifactLabel(state.artifact);
   }
   return state.status === "locked" ? "Locked artifact" : "Artifact not found";
 }

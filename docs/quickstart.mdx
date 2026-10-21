@@ -63,9 +63,10 @@ The CLI stores the key in `~/.factrove/credentials` (mode 0600). It does not pri
 ```bash
 artifact_id=$(pnpm factrove upload ./fixtures/hello.html)
 printf '%s\n' "$artifact_id"
+pnpm factrove upload ./fixtures/hello.html --name "X launch calendar"
 ```
 
-Plain success prints only the artifact id on stdout. pnpm writes the script line it runs to stderr, so the substitution above is the id. Open it at:
+Plain success prints only the artifact id on stdout. pnpm writes the script line it runs to stderr, so the substitution above is the id. Omit `--name` and the library name is the file name without `.html` or `.htm`. A stem that is empty, longer than 120 characters, or not one line stores null, and the upload still succeeds. A later replace keeps that name unless you pass `--name` again. Open it at:
 
 ```text
 http://localhost:3000/artifacts/{id}

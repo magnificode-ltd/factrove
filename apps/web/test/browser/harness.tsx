@@ -13,6 +13,7 @@ const artifact: ArtifactDto = {
   organizationId: "local-org",
   accessType: "private",
   filename: "123e4567-e89b-42d3-a456-426614174000.html",
+  name: null,
   mimeType: "text/html",
   sizeBytes: 42,
   createdAt: "2026-10-11T10:00:00.000Z",

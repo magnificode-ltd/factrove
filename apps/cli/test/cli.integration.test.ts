@@ -97,6 +97,34 @@ describe("factrove upload", () => {
     expect(stub.requests).toHaveLength(2);
   });
 
+  it("sends --name on create and on replace, and omits it when the flag is absent", async () => {
+    const stub = await startStub(() => accepted(12));
+    const named = await runCli(["upload", fixturePath, "--name", "X launch calendar", "--api-url", stub.url]);
+    expect(named.code).toBe(0);
+    const createdParts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
+    expect(createdParts.find((part) => part.name === "name")?.data.toString("utf8")).toBe("X launch calendar");
+
+    const replaced = await runCli([
+      "upload",
+      fixturePath,
+      "--artifactId",
+      artifactId,
+      "--name",
+      "Renamed calendar",
+      "--api-url",
+      stub.url,
+    ]);
+    expect(replaced.code).toBe(0);
+    const replacedParts = multipartParts(stub.requests[1]?.contentType ?? "", stub.requests[1]?.body ?? Buffer.alloc(0));
+    expect(stub.requests[1]?.method).toBe("PUT");
+    expect(replacedParts.find((part) => part.name === "name")?.data.toString("utf8")).toBe("Renamed calendar");
+
+    const kept = await runCli(["upload", fixturePath, "--artifactId", artifactId, "--api-url", stub.url]);
+    expect(kept.code).toBe(0);
+    const keptParts = multipartParts(stub.requests[2]?.contentType ?? "", stub.requests[2]?.body ?? Buffer.alloc(0));
+    expect(keptParts.find((part) => part.name === "name")).toBeUndefined();
+  });
+
   it("sends org_shared and prints the response envelope on one line", async () => {
     const directory = await makeTemp();
     const source = join(directory, "my report.html");
@@ -115,6 +143,7 @@ describe("factrove upload", () => {
     expect(parts.find((part) => part.name === "file")).toMatchObject({ filename: "my report.html" });
     expect(parts.find((part) => part.name === "file")?.data.equals(contents)).toBe(true);
     expect(parts.find((part) => part.name === "accessType")?.data.toString("utf8")).toBe("org_shared");
+    expect(parts.find((part) => part.name === "name")).toBeUndefined();
     expect(request?.body.includes(Buffer.from(directory))).toBe(false);
   });
 
@@ -764,6 +793,7 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
       organizationId: "local-org",
       accessType,
       filename: `${artifactId}.html`,
+      name: null,
       mimeType: "text/html" as const,
       sizeBytes,
       createdAt: "2026-10-18T12:00:00.000Z",

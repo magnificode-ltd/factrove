@@ -84,6 +84,7 @@ const grant = { token: `g1.${"z".repeat(6)}.${"q".repeat(43)}`, expiresAt: "2099
 const unlockedArtifact = {
   id,
   filename: "secret-plan.html",
+  name: null,
   mimeType: "text/html",
   sizeBytes: 42,
   uploadedAt: "2026-10-18T12:00:00.000Z",

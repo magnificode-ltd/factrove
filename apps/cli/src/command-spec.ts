@@ -48,18 +48,22 @@ Global options:
 
 Examples:
   factrove upload ./hey.html
+  factrove upload ./hey.html --name "X launch calendar"
   factrove upload ./hey.html --artifactId <artifact-id>
   factrove get <artifact-id> --format markdown
   factrove share <artifact-id> --password
   factrove configure
 `;
 
-export const UPLOAD_HELP = `Usage: factrove upload <file> [--artifactId <id>] [--access private|org_shared] [--json]
+export const UPLOAD_HELP = `Usage: factrove upload <file> [--name <name>] [--artifactId <id>] [--access private|org_shared] [--json]
 
 Uploads an HTML file. Without --artifactId it creates a new artifact and prints
 only its id. With --artifactId it replaces that artifact's content and prints the same id.
+--name sets the name shown in the library. Omit it and the name is the file name
+without .html or .htm. On replace, omit --name to keep the current name.
 
 Options:
+  --name <name>                  Name shown in the library. One line, up to 120 characters.
   --artifactId <id>              Replace this artifact instead of creating a new one.
   --access <private|org_shared>  Who can see a new artifact (default: private).
   --json                         Print one JSON line.
@@ -105,6 +109,15 @@ export const APPROVED_HELP = {
 } as const;
 
 export const cliFlags: readonly CliFlagSpec[] = [
+  {
+    id: "name",
+    names: ["--name"],
+    kind: "string",
+    store: "name",
+    documented: true,
+    description: "Name shown in the library. One line, up to 120 characters.",
+    appliesTo: ["upload"],
+  },
   {
     id: "artifactId",
     names: ["--artifactId"],
@@ -241,9 +254,9 @@ export const cliCommands: readonly CliCommandSpec[] = [
     name: "upload",
     summary: "Upload an HTML file as a new artifact and print its id.",
     description:
-      "Without --artifactId it creates a new artifact and prints only its id. With --artifactId it replaces that artifact's content and prints the same id.",
+      "Without --artifactId it creates a new artifact and prints only its id. With --artifactId it replaces that artifact's content and prints the same id. --name sets the name shown in the library. Omit it and the name is the file name without .html or .htm. On replace, omit --name to keep the current name.",
     positionals: [{ name: "file", required: true, description: "Local .html or .htm file." }],
-    flags: ["artifactId", "access", "json", "output", "apiUrl", "profile"],
+    flags: ["name", "artifactId", "access", "json", "output", "apiUrl", "profile"],
     helpText: UPLOAD_HELP,
     docsSlug: "upload",
   },

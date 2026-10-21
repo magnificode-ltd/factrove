@@ -393,7 +393,7 @@
           "Artifacts"
         ],
         "summary": "Upload an HTML file",
-        "description": "Accepts one non-empty `.html` or `.htm` file as multipart field `file`, optional `accessType` (`private` default, or `org_shared`). The backend assigns `text/html`. Maximum size is 10 MiB. Each request creates a new artifact. The object is written first, then the row. A storage failure leaves no row. Cookie-authenticated writes also require Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+        "description": "Accepts one non-empty `.html` or `.htm` file as multipart field `file`, optional `accessType` (`private` default, or `org_shared`), and optional `name`. `name` is one line of 1 to 120 characters. When `name` is omitted, the stored name is the file name without `.html` or `.htm` when that stem is valid, and otherwise null. An invalid `name` is `400 INVALID_REQUEST` and stores no row. The backend assigns `text/html`. Maximum size is 10 MiB. Each request creates a new artifact. The object is written first, then the row. A storage failure leaves no row. Cookie-authenticated writes also require Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
         "security": [
           {
             "bearerAuth": []
@@ -404,7 +404,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "One file and an optional access type.",
+          "description": "One file, an optional access type, and an optional library name.",
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -460,7 +460,7 @@
             }
           },
           "400": {
-            "description": "Invalid multipart body, access type, or UTF-8. Codes `INVALID_REQUEST` or `ORGANIZATION_REQUIRED`.",
+            "description": "Invalid multipart body, access type, name, or UTF-8. Codes `INVALID_REQUEST` or `ORGANIZATION_REQUIRED`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -674,7 +674,7 @@
           "Artifacts"
         ],
         "summary": "Replace an artifact's stored HTML",
-        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT`. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` sets the library name in the same revision update. Omit `name` to keep the current name. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
         "security": [
           {
             "bearerAuth": []
@@ -698,7 +698,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "One HTML file. Do not send accessType.",
+          "description": "One HTML file and an optional library name. Do not send accessType.",
           "content": {
             "multipart/form-data": {
               "schema": {
@@ -754,7 +754,7 @@
             }
           },
           "400": {
-            "description": "Invalid multipart body, accessType on replace, or UTF-8. Code `INVALID_REQUEST`.",
+            "description": "Invalid multipart body, accessType on replace, name, or UTF-8. Code `INVALID_REQUEST`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2218,6 +2218,19 @@
               "filename": {
                 "type": "string"
               },
+              "name": {
+                "description": "Library name. Null when the artifact has no name.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "mimeType": {
                 "type": "string",
                 "const": "text/html"
@@ -2263,6 +2276,7 @@
               "organizationId",
               "accessType",
               "filename",
+              "name",
               "mimeType",
               "sizeBytes",
               "createdAt",
@@ -2317,6 +2331,19 @@
                 "filename": {
                   "type": "string"
                 },
+                "name": {
+                  "description": "Library name. Null when the artifact has no name.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "mimeType": {
                   "type": "string",
                   "const": "text/html"
@@ -2362,6 +2389,7 @@
                 "organizationId",
                 "accessType",
                 "filename",
+                "name",
                 "mimeType",
                 "sizeBytes",
                 "createdAt",
@@ -2508,6 +2536,19 @@
               "filename": {
                 "type": "string"
               },
+              "name": {
+                "description": "Library name. Null when the artifact has no name.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "mimeType": {
                 "type": "string",
                 "const": "text/html"
@@ -2533,6 +2574,7 @@
             "required": [
               "id",
               "filename",
+              "name",
               "mimeType",
               "sizeBytes",
               "uploadedAt",
@@ -2611,6 +2653,12 @@
               "private",
               "org_shared"
             ]
+          },
+          "name": {
+            "description": "Library name. One line, 1 to 120 characters.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
           }
         },
         "required": [
@@ -2626,6 +2674,12 @@
             "type": "string",
             "format": "binary",
             "contentMediaType": "application/octet-stream"
+          },
+          "name": {
+            "description": "Library name. One line, 1 to 120 characters.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
           }
         },
         "required": [

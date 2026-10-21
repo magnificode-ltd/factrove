@@ -3,7 +3,10 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   accessTypeSchema,
   artifactDtoSchema,
+  artifactNameFromFilename,
+  ARTIFACT_NAME_MESSAGE,
   createShareRequestSchema,
+  normalizeArtifactName,
   publicArtifactSchema,
   publicUnlockRequestSchema,
   shareStateSchema,
@@ -97,6 +100,8 @@ export class ArtifactsService {
     if (violation) {
       throw new ApiErrorException(violation.status, violation.code, violation.message);
     }
+    const submittedName = readSubmittedName(fields);
+    const name = submittedName === undefined ? artifactNameFromFilename(upload.filename) : submittedName;
 
     const id = randomUUID();
     const objectKey = immutableContentKey(id, randomUUID());
@@ -119,6 +124,7 @@ export class ArtifactsService {
         accessType,
         mimeType: "text/html",
         sizeBytes: upload.bytes.byteLength,
+        name,
         objectKey,
         uploadedAt: new Date(),
       });
@@ -144,8 +150,9 @@ export class ArtifactsService {
     if (violation) {
       throw new ApiErrorException(violation.status, violation.code, violation.message);
     }
+    const name = readSubmittedName(fields);
 
-    const replaced = await this.publishReplacement(record, upload.bytes);
+    const replaced = await this.publishReplacement(record, upload.bytes, name);
     return this.toDto(replaced, false);
   }
 
@@ -246,6 +253,7 @@ export class ArtifactsService {
     return publicArtifactSchema.parse({
       id: record.id,
       filename: artifactObjectKey(record.id),
+      name: record.name,
       mimeType: "text/html",
       sizeBytes: record.sizeBytes,
       uploadedAt: record.uploadedAt.toISOString(),
@@ -555,8 +563,9 @@ export class ArtifactsService {
       creatorUserId: record.creatorUserId,
       organizationId: record.organizationId,
       accessType: record.accessType,
-      // Original upload names are not stored. The public filename stays `{id}.html`.
+      // The public filename stays `{id}.html`. name is the library label.
       filename: artifactObjectKey(record.id),
+      name: record.name,
       mimeType: "text/html",
       sizeBytes: record.sizeBytes,
       createdAt: record.createdAt.toISOString(),
@@ -580,7 +589,7 @@ export class ArtifactsService {
   // One replace wins a revision. The others get 409 and their objects are removed.
   // A commit that throws has an unknown outcome. The new object stays, because the
   // transaction can still land after a read of the previous key.
-  private async publishReplacement(record: ArtifactRecord, bytes: Uint8Array): Promise<ArtifactRecord> {
+  private async publishReplacement(record: ArtifactRecord, bytes: Uint8Array, name?: string): Promise<ArtifactRecord> {
     const previousKey = storedObjectKey(record.id, record.objectKey);
     const newKey = immutableContentKey(record.id, randomUUID());
     const uploadedAt = new Date();
@@ -602,6 +611,7 @@ export class ArtifactsService {
         objectKey: newKey,
         sizeBytes: bytes.byteLength,
         uploadedAt,
+        ...(name === undefined ? {} : { name }),
       });
     } catch (error) {
       const visible = await this.visibleObjectKey(record.id);
@@ -787,6 +797,20 @@ function assertNoIdentityFields(body: Record<string, unknown>): void {
       throw new ApiErrorException(400, "INVALID_REQUEST", "Creator and organization are assigned by the server.");
     }
   }
+}
+
+function readSubmittedName(fields: Record<string, unknown>): string | undefined {
+  if (!Object.hasOwn(fields, "name")) {
+    return undefined;
+  }
+  if (typeof fields.name !== "string") {
+    throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+  }
+  const name = normalizeArtifactName(fields.name);
+  if (name === null) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+  }
+  return name;
 }
 
 function readAccessType(body: Record<string, unknown>): AccessType {

@@ -135,6 +135,8 @@ model Artifact {
   organizationId    String?       @map("organization_id")
   organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   accessType        AccessType    @default(private) @map("access_type")
+  // Human-readable library name. Null when the artifact has no name.
+  name              String?       @db.VarChar(120)
   mimeType          String        @map("mime_type")
   sizeBytes         Int           @map("size_bytes")
   // Current HTML object. Readers use this key and sizeBytes from the same row.

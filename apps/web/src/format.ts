@@ -10,6 +10,13 @@ const uploadedAtFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC"
 });
 
+export function artifactLabel(artifact: { id: string; name?: string | null; filename?: string | null }): string {
+  const name = artifact.name?.trim();
+  if (name) return name;
+  if (artifact.filename) return artifact.filename;
+  return artifact.id;
+}
+
 export function accessLabel(accessType: AccessType): string {
   return accessType === "private" ? "Private" : "Organization shared";
 }

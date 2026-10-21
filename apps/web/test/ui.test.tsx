@@ -17,6 +17,7 @@ const artifact: ArtifactDto = {
   organizationId: "local-org",
   accessType: "private",
   filename: "123e4567-e89b-42d3-a456-426614174000.html",
+  name: null,
   mimeType: "text/html",
   sizeBytes: 13,
   createdAt: "2026-10-11T10:00:00.000Z",
@@ -61,6 +62,42 @@ describe("ArtifactCard", () => {
     expect(html).toContain("focus-visible:outline-peri-d");
     expect(html).toContain("ft-card");
     expect(html).not.toContain("suppressHydrationWarning");
+  });
+
+  it("shows a stored name in the library, viewer, and share header, and keeps the id", () => {
+    const named = { ...artifact, name: "X launch calendar" };
+    const now = Date.parse("2026-10-11T10:02:00.000Z");
+    const card = renderToStaticMarkup(<ArtifactCard artifact={named} now={now} />);
+    expect(card).toContain("X launch calendar");
+    expect(card).toContain(named.id);
+    expect(card).not.toContain(named.filename);
+
+    const viewer = renderToStaticMarkup(<ViewerScreen state={{ status: "ready", artifact: named }} />);
+    expect(viewer).toContain("Back to library");
+    expect(viewer).toContain("X launch calendar");
+    expect(viewer).toContain(named.id);
+    expect(viewer).not.toContain(named.filename);
+
+    const share = renderToStaticMarkup(
+      <PublicShareScreen
+        state={{
+          status: "ready",
+          artifact: {
+            id: named.id,
+            filename: named.filename,
+            name: named.name,
+            mimeType: "text/html",
+            sizeBytes: named.sizeBytes,
+            uploadedAt: named.uploadedAt,
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${named.id}/token/content`,
+            passwordProtected: false
+          }
+        }}
+      />
+    );
+    expect(share).toContain("X launch calendar");
+    expect(share).not.toContain("Back to library");
+    expect(share).not.toContain(named.filename);
   });
 });
 
@@ -126,6 +163,7 @@ describe("share controls", () => {
           artifact: {
             id: artifact.id,
             filename: artifact.filename,
+            name: null,
             mimeType: "text/html",
             sizeBytes: artifact.sizeBytes,
             uploadedAt: artifact.uploadedAt,

@@ -414,6 +414,7 @@ describe("HTTP API", () => {
     expect(body.artifact.creatorUserId).toBe(owner.userId);
     expect(body.artifact.mimeType).toBe("text/html");
     expect(body.artifact.filename).toBe(`${body.artifact.id}.html`);
+    expect(body.artifact.name).toBe("hello");
     expect(body.artifact.sizeBytes).toBe(bytes.byteLength);
     expect(body.artifact.viewerUrl).toBe(`http://localhost:3000/artifacts/${body.artifact.id}`);
     expectPlainContentUrl(body.artifact.contentUrl, body.artifact.id);
@@ -886,6 +887,8 @@ describe("HTTP API", () => {
     expect(replaced.sizeBytes).toBe(next.byteLength);
     expect(replaced.shared).toBe(false);
     expect(replaced.filename).toBe(`${artifact.id}.html`);
+    expect(artifact.name).toBe("original");
+    expect(replaced.name).toBe("original");
     const replacedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
     expect(replacedRow.objectKey.startsWith(`${artifact.id}/`)).toBe(true);
     expect(replacedRow.contentRevision).toBe(1);
@@ -896,6 +899,69 @@ describe("HTTP API", () => {
     expect(content.headers.get("content-length")).toBe(String(next.byteLength));
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
     expect(await prisma.artifact.count()).toBe(1);
+  });
+
+  it("stores a name, keeps it when a replace omits one, and rejects an over-long name", async () => {
+    const bytes = new TextEncoder().encode("<p>named</p>");
+    const created = await upload(baseUrl, "calendar.html", bytes, { name: "  X launch calendar  " });
+    expect(created.name).toBe("X launch calendar");
+    expect(created.filename).toBe(`${created.id}.html`);
+
+    const combined = await upload(baseUrl, "accent.html", bytes, { name: "e\u0301" });
+    expect(combined.name).toBe("\u00e9");
+
+    const kept = artifactEnvelopeSchema.parse(
+      await (await putContent(baseUrl, created.id, "other-file.html", new TextEncoder().encode("<p>next</p>"))).json(),
+    ).artifact;
+    expect(kept.id).toBe(created.id);
+    expect(kept.name).toBe("X launch calendar");
+
+    const renamed = artifactEnvelopeSchema.parse(
+      await (
+        await putContent(baseUrl, created.id, "other-file.html", new TextEncoder().encode("<p>renamed</p>"), {
+          name: "Renamed calendar",
+        })
+      ).json(),
+    ).artifact;
+    expect(renamed.name).toBe("Renamed calendar");
+
+    const beforeReject = await prisma.artifact.findUniqueOrThrow({ where: { id: created.id } });
+    const overLong = await putContent(baseUrl, created.id, "other-file.html", bytes, { name: "n".repeat(121) });
+    expect(overLong.status).toBe(400);
+    expect(await errorOf(overLong)).toEqual({
+      code: "INVALID_REQUEST",
+      message: "name must be one line of 1 to 120 characters.",
+    });
+    const blank = await postFile(baseUrl, "blank.html", bytes, { name: "   " });
+    expect(blank.status).toBe(400);
+    expect((await errorOf(blank)).message).toBe("name must be one line of 1 to 120 characters.");
+    const brokenLine = await postFile(baseUrl, "line.html", bytes, { name: "hello\nthere" });
+    expect(brokenLine.status).toBe(400);
+    expect((await errorOf(brokenLine)).message).toBe("name must be one line of 1 to 120 characters.");
+    const afterReject = await prisma.artifact.findUniqueOrThrow({ where: { id: created.id } });
+    expect(afterReject.name).toBe("Renamed calendar");
+    expect(afterReject.objectKey).toBe(beforeReject.objectKey);
+    expect(afterReject.contentRevision).toBe(beforeReject.contentRevision);
+    expect(await prisma.artifact.count()).toBe(2);
+
+    const longStem = "b".repeat(121);
+    const derivedNull = await upload(baseUrl, `${longStem}.html`, bytes);
+    expect(derivedNull.name).toBeNull();
+    const dotfile = await upload(baseUrl, ".html", bytes);
+    expect(dotfile.name).toBeNull();
+    const exact = await upload(baseUrl, `${"c".repeat(120)}.html`, bytes);
+    expect(exact.name).toBe("c".repeat(120));
+
+    const listed = artifactListEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts?view=mine`)).json());
+    expect(listed.items.find((item) => item.id === created.id)?.name).toBe("Renamed calendar");
+
+    const shared = shareEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${created.id}/share`, { method: "POST" })).json(),
+    );
+    const token = shared.share.shareUrl?.split("/").at(-1) ?? "";
+    const opened = publicArtifactEnvelopeSchema.parse(await (await globalThis.fetch(publicPath(baseUrl, created.id, token))).json());
+    expect(opened.artifact.name).toBe("Renamed calendar");
+    expect(opened.artifact.filename).toBe(`${created.id}.html`);
   });
 
   it("refuses a content replace when the caller cannot write that artifact", async () => {
