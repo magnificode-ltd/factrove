@@ -24,12 +24,14 @@ const API_PREFIX = "/api/v1";
 export class FactroveApiError extends Error {
   readonly status: number | null;
   readonly code: string;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, options: { status: number | null; code: string }) {
+  constructor(message: string, options: { status: number | null; code: string; retryAfterSeconds?: number }) {
     super(message);
     this.name = "FactroveApiError";
     this.status = options.status;
     this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -88,18 +90,30 @@ function normalizeBaseUrl(baseUrl: string): string {
   return `${parsed.origin}${pathname}`.replace(/\/$/, "");
 }
 
-function parseErrorPayload(payload: unknown, status: number): FactroveApiError {
+function parseErrorPayload(payload: unknown, status: number, headers?: Headers): FactroveApiError {
   const parsed = apiErrorSchema.safeParse(payload);
+  const retryAfterSeconds = readRetryAfterSeconds(headers);
   if (parsed.success) {
     return new FactroveApiError(parsed.data.error.message, {
       status,
-      code: parsed.data.error.code
+      code: parsed.data.error.code,
+      retryAfterSeconds
     });
   }
   return new FactroveApiError(`Request failed with HTTP ${status}`, {
     status,
-    code: "INVALID_RESPONSE"
+    code: "INVALID_RESPONSE",
+    retryAfterSeconds
   });
+}
+
+function readRetryAfterSeconds(headers?: Headers): number | undefined {
+  const raw = headers?.get("retry-after");
+  if (!raw) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(raw, 10);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
 export function createFactroveClient(options: FactroveClientOptions): FactroveClient {
@@ -136,14 +150,14 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     try {
       payload = await response.json();
     } catch {
-      if (!response.ok) throw parseErrorPayload(null, response.status);
+      if (!response.ok) throw parseErrorPayload(null, response.status, response.headers);
       throw new FactroveApiError("The API returned an invalid JSON response", {
         status: response.status,
         code: "INVALID_RESPONSE"
       });
     }
 
-    if (!response.ok) throw parseErrorPayload(payload, response.status);
+    if (!response.ok) throw parseErrorPayload(payload, response.status, response.headers);
     try {
       return schema.parse(payload);
     } catch {
@@ -163,7 +177,7 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       } catch {
         payload = null;
       }
-      throw parseErrorPayload(payload, response.status);
+      throw parseErrorPayload(payload, response.status, response.headers);
     }
     const received = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
     if (received !== mediaType) {

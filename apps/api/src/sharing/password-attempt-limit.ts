@@ -6,35 +6,34 @@ import { RateWindow } from "./rate-window.js";
 // separate from the public view limit, so viewing a page never spends password attempts
 // and a run of wrong passwords does not block views.
 //
-// Both budgets are reserved before Argon2, including a correct password. Exhausted means
-// 429 with no hash verification. The client slot is refunded after a match so one address
-// can unlock again; the share slot is kept, so rotating addresses cannot keep guessing.
-// Invalid or non-JSON bodies are rejected before either bucket is touched, so a cross-site
-// text/plain POST costs nothing. A dead-token lookup keeps the client charge. An unprotected
-// matching link refunds the client and does not touch the share bucket.
+// The client failure budget (10 per 10 minutes, IPv6 /64) is reserved before lookup and
+// refunded after a match or an infrastructure failure. Dead tokens keep that charge.
+// The share failure budget (30 per 10 minutes, keyed by the current token hash) is charged
+// only after a wrong password. Successes do not spend it. Exhausted means 429 with no
+// Argon2. Revoking and sharing again mints a new hash and a fresh share budget.
 //
-// The share bucket is keyed by the current share token hash. Revoking and sharing again
-// mints a new hash, a fresh budget, and a cleared backoff. That is how the owner recovers
-// after the share is exhausted. Failed verifications also start a per-share exponential
-// cooldown. During that cooldown the next attempt is 429 without Argon2. Clients use the
-// same address key as the view limit, including the IPv6 /64.
+// Every Argon2 verify, success or failure, spends a separate per-IP verify budget
+// (20 per minute and 100 per 10 minutes). A saturated global gate does not refund that
+// budget, so retries are not free. One IP may run only one verify at a time.
+// Recent share failures add a bounded delay of at most two seconds before verify; they
+// do not reject the request. Clients use the same address key as the view limit.
 export const PASSWORD_ATTEMPTS_PER_CLIENT = 10;
 export const PASSWORD_ATTEMPTS_PER_SHARE = 30;
 export const PASSWORD_ATTEMPT_WINDOW_MS = 10 * 60_000;
 export const PASSWORD_ATTEMPT_MAX_KEYS = 10_000;
-export const SHARE_BACKOFF_BASE_MS = 1_000;
-export const SHARE_BACKOFF_MAX_MS = 32_000;
-
-type ShareBackoff = {
-  failures: number;
-  until: number;
-};
+export const VERIFY_ATTEMPTS_PER_MINUTE = 20;
+export const VERIFY_MINUTE_WINDOW_MS = 60_000;
+export const VERIFY_ATTEMPTS_PER_WINDOW = 100;
+export const VERIFY_WINDOW_MS = PASSWORD_ATTEMPT_WINDOW_MS;
+export const SHARE_DELAY_MAX_MS = 2_000;
 
 @Injectable()
 export class PasswordAttemptLimiter {
   private readonly clients: RateWindow;
   private readonly shares: RateWindow;
-  private readonly backoffs = new Map<string, ShareBackoff>();
+  private readonly verifyMinute: RateWindow;
+  private readonly verifyWindow: RateWindow;
+  private readonly verifying = new Set<string>();
 
   constructor(
     perClient = PASSWORD_ATTEMPTS_PER_CLIENT,
@@ -42,11 +41,17 @@ export class PasswordAttemptLimiter {
     windowMs = PASSWORD_ATTEMPT_WINDOW_MS,
     private readonly now: () => number = () => performance.now(),
     maxKeys = PASSWORD_ATTEMPT_MAX_KEYS,
-    private readonly backoffBaseMs = SHARE_BACKOFF_BASE_MS,
+    private readonly delayMaxMs = SHARE_DELAY_MAX_MS,
+    perVerifyMinute = VERIFY_ATTEMPTS_PER_MINUTE,
+    verifyMinuteWindowMs = VERIFY_MINUTE_WINDOW_MS,
+    perVerifyWindow = VERIFY_ATTEMPTS_PER_WINDOW,
+    verifyWindowMs = VERIFY_WINDOW_MS,
   ) {
     const at = this.now();
     this.clients = new RateWindow(perClient, windowMs, maxKeys, at);
     this.shares = new RateWindow(perShare, windowMs, maxKeys, at);
+    this.verifyMinute = new RateWindow(perVerifyMinute, verifyMinuteWindowMs, maxKeys, at);
+    this.verifyWindow = new RateWindow(perVerifyWindow, verifyWindowMs, maxKeys, at);
   }
 
   reserveClient(clientIp: string | null): boolean {
@@ -57,43 +62,62 @@ export class PasswordAttemptLimiter {
     this.clients.refund(rateLimitKey(clientIp), this.now());
   }
 
-  reserveShare(shareTokenHash: string): boolean {
+  clientRetryAfterSeconds(clientIp: string | null): number {
+    return this.clients.retryAfterSeconds(rateLimitKey(clientIp), this.now());
+  }
+
+  shareHasRoom(shareTokenHash: string): boolean {
+    return this.shares.hasRoom(shareTokenHash, this.now());
+  }
+
+  chargeShareFailure(shareTokenHash: string): boolean {
     return this.shares.take(shareTokenHash, this.now());
   }
 
-  refundShare(shareTokenHash: string): void {
-    this.shares.refund(shareTokenHash, this.now());
+  shareRetryAfterSeconds(shareTokenHash: string): number {
+    return this.shares.retryAfterSeconds(shareTokenHash, this.now());
   }
 
-  shareIsCooling(shareTokenHash: string): boolean {
-    if (this.backoffBaseMs <= 0) {
+  shareDelayMs(shareTokenHash: string): number {
+    if (this.delayMaxMs <= 0) {
+      return 0;
+    }
+    const used = this.shares.used(shareTokenHash, this.now());
+    if (used <= 0) {
+      return 0;
+    }
+    return Math.min(this.delayMaxMs, Math.round((used / PASSWORD_ATTEMPTS_PER_SHARE) * this.delayMaxMs));
+  }
+
+  reserveVerify(clientIp: string | null): boolean {
+    const key = rateLimitKey(clientIp);
+    const at = this.now();
+    if (!this.verifyMinute.take(key, at)) {
       return false;
     }
-    const backoff = this.backoffs.get(shareTokenHash);
-    return backoff !== undefined && this.now() < backoff.until;
+    if (!this.verifyWindow.take(key, at)) {
+      this.verifyMinute.refund(key, at);
+      return false;
+    }
+    return true;
   }
 
-  noteShareFailure(shareTokenHash: string): void {
-    if (this.backoffBaseMs <= 0) {
-      return;
-    }
-    const previous = this.backoffs.get(shareTokenHash);
-    const failures = (previous?.failures ?? 0) + 1;
-    // The first miss stays free so a typo and the correct password can follow immediately.
-    const delay = failures < 2
-      ? 0
-      : Math.min(SHARE_BACKOFF_MAX_MS, this.backoffBaseMs * 2 ** Math.min(failures - 2, 10));
-    if (!this.backoffs.has(shareTokenHash) && this.backoffs.size >= PASSWORD_ATTEMPT_MAX_KEYS) {
-      const oldest = this.backoffs.keys().next().value;
-      if (oldest !== undefined) {
-        this.backoffs.delete(oldest);
-      }
-    }
-    this.backoffs.set(shareTokenHash, { failures, until: this.now() + delay });
+  verifyRetryAfterSeconds(clientIp: string | null): number {
+    const key = rateLimitKey(clientIp);
+    const at = this.now();
+    return Math.max(this.verifyMinute.retryAfterSeconds(key, at), this.verifyWindow.retryAfterSeconds(key, at));
   }
 
-  clearShareBackoff(shareTokenHash: string): void {
-    this.backoffs.delete(shareTokenHash);
+  tryBeginVerify(clientIp: string | null): boolean {
+    const key = rateLimitKey(clientIp);
+    if (this.verifying.has(key)) {
+      return false;
+    }
+    this.verifying.add(key);
+    return true;
+  }
+
+  endVerify(clientIp: string | null): void {
+    this.verifying.delete(rateLimitKey(clientIp));
   }
 }
-

@@ -11,45 +11,17 @@ export const contentMediaTypes = {
 
 export const SHARE_PASSWORD_MIN_LENGTH = 10;
 export const SHARE_PASSWORD_MAX_LENGTH = 128;
-const COMMON_SHARE_PASSWORDS = new Set([
-  "password10",
-  "password12",
-  "password123",
-  "password1234",
-  "1234567890",
-  "123456789",
-  "qwerty1234",
-  "qwertyuiop",
-  "letmein123",
-  "welcome123",
-  "admin12345",
-  "iloveyou12",
-  "monkey1234",
-  "dragon1234",
-  "baseball12",
-  "football12",
-  "abcdefghij",
-  "0000000000",
-  "1111111111",
-  "sunshine12",
-  "princess12",
-  "whatever12",
-  "trustno123",
-  "passw0rd12",
-  "password1!",
-  "qwerty12345",
-  "iloveyou123",
-  "letmein1234",
-  "welcome1234",
-  "abc1234567",
-  "1q2w3e4r5t",
-  "zxcvbnm123",
-  "asdfghjkl1"
-]);
-
-export function isCommonSharePassword(password: string): boolean {
-  return COMMON_SHARE_PASSWORDS.has(password.normalize("NFC").toLowerCase());
-}
+export const SHARE_PASSWORD_MIN_UNIQUE = 4;
+export {
+  isAllWhitespaceSharePassword,
+  isCommonSharePassword,
+  uniqueSharePasswordCharacters
+} from "./common-passwords.js";
+import {
+  isAllWhitespaceSharePassword,
+  isCommonSharePassword,
+  uniqueSharePasswordCharacters
+} from "./common-passwords.js";
 // The visitor sends an unlock grant in this header. It is never a cookie or part of a URL.
 export const SHARE_GRANT_HEADER = "x-factrove-share-grant";
 
@@ -73,24 +45,39 @@ export const artifactDtoSchema = z.object({
 export const shareStateSchema = z.object({
   shared: z.boolean(),
   shareUrl: z.string().url().nullable(),
-  passwordProtected: z.boolean()
+  passwordProtected: z.boolean(),
+  guessesLockedOut: z.boolean().optional()
 });
 
 export const shareEnvelopeSchema = z.object({
   share: shareStateSchema
 });
 
-export const sharePasswordSchema = z
+const sharePasswordRules = z
   .string()
   .min(SHARE_PASSWORD_MIN_LENGTH, `Use at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`)
   .max(SHARE_PASSWORD_MAX_LENGTH, `Use at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`)
+  .refine((value) => !isAllWhitespaceSharePassword(value), {
+    message: "Choose a password with letters or numbers."
+  })
+  .refine((value) => uniqueSharePasswordCharacters(value) >= SHARE_PASSWORD_MIN_UNIQUE, {
+    message: `Use at least ${SHARE_PASSWORD_MIN_UNIQUE} different characters.`
+  })
   .refine((value) => !isCommonSharePassword(value), {
     message: "Choose a less common password."
   });
 
+export const sharePasswordSchema = z.preprocess(
+  (value) => typeof value === "string" ? value.normalize("NFC") : value,
+  sharePasswordRules
+);
+
 export const createShareRequestSchema = z
   .object({
-    password: sharePasswordSchema.optional()
+    password: z.preprocess(
+      (value) => value === undefined || typeof value !== "string" ? value : value.normalize("NFC"),
+      sharePasswordRules.optional()
+    )
   })
   .strict();
 

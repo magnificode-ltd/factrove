@@ -256,10 +256,11 @@ export class ArtifactsService {
     return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
   }
 
-  // Invalid bodies are rejected before any bucket is touched. Client and share slots are
-  // reserved before Argon2, including a correct password. Exhausted or cooling shares are
-  // 429 with no hash work. A match refunds the client slot and keeps the share charge.
-  // The owner recovers by sharing again, which mints a new token hash and a fresh budget.
+  // Invalid bodies are rejected before any bucket is touched. The client failure budget is
+  // reserved before lookup and refunded after a match or an infrastructure error. Share
+  // failures are charged only after Argon2 rejects the password. Exhausted shares are 429
+  // with no hash work. Every verify spends a separate per-IP budget; a saturated gate keeps
+  // that charge. Recent share failures add a short delay before verify, not a rejection.
   async unlockPublic(
     id: string,
     token: string,
@@ -268,36 +269,59 @@ export class ArtifactsService {
   ): Promise<PublicUnlockEnvelope> {
     const password = readUnlockPassword(readBody());
     if (!this.passwordAttempts.reserveClient(clientIp)) {
-      throw tooManyPasswordAttempts();
+      throw tooManyPasswordAttempts(this.passwordAttempts.clientRetryAfterSeconds(clientIp));
     }
-    const record = await this.findPublic(id, token);
+    let record: ArtifactRecord & { uploadedAt: Date };
+    try {
+      record = await this.findPublic(id, token);
+    } catch (error) {
+      if (!(error instanceof ApiErrorException && error.status === 404)) {
+        this.passwordAttempts.refundClient(clientIp);
+      }
+      throw error;
+    }
     const scope = this.grantScope(record);
     if (!scope || !record.sharePasswordHash || !record.shareTokenHash) {
       this.passwordAttempts.refundClient(clientIp);
       return { grant: null };
     }
-    if (this.passwordAttempts.shareIsCooling(record.shareTokenHash)) {
-      throw tooManyPasswordAttempts();
+    if (!this.passwordAttempts.shareHasRoom(record.shareTokenHash)) {
+      this.passwordAttempts.refundClient(clientIp);
+      throw tooManyPasswordAttempts(this.passwordAttempts.shareRetryAfterSeconds(record.shareTokenHash));
     }
-    if (!this.passwordAttempts.reserveShare(record.shareTokenHash)) {
-      throw tooManyPasswordAttempts();
+    if (!this.passwordAttempts.reserveVerify(clientIp)) {
+      this.passwordAttempts.refundClient(clientIp);
+      throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
+    }
+    if (!this.passwordAttempts.tryBeginVerify(clientIp)) {
+      this.passwordAttempts.refundClient(clientIp);
+      throw tooManyPasswordAttempts(1);
     }
     if (!argon2VerifyGate.tryAcquire()) {
+      this.passwordAttempts.endVerify(clientIp);
       this.passwordAttempts.refundClient(clientIp);
-      this.passwordAttempts.refundShare(record.shareTokenHash);
       throw unlockBusy();
     }
     try {
+      const delayMs = this.passwordAttempts.shareDelayMs(record.shareTokenHash);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
       if (!(await verifySharePassword(password, record.sharePasswordHash))) {
-        this.passwordAttempts.noteShareFailure(record.shareTokenHash);
+        this.passwordAttempts.chargeShareFailure(record.shareTokenHash);
         throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
       }
       this.passwordAttempts.refundClient(clientIp);
-      this.passwordAttempts.clearShareBackoff(record.shareTokenHash);
       const grant = mintShareGrant(scope, this.grantKey());
       return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+    } catch (error) {
+      if (!(error instanceof ApiErrorException && (error.status === 401 || error.status === 404))) {
+        this.passwordAttempts.refundClient(clientIp);
+      }
+      throw error;
     } finally {
       argon2VerifyGate.release();
+      this.passwordAttempts.endVerify(clientIp);
     }
   }
 
@@ -437,6 +461,9 @@ export class ArtifactsService {
       shared: true,
       shareUrl: artifactShareUrl(this.config.publicBaseUrl, record.id, token),
       passwordProtected: record.sharePasswordHash !== null,
+      ...(record.sharePasswordHash && record.shareTokenHash && !this.passwordAttempts.shareHasRoom(record.shareTokenHash)
+        ? { guessesLockedOut: true }
+        : {}),
     });
   }
 
@@ -531,12 +558,17 @@ function passwordRequired(): ApiErrorException {
   return new ApiErrorException(401, "PASSWORD_REQUIRED", "This link needs a password.");
 }
 
-function tooManyPasswordAttempts(): ApiErrorException {
-  return new ApiErrorException(429, "RATE_LIMITED", "Too many password attempts. Try again later.");
+function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
+  return new ApiErrorException(
+    429,
+    "RATE_LIMITED",
+    "Too many password attempts. Try again later.",
+    Math.max(1, retryAfterSeconds),
+  );
 }
 
 function unlockBusy(): ApiErrorException {
-  return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.");
+  return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
 }
 
 function readCreateShareInput(body: unknown): CreateShareRequest {

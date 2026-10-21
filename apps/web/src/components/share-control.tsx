@@ -64,6 +64,12 @@ export function ShareControl({
     if (share.shareUrl) {
       setExpanded((open) => !open);
       setError(null);
+      try {
+        const envelope = await createWebClient().getArtifactShare(artifactId);
+        setShare(envelope.share);
+      } catch (caught) {
+        setError(shareError(caught, artifactId));
+      }
       return;
     }
     setPending("share");
@@ -288,12 +294,14 @@ function SharePassword({
         >
           {protectedLink ? <LockKeyhole className="size-4" /> : <LockKeyholeOpen className="size-4" />}
         </span>
-        <p className="min-w-0 flex-1 text-sm" role="status">
+        <p className="min-w-0 flex-1 text-sm" role={share.guessesLockedOut ? "alert" : "status"}>
           <span className="font-semibold">{protectedLink ? "Password protected" : "No password"}</span>
-          <span className="block text-muted-foreground">
-            {protectedLink
-              ? "Visitors unlock it once per tab. Access lasts 15 minutes. If they are locked out after too many attempts, stop sharing and share again to mint a new link."
-              : "Add one so only people you tell can open it."}
+          <span className={share.guessesLockedOut ? "block text-destructive" : "block text-muted-foreground"}>
+            {share.guessesLockedOut
+              ? "Too many wrong guesses: revoke and share again for a fresh link"
+              : protectedLink
+                ? "Visitors unlock it once per tab. Access lasts 15 minutes."
+                : "Add one so only people you tell can open it."}
           </span>
         </p>
         {editing ? null : (

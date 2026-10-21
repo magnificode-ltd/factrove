@@ -26,7 +26,27 @@ export class RateWindow {
 
   hasRoom(key: string, at: number): boolean {
     this.rotate(at);
-    return this.estimate(key, at) < this.max;
+    return this.used(key, at) < this.max;
+  }
+
+  used(key: string, at: number): number {
+    this.rotate(at);
+    return this.estimate(key, at);
+  }
+
+  retryAfterSeconds(key: string, at: number): number {
+    this.rotate(at);
+    if (this.estimate(key, at) < this.max) {
+      return 0;
+    }
+    const elapsed = at - this.windowStart;
+    const current = this.current.get(key) ?? 0;
+    const previous = this.previous.get(key) ?? 0;
+    if (current >= this.max || previous <= 0) {
+      return Math.max(1, Math.ceil((this.windowMs - elapsed) / 1000));
+    }
+    const neededElapsed = this.windowMs - ((this.max - current) * this.windowMs) / previous;
+    return Math.max(1, Math.ceil(Math.max(0, neededElapsed - elapsed) / 1000));
   }
 
   take(key: string, at: number): boolean {

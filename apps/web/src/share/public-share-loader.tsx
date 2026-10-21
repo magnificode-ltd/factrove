@@ -48,7 +48,7 @@ export function PublicShareLoader({
       if (!active.current) {
         return null;
       }
-      if (result.status === "incorrect" || result.status === "throttled") {
+      if (result.status === "incorrect" || result.status === "throttled" || result.status === "busy") {
         return result;
       }
       if (result.status !== "unlocked") {

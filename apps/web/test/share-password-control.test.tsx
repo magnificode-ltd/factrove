@@ -33,8 +33,9 @@ afterEach(() => {
 
 type Call = { url: string; method: string; credentials: RequestCredentials | undefined; body: string | null };
 
-function ownerApi() {
+function ownerApi(initial: { passwordProtected?: boolean; guessesLockedOut?: boolean } = {}) {
   const calls: Call[] = [];
+  let passwordProtected = Boolean(initial.passwordProtected);
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const call = {
       url: String(input),
@@ -43,11 +44,26 @@ function ownerApi() {
       body: typeof init?.body === "string" ? init.body : null
     };
     calls.push(call);
-    const passwordProtected = call.method === "POST" && call.body !== null;
-    return new Response(JSON.stringify({ share: { shared: true, shareUrl, passwordProtected } }), {
-      status: 200,
-      headers: { "content-type": "application/json" }
-    });
+    if (call.method === "POST" && call.body !== null) {
+      passwordProtected = true;
+    }
+    if (call.method === "DELETE") {
+      passwordProtected = false;
+    }
+    return new Response(
+      JSON.stringify({
+        share: {
+          shared: true,
+          shareUrl,
+          passwordProtected,
+          ...(initial.guessesLockedOut && passwordProtected ? { guessesLockedOut: true } : {})
+        }
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
   });
   return calls;
 }
@@ -97,6 +113,7 @@ async function submit(input: HTMLInputElement) {
 
 describe("share password controls", () => {
   it("starts the viewer panel closed so it does not cover the artifact", async () => {
+    ownerApi({ passwordProtected: true });
     const container = await renderControl(true);
     expect(container.querySelector('[data-testid="share-password"]')).toBeNull();
     expect(container.querySelector('[aria-expanded="true"]')).toBeNull();
@@ -133,6 +150,16 @@ describe("share password controls", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Choose a less common password.");
     expect(calls).toHaveLength(0);
 
+    await type(input, "          ");
+    await submit(input);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Choose a password with letters or numbers.");
+    expect(calls).toHaveLength(0);
+
+    await type(input, "ababababab");
+    await submit(input);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Use at least 4 different characters.");
+    expect(calls).toHaveLength(0);
+
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Show password"]')?.click();
     });
@@ -154,11 +181,22 @@ describe("share password controls", () => {
     expect(container.querySelector('input[name="share-password"]')).toBeNull();
     expect(container.textContent).not.toContain("open sesame 42");
     expect(container.textContent).toContain("Anyone with this link and its password");
-    expect(container.textContent).toContain("stop sharing and share again to mint a new link");
+    expect(container.textContent).not.toContain("Too many wrong guesses");
+  });
+
+  it("shows the lockout recovery state when the share cap is hit", async () => {
+    ownerApi({ passwordProtected: true, guessesLockedOut: true });
+    const container = await renderControl(true);
+    await openPanel(container);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain("Too many wrong guesses: revoke and share again for a fresh link");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Too many wrong guesses");
   });
 
   it("changes and removes an existing password", async () => {
-    const calls = ownerApi();
+    const calls = ownerApi({ passwordProtected: true });
     const container = await renderControl(true);
     await openPanel(container);
     await act(async () => {

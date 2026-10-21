@@ -37,6 +37,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "no-store");
+    if (exception instanceof ApiErrorException && exception.retryAfterSeconds !== undefined) {
+      response.setHeader("Retry-After", String(exception.retryAfterSeconds));
+    }
     if (publicApi) {
       response.setHeader("Referrer-Policy", "no-referrer");
       response.setHeader("X-Robots-Tag", "noindex");

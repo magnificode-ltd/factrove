@@ -91,15 +91,18 @@ const unlockedArtifact = {
   passwordProtected: true
 };
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...extraHeaders }
+  });
 }
 
 function passwordRequired(): Response {
   return json({ error: { code: "PASSWORD_REQUIRED", message: "This link needs a password." } }, 401);
 }
 
-function lockedApi(options: { password?: string; throttle?: boolean } = {}) {
+function lockedApi(options: { password?: string; throttle?: boolean; busy?: boolean; retryAfter?: string } = {}) {
   const calls: Call[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const headers = new Headers(init?.headers);
@@ -112,8 +115,20 @@ function lockedApi(options: { password?: string; throttle?: boolean } = {}) {
     };
     calls.push(call);
     if (call.url === `${apiBase}/unlock`) {
+      const retryAfter = options.retryAfter === undefined ? {} : { "retry-after": options.retryAfter };
+      if (options.busy) {
+        return json(
+          { error: { code: "UNLOCK_UNAVAILABLE", message: "Password verification is busy. Try again." } },
+          503,
+          retryAfter
+        );
+      }
       if (options.throttle) {
-        return json({ error: { code: "RATE_LIMITED", message: "Too many password attempts. Try again later." } }, 429);
+        return json(
+          { error: { code: "RATE_LIMITED", message: "Too many password attempts. Try again later." } },
+          429,
+          retryAfter
+        );
       }
       const sent = JSON.parse(call.body ?? "{}") as { password?: string };
       if (sent.password !== (options.password ?? "correct horse")) {
@@ -259,5 +274,24 @@ describe("password-protected public share page", () => {
       "Too many attempts. Wait a few minutes, then try again."
     );
     expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("shows how long to wait when Retry-After is present", async () => {
+    const { container } = await render(lockedApi({ throttle: true, retryAfter: "12" }).fetchImpl);
+    const input = await submitPassword(container, "anything at all");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Too many attempts. Try again in 12s.");
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("retries a busy unlock and then tells the visitor to try again", async () => {
+    const { container } = await render(lockedApi({ busy: true, retryAfter: "0" }).fetchImpl);
+    await submitPassword(container, "anything at all");
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (container.querySelector('[role="alert"]')?.textContent === "Busy, try again shortly.") {
+        break;
+      }
+      await settle();
+    }
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Busy, try again shortly.");
   });
 });

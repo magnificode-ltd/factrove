@@ -75,6 +75,22 @@ describe("Factrove API client", () => {
     });
   });
 
+  it("reads Retry-After on throttled unlock errors", async () => {
+    const fetchStub = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many password attempts. Try again later." } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "17" }
+      })
+    );
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+    await expect(client.unlockPublicArtifact(artifact.id, "a".repeat(43), "open sesame 42")).rejects.toMatchObject({
+      name: "FactroveApiError",
+      status: 429,
+      code: "RATE_LIMITED",
+      retryAfterSeconds: 17
+    });
+  });
+
   it("reports malformed error and success payloads as invalid responses", async () => {
     const errorClient = createFactroveClient({
       baseUrl: "http://localhost:3001",

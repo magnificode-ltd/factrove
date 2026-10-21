@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
-import { isCommonSharePassword, SHARE_PASSWORD_MAX_LENGTH, SHARE_PASSWORD_MIN_LENGTH } from "@factrove/contracts";
+import { sharePasswordSchema, SHARE_PASSWORD_MAX_LENGTH, SHARE_PASSWORD_MIN_LENGTH } from "@factrove/contracts";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
@@ -43,7 +43,7 @@ export class ShareCommand {
       process.stdout.write(`${envelope.share.shareUrl}\n`);
       process.stdout.write(
         envelope.share.passwordProtected
-          ? "This link is password protected.\nIf visitors are locked out after too many unlock attempts, share again to mint a new link.\n"
+          ? "This link is password protected.\nIf visitors are locked out after too many wrong guesses, revoke, then share again.\n"
           : "This link is not password protected.\n",
       );
     } catch (error) {
@@ -95,14 +95,16 @@ async function readPassword(source: "prompt" | "stdin"): Promise<string> {
 }
 
 function checkPassword(value: string): string {
-  if (value.length < SHARE_PASSWORD_MIN_LENGTH) {
-    throw new CliError("INVALID_INPUT", `The password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`);
+  const parsed = sharePasswordSchema.safeParse(value);
+  if (!parsed.success) {
+    const message = parsed.error.issues[0]?.message ?? "The password is invalid.";
+    if (message.startsWith("Use at least")) {
+      throw new CliError("INVALID_INPUT", `The password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters.`);
+    }
+    if (message.startsWith("Use at most")) {
+      throw new CliError("INVALID_INPUT", `The password must be at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`);
+    }
+    throw new CliError("INVALID_INPUT", message);
   }
-  if (value.length > SHARE_PASSWORD_MAX_LENGTH) {
-    throw new CliError("INVALID_INPUT", `The password must be at most ${SHARE_PASSWORD_MAX_LENGTH} characters.`);
-  }
-  if (isCommonSharePassword(value)) {
-    throw new CliError("INVALID_INPUT", "Choose a less common password.");
-  }
-  return value;
+  return parsed.data;
 }

@@ -100,7 +100,7 @@ Relative upload paths resolve from the directory where you ran pnpm.
 Plain upload success prints only the viewer URL and a newline.
 Plain share success prints the public link, whether it is password protected, and a newline.
 Plain share --revoke prints a confirmation and does not print the old link.
-Plain share --remove-password prints a confirmation. Passwords are 10 to 128 characters and are never printed.
+Plain share --remove-password prints a confirmation. Passwords are 10 to 128 NFC characters and are never printed.
 Plain get success prints the content with no extra bytes.
 JSON success prints one line.
 Errors go to stderr and the process exits nonzero.

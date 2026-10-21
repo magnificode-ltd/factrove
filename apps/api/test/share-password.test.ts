@@ -1,9 +1,12 @@
+import { createShareRequestSchema, sharePasswordSchema, SHARE_PASSWORD_MIN_UNIQUE } from "@factrove/contracts";
 import { describe, expect, it } from "vitest";
 import { Argon2VerifyGate } from "../src/sharing/argon2-gate.js";
 import {
   PasswordAttemptLimiter,
   PASSWORD_ATTEMPT_WINDOW_MS,
-  SHARE_BACKOFF_BASE_MS,
+  PASSWORD_ATTEMPTS_PER_SHARE,
+  SHARE_DELAY_MAX_MS,
+  VERIFY_ATTEMPTS_PER_MINUTE,
 } from "../src/sharing/password-attempt-limit.js";
 import { RateWindow } from "../src/sharing/rate-window.js";
 import { PublicViewLimiter } from "../src/sharing/public-view-limit.js";
@@ -143,40 +146,68 @@ describe("password attempt throttling", () => {
     expect(limiter.reserveClient("198.51.100.9")).toBe(true);
   });
 
-  it("limits each share token hash independently of the client budget", () => {
+  it("charges only share failures and keeps shares apart", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, 4, 60_000, () => now);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       expect(limiter.reserveClient(`203.0.113.${attempt}`)).toBe(true);
-      expect(limiter.reserveShare(firstHash)).toBe(true);
+      expect(limiter.shareHasRoom(firstHash)).toBe(true);
+      expect(limiter.chargeShareFailure(firstHash)).toBe(true);
     }
     expect(limiter.reserveClient("203.0.113.200")).toBe(true);
-    expect(limiter.reserveShare(firstHash)).toBe(false);
-    expect(limiter.reserveShare(secondHash)).toBe(true);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
+    expect(limiter.chargeShareFailure(firstHash)).toBe(false);
+    expect(limiter.shareHasRoom(secondHash)).toBe(true);
+    expect(limiter.chargeShareFailure(secondHash)).toBe(true);
     now = 30_000;
-    expect(limiter.reserveShare(firstHash)).toBe(false);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
     now = 120_001;
-    expect(limiter.reserveShare(firstHash)).toBe(true);
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
   });
 
-  it("backs off a share exponentially after failures and clears on success", () => {
+  it("delays a share from recent failures without rejecting, and the delay decays", () => {
     let now = 0;
-    const limiter = new PasswordAttemptLimiter(100, 100, 60_000, () => now);
-    expect(limiter.shareIsCooling(firstHash)).toBe(false);
-    limiter.noteShareFailure(firstHash);
-    expect(limiter.shareIsCooling(firstHash)).toBe(false);
-    limiter.noteShareFailure(firstHash);
-    expect(limiter.shareIsCooling(firstHash)).toBe(true);
-    now = SHARE_BACKOFF_BASE_MS - 1;
-    expect(limiter.shareIsCooling(firstHash)).toBe(true);
-    now = SHARE_BACKOFF_BASE_MS;
-    expect(limiter.shareIsCooling(firstHash)).toBe(false);
-    limiter.noteShareFailure(firstHash);
-    now = SHARE_BACKOFF_BASE_MS + (SHARE_BACKOFF_BASE_MS * 2) - 1;
-    expect(limiter.shareIsCooling(firstHash)).toBe(true);
-    limiter.clearShareBackoff(firstHash);
-    expect(limiter.shareIsCooling(firstHash)).toBe(false);
-    expect(limiter.shareIsCooling(secondHash)).toBe(false);
+    const limiter = new PasswordAttemptLimiter(100, PASSWORD_ATTEMPTS_PER_SHARE, 60_000, () => now, 10_000, SHARE_DELAY_MAX_MS);
+    expect(limiter.shareDelayMs(firstHash)).toBe(0);
+    expect(limiter.chargeShareFailure(firstHash)).toBe(true);
+    expect(limiter.shareDelayMs(firstHash)).toBeGreaterThan(0);
+    expect(limiter.shareDelayMs(firstHash)).toBeLessThanOrEqual(SHARE_DELAY_MAX_MS);
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    for (let attempt = 1; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
+      expect(limiter.chargeShareFailure(firstHash)).toBe(true);
+    }
+    expect(limiter.shareDelayMs(firstHash)).toBe(SHARE_DELAY_MAX_MS);
+    expect(limiter.shareHasRoom(firstHash)).toBe(false);
+    expect(limiter.shareDelayMs(secondHash)).toBe(0);
+    now = 120_001;
+    expect(limiter.shareHasRoom(firstHash)).toBe(true);
+    expect(limiter.shareDelayMs(firstHash)).toBe(0);
+  });
+
+  it("counts every verify on the per-IP budget and does not refund it", () => {
+    let now = 0;
+    const limiter = new PasswordAttemptLimiter(100, 100, 60_000, () => now, 10_000, 0, 3, 60_000, 5, 600_000);
+    expect(limiter.reserveVerify("198.51.100.1")).toBe(true);
+    expect(limiter.reserveVerify("198.51.100.1")).toBe(true);
+    expect(limiter.reserveVerify("198.51.100.1")).toBe(true);
+    expect(limiter.reserveVerify("198.51.100.1")).toBe(false);
+    expect(limiter.verifyRetryAfterSeconds("198.51.100.1")).toBeGreaterThanOrEqual(1);
+    expect(limiter.reserveVerify("198.51.100.2")).toBe(true);
+    now = 60_001;
+    expect(limiter.reserveVerify("198.51.100.1")).toBe(true);
+  });
+
+  it("allows only one concurrent verify per IP", () => {
+    const limiter = new PasswordAttemptLimiter();
+    expect(limiter.tryBeginVerify("198.51.100.1")).toBe(true);
+    expect(limiter.tryBeginVerify("198.51.100.1")).toBe(false);
+    expect(limiter.tryBeginVerify("198.51.100.2")).toBe(true);
+    limiter.endVerify("198.51.100.1");
+    expect(limiter.tryBeginVerify("198.51.100.1")).toBe(true);
+  });
+
+  it("uses the default verify minute budget", () => {
+    expect(VERIFY_ATTEMPTS_PER_MINUTE).toBe(20);
   });
 
   it("uses a ten minute window by default", () => {
@@ -201,7 +232,32 @@ describe("password attempt throttling", () => {
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(false);
-    expect(attempts.reserveShare(firstHash)).toBe(true);
+    expect(attempts.chargeShareFailure(firstHash)).toBe(true);
+  });
+});
+
+describe("share password contract", () => {
+  it("normalises to NFC before the length check", () => {
+    const shortAfterNfc = "é".normalize("NFD").repeat(9);
+    expect(shortAfterNfc.length).toBeGreaterThan(10);
+    expect(sharePasswordSchema.safeParse(shortAfterNfc).success).toBe(false);
+    expect(sharePasswordSchema.safeParse(shortAfterNfc).error?.issues[0]?.message).toBe("Use at least 10 characters.");
+    expect(sharePasswordSchema.safeParse("café-gate1".normalize("NFD")).success).toBe(true);
+  });
+
+  it("rejects all-whitespace and too few distinct characters", () => {
+    expect(sharePasswordSchema.safeParse("          ").error?.issues[0]?.message).toBe(
+      "Choose a password with letters or numbers.",
+    );
+    expect(sharePasswordSchema.safeParse("ababababab").error?.issues[0]?.message).toBe(
+      `Use at least ${SHARE_PASSWORD_MIN_UNIQUE} different characters.`,
+    );
+    expect(sharePasswordSchema.safeParse("password123").error?.issues[0]?.message).toBe("Choose a less common password.");
+  });
+
+  it("accepts an omitted password on the owner share body", () => {
+    expect(createShareRequestSchema.safeParse({}).success).toBe(true);
+    expect(createShareRequestSchema.safeParse({ password: "open sesame 42" }).success).toBe(true);
   });
 });
 
@@ -212,6 +268,14 @@ describe("rate window refunds", () => {
     expect(window.take("one", 0)).toBe(false);
     window.refund("one", 0);
     expect(window.take("one", 0)).toBe(true);
+  });
+
+  it("reports retry-after while the sliding window is full", () => {
+    const window = new RateWindow(1, 60_000, 10, 0);
+    expect(window.retryAfterSeconds("one", 0)).toBe(0);
+    expect(window.take("one", 0)).toBe(true);
+    expect(window.retryAfterSeconds("one", 0)).toBeGreaterThanOrEqual(1);
+    expect(window.used("one", 0)).toBe(1);
   });
 });
 

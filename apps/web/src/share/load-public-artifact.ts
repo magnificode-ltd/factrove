@@ -11,12 +11,21 @@ export type PublicShareModel =
 export type UnlockResult =
   | { status: "unlocked"; grant: { token: string; expiresAt: string } | null }
   | { status: "incorrect"; message: string }
-  | { status: "throttled"; message: string }
+  | { status: "throttled"; message: string; retryAfterSeconds?: number }
+  | { status: "busy"; message: string; retryAfterSeconds?: number }
   | Extract<PublicShareModel, { status: "missing" | "unavailable" }>;
 
 export const MISSING_MESSAGE = "This artifact does not exist.";
 export const INCORRECT_MESSAGE = "That password didn't work. Check it and try again.";
 export const THROTTLED_MESSAGE = "Too many attempts. Wait a few minutes, then try again.";
+export const BUSY_RETRYING_MESSAGE = "Busy, retrying";
+
+export function throttledUnlockMessage(retryAfterSeconds?: number): string {
+  if (retryAfterSeconds && retryAfterSeconds > 0) {
+    return `Too many attempts. Try again in ${retryAfterSeconds}s.`;
+  }
+  return THROTTLED_MESSAGE;
+}
 
 export async function loadPublicArtifact(
   client: FactroveClient,
@@ -54,8 +63,11 @@ export async function unlockPublicArtifact(
     if (error instanceof FactroveApiError && (error.status === 401 || error.status === 400)) {
       return { status: "incorrect", message: INCORRECT_MESSAGE };
     }
-    if (error instanceof FactroveApiError && (error.status === 429 || error.status === 503)) {
-      return { status: "throttled", message: THROTTLED_MESSAGE };
+    if (error instanceof FactroveApiError && error.status === 429) {
+      return { status: "throttled", message: throttledUnlockMessage(error.retryAfterSeconds), retryAfterSeconds: error.retryAfterSeconds };
+    }
+    if (error instanceof FactroveApiError && error.status === 503) {
+      return { status: "busy", message: BUSY_RETRYING_MESSAGE, retryAfterSeconds: error.retryAfterSeconds ?? 1 };
     }
     if (error instanceof FactroveApiError && error.status === 404) {
       return { status: "missing", message: MISSING_MESSAGE };

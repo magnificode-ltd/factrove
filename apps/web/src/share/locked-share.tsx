@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import type { UnlockResult } from "@/share/load-public-artifact";
 
-export type UnlockFeedback = Extract<UnlockResult, { status: "incorrect" | "throttled" }> | null;
+export type UnlockFeedback = Extract<UnlockResult, { status: "incorrect" | "throttled" | "busy" }> | null;
 
 export function LockedShare({
   expired,
@@ -22,6 +22,7 @@ export function LockedShare({
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<UnlockFeedback | { status: "empty"; message: string }>(null);
   const [shaking, setShaking] = useState(false);
+  const retries = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const errorId = `${inputId}-error`;
@@ -47,13 +48,29 @@ export function LockedShare({
       inputRef.current?.focus();
       return;
     }
+    retries.current = 0;
     setBusy(true);
     setFeedback(null);
-    const result = await onUnlock(password);
+    await finishUnlock(password);
+  }
+
+  async function finishUnlock(nextPassword: string) {
+    const result = await onUnlock(nextPassword);
+    if (result?.status === "busy" && retries.current < 5) {
+      retries.current += 1;
+      setBusy(true);
+      setFeedback(result);
+      window.setTimeout(() => {
+        void finishUnlock(nextPassword);
+      }, (result.retryAfterSeconds ?? 1) * 1000);
+      return;
+    }
     setBusy(false);
     if (result) {
-      setFeedback(result);
-      shake();
+      setFeedback(result.status === "busy" ? { ...result, message: "Busy, try again shortly." } : result);
+      if (result.status !== "busy") {
+        shake();
+      }
       inputRef.current?.focus();
       inputRef.current?.select();
     }

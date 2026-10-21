@@ -37,6 +37,7 @@ import {
   PASSWORD_ATTEMPT_WINDOW_MS,
   PASSWORD_ATTEMPTS_PER_CLIENT,
   PASSWORD_ATTEMPTS_PER_SHARE,
+  VERIFY_ATTEMPTS_PER_MINUTE,
 } from "../src/sharing/password-attempt-limit.js";
 import { browserOrigins } from "../src/sharing/public-origin.js";
 import { SHARE_TICKET_MAX_USES } from "../src/sharing/share-grant.js";
@@ -1813,6 +1814,7 @@ describe("HTTP API", () => {
       }
       const blocked = await unlock(noisy, artifact.id, token, password);
       expect(blocked.status).toBe(429);
+      expectRetryAfter(blocked);
       expect(await errorOf(blocked)).toEqual({ code: "RATE_LIMITED", message: "Too many password attempts. Try again later." });
       const blockedElsewhere = await unlock(noisy, artifact.id, "y".repeat(43), password);
       expect(blockedElsewhere.status).toBe(429);
@@ -1837,11 +1839,17 @@ describe("HTTP API", () => {
       const fresh = visitorIp();
       const shareStillClosed = await unlock(fresh, target.id, targetShare.token, password);
       expect(shareStillClosed.status).toBe(429);
+      expectRetryAfter(shareStillClosed);
       expect((await errorOf(shareStillClosed)).code).toBe("RATE_LIMITED");
       const shareWrong = await unlock(visitorIp(), target.id, targetShare.token, "still the wrong guess");
       expect(shareWrong.status).toBe(429);
+      expectRetryAfter(shareWrong);
       expect((await errorOf(shareWrong)).code).toBe("RATE_LIMITED");
       expect((await unlock(fresh, bystander.id, bystanderShare.token, password)).status).toBe(200);
+
+      const lockedState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${target.id}/share`)).json());
+      expect(lockedState.share.passwordProtected).toBe(true);
+      expect(lockedState.share.guessesLockedOut).toBe(true);
     });
 
     it("does not charge a bucket for a non-JSON unlock body", async () => {
@@ -1870,23 +1878,28 @@ describe("HTTP API", () => {
       expect((await unlock(ip, artifact.id, token, password)).status).toBe(200);
     });
 
-    it("refuses the 31st attempt even with the correct password and resets after a re-share", async () => {
+    it("lets thirty-one correct visitors through and locks only after failed guesses", async () => {
       const artifact = await upload(baseUrl, "meeting.html", new TextEncoder().encode("<p>meeting</p>"));
       const password = "meeting password";
       const first = await shareWithPassword(artifact.id, password);
       for (let visitor = 0; visitor < PASSWORD_ATTEMPTS_PER_SHARE; visitor += 1) {
         expect((await unlock(visitorIp(), artifact.id, first.token, password)).status).toBe(200);
       }
-      const locked = await unlock(visitorIp(), artifact.id, first.token, password);
-      expect(locked.status).toBe(429);
-      expect((await errorOf(locked)).code).toBe("RATE_LIMITED");
+      expect((await unlock(visitorIp(), artifact.id, first.token, password)).status).toBe(200);
+      const openState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+      expect(openState.share.guessesLockedOut).toBeUndefined();
 
       const exhausted = await upload(baseUrl, "reshare.html", new TextEncoder().encode("<p>reshare</p>"));
       const oldShare = await shareWithPassword(exhausted.id, password);
       for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
         expect((await unlock(visitorIp(), exhausted.id, oldShare.token, `old wrong ${attempt}`)).status).toBe(401);
       }
-      expect((await unlock(visitorIp(), exhausted.id, oldShare.token, password)).status).toBe(429);
+      const locked = await unlock(visitorIp(), exhausted.id, oldShare.token, password);
+      expect(locked.status).toBe(429);
+      expectRetryAfter(locked);
+      expect((await errorOf(locked)).code).toBe("RATE_LIMITED");
+      const lockedState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${exhausted.id}/share`)).json());
+      expect(lockedState.share.guessesLockedOut).toBe(true);
 
       const revoked = await ownerFetch(`${baseUrl}/api/v1/artifacts/${exhausted.id}/share`, { method: "DELETE" });
       expect(revoked.status).toBe(200);
@@ -1894,6 +1907,39 @@ describe("HTTP API", () => {
       expect(next.token).not.toBe(oldShare.token);
       expect((await unlock(visitorIp(), exhausted.id, next.token, "first wrong on the new link")).status).toBe(401);
       expect((await unlock(visitorIp(), exhausted.id, next.token, "brand new password")).status).toBe(200);
+      const resetState = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${exhausted.id}/share`)).json());
+      expect(resetState.share.guessesLockedOut).toBeUndefined();
+    });
+
+    it("does not let one IP's correct unlocks starve another IP", async () => {
+      const password = "starve password";
+      const shares: Array<{ id: string; token: string }> = [];
+      for (let index = 0; index < 6; index += 1) {
+        const artifact = await upload(baseUrl, `starve-${index}.html`, new TextEncoder().encode(`<p>starve ${index}</p>`));
+        const shared = await shareWithPassword(artifact.id, password);
+        shares.push({ id: artifact.id, token: shared.token });
+      }
+      const attacker = visitorIp();
+      const victim = visitorIp();
+      for (let index = 0; index < 5; index += 1) {
+        const share = shares[index];
+        if (!share) {
+          throw new Error("missing starve share");
+        }
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          expect((await unlock(attacker, share.id, share.token, password)).status).toBe(200);
+        }
+      }
+      expect(5 * 4).toBe(VERIFY_ATTEMPTS_PER_MINUTE);
+      const last = shares[5];
+      if (!last) {
+        throw new Error("missing victim share");
+      }
+      const blocked = await unlock(attacker, last.id, last.token, password);
+      expect(blocked.status).toBe(429);
+      expectRetryAfter(blocked);
+      expect((await errorOf(blocked)).code).toBe("RATE_LIMITED");
+      expect((await unlock(victim, last.id, last.token, password)).status).toBe(200);
     });
 
     it("caps 65 parallel unlocks from one address before Argon2", async () => {
@@ -1909,6 +1955,11 @@ describe("HTTP API", () => {
       expect(statuses.filter((status) => status === 401).length).toBeLessThanOrEqual(PASSWORD_ATTEMPTS_PER_CLIENT);
       expect(statuses.filter((status) => status === 429 || status === 503).length).toBeGreaterThanOrEqual(55);
       expect(statuses).toHaveLength(65);
+      for (const response of responses) {
+        if (response.status === 429 || response.status === 503) {
+          expectRetryAfter(response);
+        }
+      }
       await Promise.all(responses.map((response) => response.arrayBuffer()));
     });
 
@@ -1940,6 +1991,25 @@ describe("HTTP API", () => {
       const short = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "short" }) });
       expect(short.status).toBe(400);
       expect(await errorOf(short)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Use at least 10 characters." });
+      const nfcShort = await ownerFetch(shareRoute, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ password: "é".normalize("NFD").repeat(9) }),
+      });
+      expect(nfcShort.status).toBe(400);
+      expect(await errorOf(nfcShort)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Use at least 10 characters." });
+      const whitespace = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "          " }) });
+      expect(whitespace.status).toBe(400);
+      expect(await errorOf(whitespace)).toEqual({
+        code: "INVALID_REQUEST",
+        message: "The password is invalid. Choose a password with letters or numbers.",
+      });
+      const repeated = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "ababababab" }) });
+      expect(repeated.status).toBe(400);
+      expect(await errorOf(repeated)).toEqual({
+        code: "INVALID_REQUEST",
+        message: "The password is invalid. Use at least 4 different characters.",
+      });
       const common = await ownerFetch(shareRoute, { method: "POST", headers: json, body: JSON.stringify({ password: "password123" }) });
       expect(common.status).toBe(400);
       expect(await errorOf(common)).toEqual({ code: "INVALID_REQUEST", message: "The password is invalid. Choose a less common password." });
@@ -2105,6 +2175,12 @@ async function upload(
   const response = await postFile(url, filename, bytes, fields, apiKey);
   expect(response.status).toBe(201);
   return artifactEnvelopeSchema.parse(await response.json()).artifact;
+}
+
+function expectRetryAfter(response: Response): number {
+  const value = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
+  expect(value).toBeGreaterThanOrEqual(1);
+  return value;
 }
 
 async function errorOf(response: Response): Promise<{ code: string; message: string }> {
