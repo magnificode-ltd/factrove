@@ -37,7 +37,8 @@ function artifact(id: string, accessType: ArtifactDto["accessType"], creatorUser
     uploadedAt: "2026-10-11T10:00:00.000Z",
     viewerUrl: `http://localhost:3000/artifacts/${id}`,
     contentUrl: `http://localhost:3001/api/v1/artifacts/${id}/content`,
-    shared: false
+    shared: false,
+    passwordProtected: false
   };
 }
 
@@ -168,7 +169,7 @@ describe("viewer", () => {
     const item = artifact(mineId, "private");
     const fetchImpl = stubFetch(async (url) => {
       if (url.endsWith("/context")) return jsonResponse(context);
-      if (url.endsWith("/share")) return jsonResponse({ share: { shared: false, shareUrl: null } });
+      if (url.endsWith("/share")) return jsonResponse({ share: { shared: false, shareUrl: null, passwordProtected: false } });
       expect(url).toBe(`http://localhost:3001/api/v1/artifacts/${mineId}`);
       return jsonResponse({ artifact: item });
     });
