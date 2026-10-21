@@ -30,7 +30,8 @@
             "group": "Guides",
             "pages": [
               "guides/sharing-links",
-              "guides/self-hosting"
+              "guides/self-hosting",
+              "guides/cli"
             ]
           }
         ]
@@ -42,10 +43,11 @@
             "group": "Commands",
             "pages": [
               "cli-reference/overview",
-              "cli-reference/configure",
+              "cli-reference/help",
               "cli-reference/upload",
               "cli-reference/get",
-              "cli-reference/share"
+              "cli-reference/share",
+              "cli-reference/configure"
             ]
           }
         ]

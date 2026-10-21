@@ -162,7 +162,7 @@ Edit `apps/api/.env` before uploading:
 
 `NEXT_PUBLIC_API_URL` in `apps/api/.env` is the origin the browser uses for the API. It defaults to `http://localhost:3001`. A production bundle keeps the origin from the build.
 
-CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `--api-url` overrides the API origin for one command. Then `FACTROVE_API_URL` from the process environment. Then the selected profile's `api_url` in `~/.factrove/config`. `pnpm factrove` uses a URL from `apps/cli/.env` only when both of those are unset. The built-in default is `http://localhost:3001`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials` and ignores `FACTROVE_API_KEY`. `factrove configure` writes those files mode 0600. `apps/cli/.env` does not supply a key. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted, and `pnpm factrove` can fill that name from `apps/cli/.env` when the variable is unset. The API key is not printed.
+CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `--endpoint-url` and `--api-url` set the API origin for one command. They must agree when both are present. Then `FACTROVE_API_URL` from the process environment, then `FACTROVE_ENDPOINT_URL` when that is unset. Then the selected profile's `api_url` in `~/.factrove/config`, or `endpoint_url` in that profile when `api_url` is absent. `pnpm factrove` uses a URL from `apps/cli/.env` only when the environment and the profile have no URL. The built-in default is `http://localhost:3001`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials` and ignores `FACTROVE_API_KEY`. `factrove configure` writes those files mode 0600 and stores the origin as `api_url`. `apps/cli/.env` does not supply a key or `FACTROVE_ENDPOINT_URL`. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted, and `pnpm factrove` can fill that name from `apps/cli/.env` when the variable is unset. The API key is not printed. Commands, config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
 
 The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to the narrowest parent of both, such as `factrove.example.com` for `app.factrove.example.com` and `api.factrove.example.com`. The browser sends that cookie to every subdomain of the value. Startup rejects an IP address, a public suffix, and a domain that does not cover both origins. Set `TRUSTED_PROXIES` to the IP addresses or CIDR ranges of reverse proxies that may send `X-Forwarded-For`. Leave it unset when the API sees the client socket directly. Sign-in limits follow that client address, and an incoming `X-Forwarded-For` from an untrusted peer does not choose the bucket.
 
@@ -200,13 +200,14 @@ pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown
 pnpm factrove get <artifact-id> --format markdown --json
 pnpm factrove share <artifact-id>
-pnpm factrove share <artifact-id> --revoke
 pnpm factrove share <artifact-id> --password
 printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
 pnpm factrove share <artifact-id> --remove-password
+pnpm factrove share <artifact-id> --revoke
+pnpm factrove upload ./fixtures/hello.html --artifactId <artifact-id>
 ```
 
-Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
+Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain `upload` success prints only the artifact id. `--json` prints the `{ artifact }` envelope on one line. `upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. Failures go to stderr and the process exits 1. Success exits 0. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
 `pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
 
@@ -214,7 +215,7 @@ Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and
 
 A link can also need a password. `--password` prompts twice without echoing and needs a terminal. `--password-stdin` reads it from a pipe and removes one trailing newline. Either one sets or replaces the password and prints the same link. A protected link also says to revoke, then share again, if visitors are locked out. `--remove-password` keeps the link and removes the password, or says so when the artifact is not shared or the link has no password. A password typed as an argument, such as `--password=secret`, is refused so it stays out of shell history. In the web app, the Public link panel has Add, Change, and Remove password, and tells the owner to share again after a lockout. The viewer panel stays closed until the owner opens Sharing. Revoking a link also removes its password.
 
-When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get <id>` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
+Creating an upload assigns a new id. Replacing content keeps that id, the current access, and any existing share link. `--access` with `--artifactId` is an error. A replace can rarely return 500 after the new object is already committed. GET the artifact before retrying. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
 
 `pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops the dev Compose project and deletes its PostgreSQL and Garage volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. That removes local metadata and local object bytes for the dev project. Objects in a real AWS bucket are outside these volumes and stay there. `pnpm e2e` deletes volumes only for its own Compose project, `factrove-e2e`.
 
@@ -241,7 +242,7 @@ pnpm e2e
 - **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API. Stop the other process and run `pnpm e2e` again. The dev ports 5432, 3900, 3000, and 3001 stay with `pnpm infra:up` and `pnpm dev`.
 - **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set a local placeholder in `apps/api/.env`, then run `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
-- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--api-url`, then `FACTROVE_API_URL`, then the selected profile's `api_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
+- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--endpoint-url` or `--api-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
 - **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`. A production bundle keeps the origin from the build, so run `pnpm build` again after changing it.
 
 ## Development
@@ -255,6 +256,10 @@ The build follows workspace dependency order. Shared packages expose compiled mo
 The persistence convention is a committed Prisma SQL migration history under `apps/api/prisma/migrations/`. Both schema changes (DDL) and data transformations (DML) belong in that history. The selected SQL migration workflow applies releases with `prisma migrate deploy`.
 
 Applied migrations remain immutable; subsequent changes receive new migrations. Changes that require data conversion can use expansion, a DML backfill, an application cutover, and contraction across compatible releases. Local demo fixtures are populated by an explicit idempotent seed.
+
+### Upgrade cutover for object keys
+
+Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration. Rolling back after the cutover means stopping the old app processes, restoring the schema, and copying each current object back to `{artifactId}.html` so the row points at that key. New objects live at `{artifactId}/{contentId}.html`.
 
 ## Documentation
 

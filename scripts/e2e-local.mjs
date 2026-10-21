@@ -115,17 +115,14 @@ async function main() {
   await expectItems("org", []);
 
   const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--profile", "e2e"], cliChildEnv(configDir));
-  const plainViewer = plain.stdout.trim();
-  if (!viewerUrl(plainViewer)) {
-    throw new Error(`Plain upload did not print a viewer URL.\n${plain.stdout}`);
-  }
+  const plainId = artifactIdFromStdout(plain.stdout);
   if (plain.stdout.includes("Nest") || plain.stdout.includes("successfully started")) {
     throw new Error("Plain upload stdout included framework logs.");
   }
   if (plain.stdout.includes(owner.secret)) {
     throw new Error("Plain upload printed the API key.");
   }
-  const plainId = plainViewer.slice(plainViewer.lastIndexOf("/") + 1);
+  const plainViewer = `${webOrigin}/artifacts/${plainId}`;
 
   const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   const jsonArtifact = JSON.parse(jsonUpload.stdout).artifact;
@@ -147,11 +144,8 @@ async function main() {
     ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared", "--profile", "e2e"],
     cliChildEnv(configDir),
   );
-  const sharedViewer = shared.stdout.trim();
-  const sharedId = sharedViewer.slice(sharedViewer.lastIndexOf("/") + 1);
-  if (!viewerUrl(sharedViewer)) {
-    throw new Error(`org_shared upload did not print a viewer URL.\n${shared.stdout}`);
-  }
+  const sharedId = artifactIdFromStdout(shared.stdout);
+  const sharedViewer = `${webOrigin}/artifacts/${sharedId}`;
 
   const mine = await expectItems("mine", [plainId, jsonArtifact.id, sharedId]);
   const org = await expectItems("org", [sharedId]);
@@ -283,8 +277,12 @@ function integrationChildEnv() {
   return child;
 }
 
-function viewerUrl(value) {
-  return new RegExp(`^http://127\\.0\\.0\\.1:${e2eWebPort}/artifacts/[0-9a-f-]{36}$`).test(value);
+function artifactIdFromStdout(stdout) {
+  const id = stdout.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || stdout !== `${id}\n`) {
+    throw new Error(`Plain upload did not print only the artifact id.\n${stdout}`);
+  }
+  return id;
 }
 
 async function requireDocker() {

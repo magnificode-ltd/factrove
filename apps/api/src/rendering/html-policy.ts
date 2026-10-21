@@ -14,6 +14,19 @@ export function artifactObjectKey(id: string): string {
   return `${id}.html`;
 }
 
+// One immutable object per upload. The artifact id is the prefix so a row cannot point at another artifact.
+export function immutableContentKey(artifactId: string, contentId: string): string {
+  return `${artifactId}/${contentId}.html`;
+}
+
+// A blank key is the legacy object from before object_key was stored.
+export function storedObjectKey(artifactId: string, objectKey: string | null | undefined): string {
+  if (typeof objectKey === "string" && objectKey.trim().length > 0) {
+    return objectKey;
+  }
+  return artifactObjectKey(artifactId);
+}
+
 export function contentSecurityPolicy(frameAncestors: readonly string[]): string {
   return [
     // allow-scripts only: no same-origin access, forms, or top-level navigation.

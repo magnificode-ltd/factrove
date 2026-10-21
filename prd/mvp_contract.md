@@ -71,6 +71,7 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/v1/health | None | 200 `{ status: "ok" }` once initialized |
 | GET /api/v1/context | Session cookie or `Authorization: Bearer` | 200 `{ user: { id, name }, organization: { id, name } \| null }` |
 | POST /api/v1/artifacts | multipart/form-data: one `file`, optional `accessType` | 201 `{ artifact: ArtifactDto }` |
+| PUT /api/v1/artifacts/{id}/content | Owner session or API key. multipart/form-data: one `file`. `accessType` is rejected. | 200 `{ artifact: ArtifactDto }` with the same id |
 | GET /api/v1/artifacts?view=mine\|org | Default mine | 200 `{ items: ArtifactDto[] }` |
 | GET /api/v1/artifacts/{id} | Session cookie or `Authorization: Bearer` | 200 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts/{id}/content | Optional `format=html\|markdown`. Omitted means `html`. Optional `access` grant. | 200 HTML bytes, or Markdown converted from those bytes |
@@ -120,10 +121,22 @@ Input larger than the 10 MiB stored-HTML limit is `413 CONTENT_TOO_LARGE` with m
 - The backend assigns text/html; browser-supplied multipart MIME is not authoritative.
 - Maximum file size: 10 MiB (10,485,760 bytes). Enforce during request parsing, not after accepting an unbounded body. Bounded buffering is acceptable for this MVP.
 - accessType defaults to private; reject any other enum value. Reject org_shared when the caller has no current organization. The message is `Organization sharing requires membership in an organization.`
-- Each request creates a new artifact. No idempotency or automatic upload retries; rerunning a successful request creates another artifact.
-- Write the object, then insert the artifact row with `uploaded_at` set. Return the DTO only after both succeed.
-- The upload is atomic. If the object write fails, do not insert an artifact row. A failed upload leaves no artifact in the database.
+- `POST /api/v1/artifacts` creates a new artifact. No idempotency or automatic upload retries; rerunning a successful create creates another artifact.
+- Write a new object at `{artifactId}/{contentId}.html`, then insert the artifact row with that `object_key`, `size_bytes`, `uploaded_at`, and `content_revision` 0. Return the DTO only after both succeed.
+- The upload is atomic. If the object write fails, or the acknowledgement is lost, delete that object when it can be removed and do not insert an artifact row. A failed upload leaves no artifact in the database.
 - This API does not watch/import files written to S3 outside Factrove.
+
+### Replace content
+
+`PUT /api/v1/artifacts/{id}/content` replaces the stored HTML of an existing artifact and returns the same id. The caller must be the owner, with the same session or API key as the other artifact writes. A missing id and a caller who is not the owner, including an organization member who can read an `org_shared` artifact, return `404 ARTIFACT_NOT_FOUND`. A request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded. A content grant and a share unlock grant do not authorize this route. The file uses the same extension, size, and UTF-8 checks as create. `accessType` and identity fields are rejected, so replace does not change who can see the artifact. The share token stays in place. The existing public link, including a password-protected link, serves the new bytes.
+
+Each create and replace writes a new immutable object at `{artifactId}/{contentId}.html`. The artifact row stores that key in `object_key` with `size_bytes`, `uploaded_at`, and `content_revision`. A replace reads the row, writes the new object, then updates the row in one statement that matches `id` and the `content_revision` it read. The statement sets `object_key`, `size_bytes`, and `uploaded_at`, and increments `content_revision`. That compare-and-set is the concurrency rule. The handler returns 200 only when the row points at the object this request wrote. One replace of a given revision wins that commit. A replace that still holds the previous revision returns `409 CONTENT_CONFLICT` with message `Another replace finished first. Upload again to replace the current content.` and its new object is deleted. A replace that starts after a commit reads the new revision and can commit on its own. If another replace commits before this request observes its own object, this request also returns 409 and deletes that object, because it is no longer current. The stored key and `size_bytes` stay aligned: a content response takes both the key and `Content-Length` from the same row snapshot, so the body length is the length of that object.
+
+After a successful commit, the previous object is deleted. That delete is best-effort. Keeping the previous key instead of deleting it is the seam for a later version history. This API does not return or list older bytes.
+
+A failed object write leaves the row and its current object unchanged. When a write may have landed and then lost its acknowledgement, the handler deletes that new object when it can and still leaves the row unchanged. If the row update's outcome is unknown, the handler leaves the new object in place and returns the error. A following read that still shows the previous key does not prove the transaction rolled back; that commit can still land. The new object is deleted only when the update is known to have finished as a rollback or a compare-and-set loss. If a following read shows that this request's object is current, the replace is treated as committed and the previous object is deleted. A missing row after a finished update deletes the new object and returns 404. An unknown outcome or a failed delete can leave an unreferenced object. Those objects are not swept.
+
+Reads use `object_key` and `size_bytes` from that same row. A blank key means the legacy object `{artifactId}.html`. Rows created before this column existed are migrated to that legacy key. The public filename in the DTO stays `{artifactId}.html`. Responses omit the stored object key.
 
 ### Errors
 
@@ -142,8 +155,9 @@ Return the common JSON envelope without stack traces or secrets:
 | 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact, an artifact the caller cannot read, or a public link that is not active |
+| 409 | CONTENT_CONFLICT | Another replace committed the revision this request read |
 | 429 | RATE_LIMITED | Too many public views from one client address, or too many password attempts |
-| 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
+| 503 | STORAGE_UNAVAILABLE | S3 failure. A failed create stores no artifact row. A failed or unacknowledged replace leaves the current object and the row unchanged. |
 | 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 503 | UNLOCK_UNAVAILABLE | Password verification is busy (gate saturated or share check slots full) |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
@@ -158,6 +172,7 @@ A network failure has no API envelope; clients must report it separately.
 createFactroveClient({ baseUrl, fetch?, apiKey?, cookie? })
 client.getContext()
 client.uploadArtifact({ file: Blob, filename, accessType? })
+client.replaceArtifactContent(id, { file: Blob, filename })
 client.listArtifacts({ view: "mine" | "org" })
 client.getArtifact(id)
 client.getArtifactContent(id, { format?: "html" | "markdown" })
@@ -181,7 +196,8 @@ File placement follows the [canonical README backend directory structure](../REA
 
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
-- `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, uploadedAt? })`
+- `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, objectKey?, uploadedAt? })` stores `objectKey`, or `{id}.html` when the caller omits it. New uploads pass `{id}/{contentId}.html`. `content_revision` starts at 0.
+- `commitContent({ id, expectedRevision, objectKey, sizeBytes, uploadedAt })` sets those fields and increments `content_revision` only when the row still has `expectedRevision`. It returns true when one row changed. Access, share, and `createdAt` stay unchanged.
 - `update(id, { organizationId?, accessType?, mimeType?, sizeBytes?, uploadedAt? })`
 - `delete(id)`
 - `findById(id)`
@@ -211,7 +227,7 @@ interface BlobStore {
 }
 ```
 
-No S3 SDK types escape the implementation. Flat object keys are generated by the API, not supplied by clients. The implementation reads `S3_BUCKET`, `S3_REGION`, and the standard AWS credential chain. Optional `S3_ENDPOINT` selects an S3-compatible origin. When it is set, `S3_FORCE_PATH_STYLE` defaults to `true` and may be set to `false`. Plain `http://` is accepted only for `localhost`, `127.0.0.1`, and `::1`; any other host requires `https://`. When `S3_ENDPOINT` is unset, the client calls AWS S3 in `S3_REGION` with virtual-hosted addressing, and `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_S3`, and a profile `endpoint_url` are ignored. Static `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are optional and must be set together; otherwise the SDK default chain, including `AWS_PROFILE`, is used. The API does not create the bucket. `pnpm infra:up` starts Garage, which creates the local `factrove` bucket.
+No S3 SDK types escape the implementation. Object keys are generated by the API. Clients do not send them. The current HTML object is `{artifactId}/{contentId}.html`. Rows from before `object_key` existed use `{artifactId}.html`. The public filename stays `{artifactId}.html`. The implementation reads `S3_BUCKET`, `S3_REGION`, and the standard AWS credential chain. Optional `S3_ENDPOINT` selects an S3-compatible origin. When it is set, `S3_FORCE_PATH_STYLE` defaults to `true` and may be set to `false`. Plain `http://` is accepted only for `localhost`, `127.0.0.1`, and `::1`; any other host requires `https://`. When `S3_ENDPOINT` is unset, the client calls AWS S3 in `S3_REGION` with virtual-hosted addressing, and `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_S3`, and a profile `endpoint_url` are ignored. Static `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are optional and must be set together; otherwise the SDK default chain, including `AWS_PROFILE`, is used. The API does not create the bucket. `pnpm infra:up` starts Garage, which creates the local `factrove` bucket.
 
 The caller needs `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN. Without `s3:ListBucket`, S3 returns `AccessDenied` for a missing key.
 
@@ -241,34 +257,36 @@ pnpm factrove configure
 pnpm factrove configure --profile dev --api-url http://localhost:3001
 pnpm factrove upload ./report.html
 pnpm factrove upload ./report.html --access org_shared --json
+pnpm factrove upload ./report.html --artifactId <artifact-id>
 pnpm factrove upload ./report.html --api-url http://localhost:3001 --profile dev --json
 pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown --json
 pnpm factrove get <artifact-id> --api-url http://localhost:3001
 pnpm factrove share <artifact-id>
 pnpm factrove share <artifact-id> --json
-pnpm factrove share <artifact-id> --revoke
 pnpm factrove share <artifact-id> --password
 printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
 pnpm factrove share <artifact-id> --remove-password
+pnpm factrove share <artifact-id> --revoke
 ```
 
-- When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
-- API origin precedence: --api-url, FACTROVE_API_URL, the selected profile's `api_url`, then a URL from `apps/cli/.env` when the command is `pnpm factrove`, then http://localhost:3001. `upload` and `get` share it. `scripts/factrove.mjs` reads that file. `node apps/cli/dist/main.js` does not. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. A profile `api_url` wins over the file.
-- API key precedence matches the AWS CLI. An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. Otherwise the key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`. `pnpm factrove` can fill `FACTROVE_PROFILE` from `apps/cli/.env` when the variable is unset. The file does not supply an API key.
+- The commands are `upload`, `get`, `share`, and `configure`. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](../docs/guides/cli.mdx). `get` writes artifact bytes to stdout.
+- API origin precedence: `--endpoint-url` or `--api-url` (the same value; different values are an error), then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url`, then that profile's `endpoint_url`, then a URL from `apps/cli/.env` when the command is `pnpm factrove`, then http://localhost:3001. `scripts/factrove.mjs` reads that file. `node apps/cli/dist/main.js` does not. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set `FACTROVE_ENDPOINT_URL`. A profile URL wins over the file.
+- API key precedence matches the AWS CLI as implemented for Factrove profiles. An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. Otherwise the key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`. `pnpm factrove` can fill `FACTROVE_PROFILE` from `apps/cli/.env` when the variable is unset. The file does not supply an API key.
 - `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. When the path is a symlink, the rename updates the target and leaves the symlink in place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
-- Access defaults to private. `--access` is only valid for `upload`.
-- `--format html|markdown` is only valid for `get` and defaults to `html`.
-- `--revoke`, `--password`, `--password-stdin`, and `--remove-password` are only valid for `share`, and only one of them can be used at a time. `--password` takes no value: it prompts twice on the terminal without echoing, and fails when stdin is not a terminal. `--password-stdin` reads stdin and removes one trailing newline. A password given as an argument is rejected so it stays out of shell history. Passwords are 10 to 128 NFC characters, at least four distinct characters, not all whitespace, and must not be a common password from the bundled top-10k list.
-- Plain upload success prints only viewerUrl plus newline to stdout. The viewer URL uses `PUBLIC_BASE_URL`.
+- Access defaults to private. `--access` is only valid for `upload` when creating a new artifact. `--artifactId` replaces that artifact's content and is only valid for `upload`. Passing `--access` with `--artifactId` is an error, and the API rejects `accessType` on replace.
+- `--format html|markdown` is valid for `get`. It defaults to `html`.
+- `--revoke`, `--password`, `--password-stdin`, and `--remove-password` are only valid for `share`, and only one of them can be used at a time. `--password` takes no value: it prompts twice on the terminal without echoing, and fails when stdin is not a terminal. The confirmation is NFC-normalised before it is compared. `--password-stdin` reads stdin and removes one trailing newline. A password given as an argument is rejected so it stays out of shell history. Passwords are 10 to 128 NFC characters, at least four distinct characters, not all whitespace, and must not be a common password from the bundled top-10k list. These flags stay on `share`. A share link lasts until revoke and can take a password. The CLI does not add a `presign` command.
+- Plain upload success prints only the artifact id plus a newline. `--json` prints the `{ artifact }` envelope, which includes `viewerUrl` from `PUBLIC_BASE_URL`. `upload <file> --artifactId <id>` prints that same id. `--quiet` does not hide the id.
 - JSON upload success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
 - Plain get success prints the content bytes and does not add a newline of its own.
 - JSON get success prints one line: `{ format, mediaType, content }`, with `mediaType` of `text/html` or `text/markdown`.
-- Plain share success prints the public URL, whether the link is password protected, and a recovery note when it is. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. `--remove-password` prints `Removed the password for {id}.` JSON share success prints `{ share: { shared, shareUrl, passwordProtected } }` on one line. `shareUrl` is null after revoke. No command prints a password.
-- Errors go to stderr and exit nonzero. In --json mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR.
+- Plain share success prints the public URL, whether the link is password protected, and a recovery note when it is. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. `--remove-password` prints `Removed the password for {id}.` JSON share success prints `{ share: { shared, shareUrl, passwordProtected } }` on one line. `shareUrl` is null after revoke. No command prints a password. `--quiet` does not hide share output.
+- `--output json|text` selects the format. `--json` is `--output json`. JSON is one line. `--output json` prints the same payload as `--json`. `--json` together with `--output text` is an error in either order.
+- Errors go to stderr and the process exits 1. Success exits 0. In --json or `--output json` mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR. API errors, including a `Retry-After` value on a throttled unlock, pass through the client.
 - No progress/framework startup logs on stdout. Close the Nest application context so the process exits.
-- `configure` is the credentials command. There is no login or list command in the CLI, no background process, and no separate CLI server.
-- Do not add automatic retries for uploads. `get` calls the content endpoint once.
+- `configure` is the credentials command. There is no login command, no background process, and no separate CLI server. `--profile` is accepted on every command and is listed on `configure --help`. `--quiet` is accepted and is omitted from help. `share` keeps its password flags.
+- Do not add automatic retries for uploads. `get` calls the content endpoint once per artifact. `upload --artifactId` calls the replace endpoint once.
 
 ## Configuration and planned root commands
 
@@ -282,7 +300,7 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 | pnpm db:claim-local-artifacts -- --email … | Attach existing `local-user` artifacts to a signed-up account |
 | pnpm dev | Run FE and BE together |
 | pnpm factrove configure | Save an API key and API URL for a profile |
-| pnpm factrove upload ... | Run Nest CLI upload |
+| pnpm factrove upload ... | Create an artifact, or replace its content with --artifactId |
 | pnpm factrove get ... | Print artifact content as HTML or Markdown |
 | pnpm factrove share ... | Create, print, or revoke a public link |
 | pnpm build / pnpm typecheck / pnpm test | Workspace verification |
@@ -291,6 +309,6 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 
 Application env (`apps/api/.env`, copied from `apps/api/.env.example`): DATABASE_URL, HOST (127.0.0.1), PORT (3001), WEB_ORIGIN, API_PUBLIC_ORIGIN, PUBLIC_BASE_URL, NEXT_PUBLIC_API_URL, BETTER_AUTH_SECRET, optional AUTH_COOKIE_DOMAIN, optional SHARE_TOKEN_KEY, optional TRUSTED_PROXIES, S3_BUCKET, S3_REGION, optional S3_ENDPOINT and S3_FORCE_PATH_STYLE, and the standard AWS credential chain (`AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY` and optional `AWS_SESSION_TOKEN`). `PUBLIC_BASE_URL` defaults to `WEB_ORIGIN` when unset. It is an absolute http(s) origin and is the only source for viewer URLs and public share links. `SHARE_TOKEN_KEY` encrypts share tokens. When it is unset, the key is derived from `BETTER_AUTH_SECRET`. `TRUSTED_PROXIES` is required behind a proxy so the per-process public view limit sees the visitor. The API loads that file and keeps variables already set in the process. `pnpm dev` passes `NEXT_PUBLIC_API_URL` from the same file to the web app when the variable is unset. `pnpm build` and `next build` do the same, and Next.js fixes that origin in the client bundle. `next start` cannot change it. Only `NEXT_PUBLIC_API_URL` is copied. The default is http://localhost:3001. `S3_INTEGRATION=1` runs the storage integration tests against local Garage. Those tests set the Garage endpoint and credentials, remove `AWS_*` and `S3_*` overrides, and require a loopback HTTP endpoint before opening a client. With `S3_ENDPOINT` unset, the API does not use a custom S3 endpoint. `MARKDOWN_CONVERSION_CONCURRENCY` (default 2) and `MARKDOWN_CONVERSION_QUEUE` (default 2) bound on-request Markdown conversion.
 
-CLI env (`apps/cli/.env`, copied from `apps/cli/.env.example`): `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `pnpm factrove` reads that file. The built CLI does not. A URL from the file is used only when `FACTROVE_API_URL` is unset and the selected profile has no `api_url`. The file does not supply an API key or config-path overrides. The CLI reads `FACTROVE_API_KEY`, `FACTROVE_PROFILE`, and the config-path overrides from the process environment, and reads `api_url` and `factrove_api_key` from `~/.factrove/config` and `~/.factrove/credentials`. Precedence is flags, then process environment variables, then profile files, then the dev file URL. Client packages must never receive database, storage, or auth-secret credentials. The dev file is limited to `FACTROVE_API_URL` and `FACTROVE_PROFILE`.
+CLI env (`apps/cli/.env`, copied from `apps/cli/.env.example`): `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `pnpm factrove` reads that file. The built CLI does not. A URL from the file is used only when `FACTROVE_API_URL` and `FACTROVE_ENDPOINT_URL` are unset and the selected profile has no `api_url` or `endpoint_url`. The file does not supply an API key, `FACTROVE_ENDPOINT_URL`, or config-path overrides. The CLI reads `FACTROVE_API_KEY`, `FACTROVE_API_URL`, `FACTROVE_ENDPOINT_URL`, `FACTROVE_PROFILE`, and the config-path overrides from the process environment, and reads `api_url`, `endpoint_url`, and `factrove_api_key` from `~/.factrove/config` and `~/.factrove/credentials`. Precedence is flags, then process environment variables, then profile files, then the dev file URL. Client packages must never receive database, storage, or auth-secret credentials. The dev file is limited to `FACTROVE_API_URL` and `FACTROVE_PROFILE`.
 
 Local setup uses Garage from `pnpm infra:up`, which creates the bucket. An operator can use an existing AWS bucket by setting `S3_BUCKET` and `S3_REGION` and leaving `S3_ENDPOINT` unset. The API does not create that AWS bucket.

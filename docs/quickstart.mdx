@@ -39,13 +39,13 @@ The CLI stores the key in `~/.factrove/credentials` (mode 0600). It does not pri
 pnpm factrove upload ./fixtures/hello.html
 ```
 
-Plain success prints only the viewer URL, built from `PUBLIC_BASE_URL`:
+Plain success prints only the artifact id. Open it at:
 
 ```text
 http://localhost:3000/artifacts/{id}
 ```
 
-`--json` prints the `{ artifact }` envelope on one line.
+`--json` prints the `{ artifact }` envelope on one line. Replace that artifact later with `pnpm factrove upload ./fixtures/hello.html --artifactId <id>`. If a replace returns `500`, GET the artifact before retrying.
 
 ## 4. Open the library
 
@@ -70,7 +70,8 @@ Add a password with `--password` (a prompt) or `--password-stdin`. See [Sharing 
 ```bash
 pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown
+pnpm factrove upload ./fixtures/hello.html --artifactId <artifact-id>
 pnpm factrove share <artifact-id> --revoke
 ```
 
-`pnpm factrove` reads `apps/cli/.env` only for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `node apps/cli/dist/main.js` does not read that file. The default API origin is `http://localhost:3001`.
+`pnpm factrove` reads `apps/cli/.env` only for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `node apps/cli/dist/main.js` does not read that file. The default API origin is `http://localhost:3001`. See [CLI](/guides/cli) for flags and precedence.

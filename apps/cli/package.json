@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "start": "node dist/main.js",
     "dev": "pnpm build && node dist/main.js",
-    "test": "pnpm --filter @factrove/cli... build && vitest run"
+    "test": "node ../../scripts/build-cli-if-needed.mjs && vitest run"
   },
   "dependencies": {
     "@factrove/api-client": "workspace:*",

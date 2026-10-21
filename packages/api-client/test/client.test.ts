@@ -46,6 +46,27 @@ describe("Factrove API client", () => {
     expect(await uploadedFile.text()).toBe("<h1>Hello</h1>");
   });
 
+  it("puts replacement HTML on the artifact content route", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input);
+      capturedInit = init;
+      return jsonResponse({ artifact });
+    });
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+
+    await client.replaceArtifactContent(artifact.id, { file: new Blob(["<p>next</p>"]), filename: "next.html" });
+
+    expect(capturedUrl).toBe(`http://localhost:3001/api/v1/artifacts/${artifact.id}/content`);
+    expect(capturedInit?.method).toBe("PUT");
+    const form = capturedInit?.body as FormData;
+    expect(form.get("accessType")).toBeNull();
+    const uploadedFile = form.get("file") as File;
+    expect(uploadedFile.name).toBe("next.html");
+    expect(await uploadedFile.text()).toBe("<p>next</p>");
+  });
+
   it("appends /api/v1 once when the origin already includes the prefix", async () => {
     const fetchStub = vi.fn(async () => jsonResponse({ items: [artifact] }));
     const client = createFactroveClient({ baseUrl: "http://localhost:3001/api/v1/", fetch: fetchStub as typeof fetch });

@@ -51,6 +51,11 @@ export interface UploadArtifactInput {
   accessType?: AccessType;
 }
 
+export interface ReplaceArtifactContentInput {
+  file: Blob;
+  filename: string;
+}
+
 export interface ArtifactContent {
   format: ContentFormat;
   mediaType: ContentMediaType;
@@ -60,6 +65,8 @@ export interface ArtifactContent {
 export interface FactroveClient {
   getContext(): Promise<ContextEnvelope>;
   uploadArtifact(input: UploadArtifactInput): Promise<ArtifactEnvelope>;
+  /** Replaces the current HTML for an existing artifact. Does not change access or the share token. */
+  replaceArtifactContent(id: string, input: ReplaceArtifactContentInput): Promise<ArtifactEnvelope>;
   listArtifacts(input?: { view?: "mine" | "org" }): Promise<ArtifactListEnvelope>;
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
@@ -204,6 +211,11 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       form.append("file", file, filename);
       if (accessType !== undefined) form.append("accessType", accessType);
       return request("/artifacts", { method: "POST", body: form }, artifactEnvelopeSchema);
+    },
+    replaceArtifactContent: (id, { file, filename }) => {
+      const form = new FormData();
+      form.append("file", file, filename);
+      return request(`/artifacts/${encodeURIComponent(id)}/content`, { method: "PUT", body: form }, artifactEnvelopeSchema);
     },
     listArtifacts: ({ view = "mine" } = {}) => {
       const query = new URLSearchParams({ view });

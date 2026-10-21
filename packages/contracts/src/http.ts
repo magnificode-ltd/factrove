@@ -155,6 +155,10 @@ const uploadFormSchema = z.object({
   accessType: accessTypeSchema.optional()
 });
 
+const replaceFormSchema = z.object({
+  file: z.string().describe("One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted.")
+});
+
 const apiErrorResponse: ResponseSpec = {
   description: "JSON error envelope `{ error: { code, message } }`.",
   schemaName: "ApiError"
@@ -195,6 +199,7 @@ export const namedSchemas: Record<string, z.ZodType> = {
   PublicUnlockRequest: publicUnlockRequestSchema,
   PublicUnlockEnvelope: publicUnlockEnvelopeSchema,
   UploadForm: uploadFormSchema,
+  ReplaceForm: replaceFormSchema,
   CreateApiKeyRequest: createApiKeyRequestSchema,
   CreateApiKeyResponse: createApiKeyResponseSchema,
   ListApiKeysResponse: listApiKeysResponseSchema,
@@ -396,6 +401,56 @@ export const httpOperations: HttpOperation[] = [
       "415": { description: "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.", schemaName: "ApiError" },
       "503": {
         description: "Object storage failed. Code `STORAGE_UNAVAILABLE`. No artifact row is stored.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "replaceArtifactContent",
+    method: "put",
+    path: "/api/v1/artifacts/{id}/content",
+    tags: ["Artifacts"],
+    summary: "Replace an artifact's stored HTML",
+    description:
+      "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT`. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+    security: "owner",
+    pathParameters: [artifactIdParam],
+    requestBody: {
+      contentType: "multipart/form-data",
+      required: true,
+      description: "One HTML file. Do not send accessType.",
+      schema: replaceFormSchema,
+      schemaName: "ReplaceForm"
+    },
+    responses: {
+      "200": {
+        description: "The same artifact id with the new size and upload time.",
+        schema: artifactEnvelopeSchema,
+        schemaName: "ArtifactEnvelope"
+      },
+      "400": {
+        description: "Invalid multipart body, accessType on replace, or UTF-8. Code `INVALID_REQUEST`.",
+        schemaName: "ApiError"
+      },
+      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": {
+        description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Another replace finished first. Code `CONTENT_CONFLICT`.",
+        schemaName: "ApiError"
+      },
+      "413": { description: "The file is larger than 10 MiB. Code `FILE_TOO_LARGE`.", schemaName: "ApiError" },
+      "415": { description: "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.", schemaName: "ApiError" },
+      "500": {
+        description:
+          "The replace commit threw after the object was written. The new bytes may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
+        schemaName: "ApiError"
+      },
+      "503": {
+        description: "Object storage failed before the row was updated. Code `STORAGE_UNAVAILABLE`.",
         schemaName: "ApiError"
       }
     }

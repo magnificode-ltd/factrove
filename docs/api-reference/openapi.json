@@ -456,14 +456,14 @@
         }
       }
     },
-    "/api/v1/artifacts/{id}": {
-      "get": {
-        "operationId": "getArtifact",
+    "/api/v1/artifacts/{id}/content": {
+      "put": {
+        "operationId": "replaceArtifactContent",
         "tags": [
           "Artifacts"
         ],
-        "summary": "Get artifact metadata",
-        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+        "summary": "Replace an artifact's stored HTML",
+        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT`. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
         "security": [
           {
             "bearerAuth": []
@@ -485,9 +485,20 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "description": "One HTML file. Do not send accessType.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceForm"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Artifact metadata, including whether a public share is active.",
+            "description": "The same artifact id with the new size and upload time.",
             "content": {
               "application/json": {
                 "schema": {
@@ -497,7 +508,27 @@
             }
           },
           "400": {
-            "description": "The id is not a UUID. Code `INVALID_REQUEST`.",
+            "description": "Invalid multipart body, accessType on replace, or UTF-8. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -507,7 +538,57 @@
             }
           },
           "404": {
-            "description": "Unknown or unreadable artifact, including missing or invalid credentials. Code `ARTIFACT_NOT_FOUND`.",
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another replace finished first. Code `CONTENT_CONFLICT`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than 10 MiB. Code `FILE_TOO_LARGE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The replace commit threw after the object was written. The new bytes may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed before the row was updated. Code `STORAGE_UNAVAILABLE`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -517,9 +598,7 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/artifacts/{id}/content": {
+      },
       "get": {
         "operationId": "getArtifactContent",
         "tags": [
@@ -632,6 +711,69 @@
           },
           "503": {
             "description": "Object storage failed (`STORAGE_UNAVAILABLE`) or the Markdown conversion pool is full (`CONVERSION_UNAVAILABLE`). Neither sets Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}": {
+      "get": {
+        "operationId": "getArtifact",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Get artifact metadata",
+        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact metadata, including whether a public share is active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a UUID. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or unreadable artifact, including missing or invalid credentials. Code `ARTIFACT_NOT_FOUND`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1362,6 +1504,7 @@
                   "PASSWORD_INCORRECT",
                   "FORBIDDEN",
                   "ARTIFACT_NOT_FOUND",
+                  "CONTENT_CONFLICT",
                   "FILE_TOO_LARGE",
                   "CONTENT_TOO_LARGE",
                   "UNSUPPORTED_FILE_TYPE",
@@ -1372,7 +1515,7 @@
                   "CONVERSION_UNAVAILABLE",
                   "UNLOCK_UNAVAILABLE"
                 ],
-                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
               },
               "message": {
                 "type": "string"
@@ -1396,6 +1539,7 @@
           "PASSWORD_INCORRECT",
           "FORBIDDEN",
           "ARTIFACT_NOT_FOUND",
+          "CONTENT_CONFLICT",
           "FILE_TOO_LARGE",
           "CONTENT_TOO_LARGE",
           "UNSUPPORTED_FILE_TYPE",
@@ -1856,6 +2000,21 @@
               "private",
               "org_shared"
             ]
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
+      "ReplaceForm": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "description": "One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted.",
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "text/html"
           }
         },
         "required": [

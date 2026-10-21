@@ -70,13 +70,7 @@ When those hosts differ, `AUTH_COOKIE_DOMAIN` must cover them. `localhost` and `
 
 ## CLI configuration
 
-Resolution follows flags, then environment variables, then `~/.factrove` profile files.
-
-- `--api-url` overrides the API origin for one command
-- then `FACTROVE_API_URL`
-- then the profile `api_url`
-- then a URL from `apps/cli/.env` when you use `pnpm factrove`
-- then `http://localhost:3001`
+Resolution is listed in [CLI](/guides/cli). In short: `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the profile `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
 
 An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. `factrove configure` writes the profile files mode 0600.
 
@@ -90,3 +84,15 @@ pnpm test
 ```
 
 `pnpm e2e` starts a separate Compose project and needs Playwright Chromium.
+
+## Object-key migration
+
+Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration.
+
+Rolling back after that cutover means:
+
+1. Stop the old app processes
+2. Restore the schema
+3. Copy each current object back to `{artifactId}.html` and point the row at that key
+
+New objects live at `{artifactId}/{contentId}.html`. Older rows may still use `{artifactId}.html`. The public filename stays `{artifactId}.html`. HTTP responses and the CLI omit the object key.

@@ -35,14 +35,14 @@ afterEach(async () => {
 });
 
 describe("factrove upload", () => {
-  it("uploads the file basename and bytes and prints only the viewer URL", async () => {
+  it("uploads the file basename and bytes and prints only the artifact id", async () => {
     const fixture = await readFile(fixturePath);
     const stub = await startStub(() => accepted(fixture.byteLength));
     const result = await runCli(["upload", "fixtures/hello.html"], { cwd: repoRoot, env: { FACTROVE_API_URL: stub.url } });
 
     expect(result.code).toBe(0);
     expect(result.signal).toBeNull();
-    expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
+    expect(result.stdout).toBe(`${artifactId}\n`);
     expect(result.stderr).toBe("");
     expect(stub.requests).toHaveLength(1);
     const request = stub.requests[0];
@@ -59,6 +59,42 @@ describe("factrove upload", () => {
     expect(access?.data.toString("utf8")).toBe("private");
     expect(request?.body.includes(Buffer.from("fixtures/hello.html"))).toBe(false);
     expect(result.stdout).not.toMatch(/Nest|ERROR|LOG/);
+  });
+
+  it("replaces an existing artifact and prints the same id", async () => {
+    const fixture = await readFile(fixturePath);
+    const stub = await startStub(() => ({ status: 200, body: created(fixture.byteLength) }));
+    const result = await runCli(
+      ["upload", "fixtures/hello.html", "--artifactId", artifactId, "--output", "text"],
+      { cwd: repoRoot, env: { FACTROVE_API_URL: stub.url } },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`${artifactId}\n`);
+    expect(result.stderr).toBe("");
+    expect(stub.requests).toHaveLength(1);
+    const request = stub.requests[0];
+    expect(request?.method).toBe("PUT");
+    expect(request?.url).toBe(`/api/v1/artifacts/${artifactId}/content`);
+    const parts = multipartParts(request?.contentType ?? "", request?.body ?? Buffer.alloc(0));
+    expect(parts.find((part) => part.name === "file")?.data.equals(fixture)).toBe(true);
+    expect(parts.find((part) => part.name === "accessType")).toBeUndefined();
+
+    const json = await runCli(
+      ["upload", "fixtures/hello.html", "--artifactId", artifactId, "--json", "--api-url", stub.url],
+      { cwd: repoRoot },
+    );
+    expect(json.code).toBe(0);
+    expect(JSON.parse(json.stdout).artifact.id).toBe(artifactId);
+
+    const rejected = await runCli(
+      ["upload", "fixtures/hello.html", "--artifactId", artifactId, "--access", "org_shared", "--api-url", stub.url],
+      { cwd: repoRoot },
+    );
+    expect(rejected.code).toBe(1);
+    expect(rejected.stdout).toBe("");
+    expect(rejected.stderr).toMatch(/cannot be used with --artifactId/);
+    expect(stub.requests).toHaveLength(2);
   });
 
   it("sends org_shared and prints the response envelope on one line", async () => {
@@ -245,11 +281,11 @@ describe("factrove upload", () => {
     const help = await runLauncher(["--help"], { env: { FACTROVE_CLI_ENV_FILE: unreadable } });
     expect(help.code).toBe(0);
     expect(help.stderr).toBe("");
-    expect(help.stdout).toBe(helpText());
+    expect(help.stdout).toBe(helpText(null));
 
     const commandHelp = await runLauncher(["upload", "--help"], { env: { FACTROVE_CLI_ENV_FILE: unreadable } });
     expect(commandHelp.code).toBe(0);
-    expect(commandHelp.stdout).toBe(helpText());
+    expect(commandHelp.stdout).toBe(helpText("upload"));
   });
 
   it("reports an unreadable dev env file as a CLI error and honors --json", async () => {
@@ -283,7 +319,7 @@ describe("factrove upload", () => {
     });
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
+    expect(result.stdout).toBe(`${artifactId}\n`);
     const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
     expect(parts.find((part) => part.name === "file")?.filename).toBe("note.html");
 
@@ -301,7 +337,7 @@ describe("factrove upload", () => {
     expect(result.code).toBe(0);
     expect(result.signal).toBeNull();
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(helpText());
+    expect(result.stdout).toBe(helpText("upload"));
   });
 
   it("writes local failures to stderr and does not call the API", async () => {
@@ -393,7 +429,7 @@ describe("factrove upload", () => {
     );
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(`http://localhost:3000/artifacts/${artifactId}\n`);
+    expect(result.stdout).toBe(`${artifactId}\n`);
     expect(result.stderr).toBe("");
     const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
     expect(parts.find((part) => part.name === "file")?.filename).toBe("hello.html");
@@ -880,7 +916,7 @@ describe("factrove configure", () => {
   it("fails a command that has no API key", async () => {
     const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
     expect(result.code).toBe(1);
-    expect(result.stderr).toBe("INVALID_INPUT: An API key is required. Run: pnpm factrove configure\n");
+    expect(result.stderr).toBe("INVALID_INPUT: An API key is required. Run: factrove configure\n");
     expect(result.stdout).toBe("");
   });
 });

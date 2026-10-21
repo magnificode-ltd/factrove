@@ -1,41 +1,34 @@
 import { CliError } from "./cli-error.js";
-import {
-  ARTIFACT_ID,
-  cliFlags,
-  commandAllowsFlag,
-  findFlagByArg,
-  flagTakesValue,
-  matchCommand,
-  optionNamesWithValues,
-  renderHelpText,
-  type CliCommandSpec,
-  type CliFlagSpec,
-} from "./command-spec.js";
+import { ARTIFACT_ID, helpPage, type HelpCommand } from "./command-spec.js";
 import { readStoredProfileSync, resolveApiKey, selectedProfile } from "./credentials.js";
 
 export const DEFAULT_API_URL = "http://localhost:3001";
 
 export type AccessType = "private" | "org_shared";
 export type ContentFormat = "html" | "markdown";
+export type OutputFormat = "json" | "text";
+export type { HelpCommand };
 
-export type UploadInvocation = {
-  kind: "upload";
-  path: string;
-  access: AccessType;
+type CommandOptions = {
   json: boolean;
+  output: OutputFormat;
+  quiet: boolean;
   apiUrl: string;
   profile: string;
   profileExplicit: boolean;
 };
 
-export type GetInvocation = {
+export type UploadInvocation = CommandOptions & {
+  kind: "upload";
+  path: string;
+  access: AccessType;
+  artifactId: string | null;
+};
+
+export type GetInvocation = CommandOptions & {
   kind: "get";
   id: string;
   format: ContentFormat;
-  json: boolean;
-  apiUrl: string;
-  profile: string;
-  profileExplicit: boolean;
 };
 
 export type ConfigureInvocation = {
@@ -48,124 +41,311 @@ export type ConfigureInvocation = {
 
 export type SharePasswordSource = "prompt" | "stdin";
 
-export type ShareInvocation = {
+export type ShareInvocation = CommandOptions & {
   kind: "share";
   id: string;
   revoke: boolean;
   password: SharePasswordSource | null;
   removePassword: boolean;
-  json: boolean;
-  apiUrl: string;
-  profile: string;
-  profileExplicit: boolean;
 };
 
-export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | { kind: "help" };
-
-type ParsedStores = {
-  json?: boolean;
-  revoke?: boolean;
-  password?: SharePasswordSource;
-  removePassword?: boolean;
-  access?: AccessType;
-  format?: ContentFormat;
-  apiUrl?: string;
-  apiKey?: string;
-  profile?: string;
+export type HelpInvocation = {
+  kind: "help";
+  command: HelpCommand | null;
 };
 
-const OPTIONS_WITH_VALUES = optionNamesWithValues();
+export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | HelpInvocation;
 
-export function helpText(): string {
-  return renderHelpText();
+const OPTIONS_WITH_VALUES = new Set([
+  "--access",
+  "--api-url",
+  "--api-key",
+  "--artifactId",
+  "--endpoint-url",
+  "--format",
+  "--output",
+  "--profile",
+]);
+
+export function helpText(command: HelpCommand | null = null): string {
+  return helpPage(command);
 }
 
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
-  if (requestsHelp(argv)) {
-    return { kind: "help" };
+  const help = requestedHelp(argv);
+  if (help) {
+    return { kind: "help", command: help.command };
   }
 
-  const { positionals, stores } = collectArgs(argv);
-  if (positionals[0] === undefined) {
-    throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+  const positionals: string[] = [];
+  let json = false;
+  let quiet = false;
+  let revoke: boolean | undefined;
+  let password: SharePasswordSource | undefined;
+  let removePassword: boolean | undefined;
+  let access: AccessType | undefined;
+  let format: ContentFormat | undefined;
+  let outputFlag: OutputFormat | undefined;
+  let apiUrlFlag: string | undefined;
+  let endpointFlag: string | undefined;
+  let apiKeyFlag: string | undefined;
+  let profileFlag: string | undefined;
+  let artifactId: string | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) {
+      continue;
+    }
+    if (arg === "--") {
+      positionals.push(...argv.slice(index + 1));
+      break;
+    }
+    if (arg === "-") {
+      throw new CliError("INVALID_INPUT", "Unknown option '-'. Run: factrove --help");
+    }
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--quiet") {
+      if (quiet) {
+        throw new CliError("INVALID_INPUT", "--quiet was provided more than once.");
+      }
+      quiet = true;
+      continue;
+    }
+    if (arg === "--revoke") {
+      if (revoke !== undefined) {
+        throw new CliError("INVALID_INPUT", "--revoke was provided more than once.");
+      }
+      revoke = true;
+      continue;
+    }
+    if (arg === "--password" || arg === "--password-stdin") {
+      password = assignOnce(password, arg === "--password" ? "prompt" : "stdin", "A password option");
+      continue;
+    }
+    if (arg.startsWith("--password=") || arg.startsWith("--password-stdin=")) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "Passwords are not accepted as arguments. Use --password to be prompted, or --password-stdin.",
+      );
+    }
+    if (arg === "--remove-password") {
+      removePassword = assignOnce(removePassword, true, "--remove-password");
+      continue;
+    }
+    if (arg === "--access" || arg.startsWith("--access=")) {
+      const inline = arg.startsWith("--access=");
+      const value = readOption(argv, arg, "--access", index);
+      if (!inline) {
+        index += 1;
+      }
+      access = assignOnce(access, parseAccess(value), "--access");
+      continue;
+    }
+    if (arg === "--format" || arg.startsWith("--format=")) {
+      const inline = arg.startsWith("--format=");
+      const value = readOption(argv, arg, "--format", index);
+      if (!inline) {
+        index += 1;
+      }
+      format = assignOnce(format, parseFormat(value), "--format");
+      continue;
+    }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = readOption(argv, arg, "--output", index);
+      if (!inline) {
+        index += 1;
+      }
+      outputFlag = assignOnce(outputFlag, parseOutput(value), "--output");
+      continue;
+    }
+    if (arg === "--api-url" || arg.startsWith("--api-url=")) {
+      const inline = arg.startsWith("--api-url=");
+      const value = readOption(argv, arg, "--api-url", index);
+      if (!inline) {
+        index += 1;
+      }
+      apiUrlFlag = assignOnce(apiUrlFlag, value, "--api-url");
+      continue;
+    }
+    if (arg === "--endpoint-url" || arg.startsWith("--endpoint-url=")) {
+      const inline = arg.startsWith("--endpoint-url=");
+      const value = readOption(argv, arg, "--endpoint-url", index);
+      if (!inline) {
+        index += 1;
+      }
+      endpointFlag = assignOnce(endpointFlag, value, "--endpoint-url");
+      continue;
+    }
+    if (arg === "--api-key" || arg.startsWith("--api-key=")) {
+      const inline = arg.startsWith("--api-key=");
+      const value = readOption(argv, arg, "--api-key", index);
+      if (!inline) {
+        index += 1;
+      }
+      apiKeyFlag = assignOnce(apiKeyFlag, value, "--api-key");
+      continue;
+    }
+    if (arg === "--profile" || arg.startsWith("--profile=")) {
+      const inline = arg.startsWith("--profile=");
+      const value = readOption(argv, arg, "--profile", index);
+      if (!inline) {
+        index += 1;
+      }
+      profileFlag = assignOnce(profileFlag, value, "--profile");
+      continue;
+    }
+    if (arg === "--artifactId" || arg.startsWith("--artifactId=")) {
+      const inline = arg.startsWith("--artifactId=");
+      const value = readOption(argv, arg, "--artifactId", index);
+      if (!inline) {
+        index += 1;
+      }
+      artifactId = assignOnce(artifactId, value, "--artifactId");
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: factrove --help`);
+    }
+    positionals.push(arg);
   }
 
-  const matched = matchCommand(positionals);
-  const passwordUsed = stores.password !== undefined || stores.removePassword === true;
-  if ((matched === undefined || matched.command.name !== "share") && passwordUsed) {
+  if (json && outputFlag !== undefined && outputFlag !== "json") {
+    throw new CliError("INVALID_INPUT", `--json conflicts with --output ${outputFlag}.`);
+  }
+  if (apiUrlFlag !== undefined && endpointFlag !== undefined && apiUrlFlag !== endpointFlag) {
+    throw new CliError("INVALID_INPUT", "--endpoint-url and --api-url were given different values.");
+  }
+
+  const command = positionals[0];
+  const args = positionals.slice(1);
+  if (command === undefined) {
+    throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
+  }
+  if (command !== "share" && (password !== undefined || removePassword !== undefined)) {
     throw new CliError("INVALID_INPUT", "Password options are only valid for the share command.");
   }
-
-  const profile = selectedProfile(stores.profile, env);
+  if (command !== "upload" && artifactId !== undefined) {
+    throw new CliError("INVALID_INPUT", "--artifactId is only valid for the upload command.");
+  }
+  const profile = selectedProfile(profileFlag, env);
   const stored = readStoredProfileSync(profile, env);
-  const apiUrl = resolveApiUrl(stores.apiUrl, env, stored.apiUrl);
-  const profileExplicit = stores.profile !== undefined;
+  const originFlag = apiUrlFlag ?? endpointFlag;
+  const apiUrl = resolveApiUrl(originFlag, env, stored.apiUrl);
+  const options: CommandOptions = {
+    json: json || outputFlag === "json",
+    output: json || outputFlag === "json" ? "json" : "text",
+    quiet,
+    apiUrl,
+    profile,
+    profileExplicit: profileFlag !== undefined,
+  };
 
-  if (matched?.command.extraArgsBeforeFlags) {
-    const rest = positionals.slice(matched.consumed);
-    if (rest.length > 0) {
-      throw new CliError("INVALID_INPUT", matched.command.extraArgsError);
+  if (command === "configure") {
+    if (args.length > 0) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    rejectConfigureFlags(matched.command, stores);
+    if (access !== undefined || format !== undefined || json || outputFlag !== undefined || quiet || revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "configure accepts --profile, --api-key, --api-url, and --endpoint-url.");
+    }
     return {
       kind: "configure",
       profile,
-      apiKey: stores.apiKey,
-      apiUrl: stores.apiUrl,
+      apiKey: apiKeyFlag,
+      apiUrl: originFlag,
       suggestedApiUrl: apiUrl,
     };
   }
-
-  if (stores.apiKey !== undefined) {
+  if (apiKeyFlag !== undefined) {
     throw new CliError("INVALID_INPUT", "--api-key is only valid for the configure command.");
   }
-
-  if (matched === undefined) {
-    throw new CliError("INVALID_INPUT", `Unknown command '${positionals[0]}'. Run: pnpm factrove --help`);
+  if (command === "upload") {
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
+    if (artifactId !== undefined && access !== undefined) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "--access cannot be used with --artifactId. Replacing content keeps the current access.",
+      );
+    }
+    if (artifactId !== undefined && !ARTIFACT_ID.test(artifactId)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    const filePath = args[0];
+    if (filePath === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing file path. Run: factrove upload <file>");
+    }
+    if (args.length > 1) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    return { kind: "upload", path: filePath, access: access ?? "private", artifactId: artifactId ?? null, ...options };
   }
-
-  const command = matched.command;
-  const rest = positionals.slice(matched.consumed);
-  rejectWrongCommandFlags(command, stores);
-  const values = readPositionals(command, rest, stores);
-  if (command.name === "upload") {
-    return {
-      kind: "upload",
-      path: requiredValue(values.path, command.positionals[0]?.missingError ?? command.extraArgsError),
-      access: stores.access ?? "private",
-      json: stores.json === true,
-      apiUrl,
-      profile,
-      profileExplicit,
-    };
+  if (command === "get") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
+    const id = args[0];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove get <id>");
+    }
+    if (args.length > 1) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    return { kind: "get", id, format: format ?? "html", ...options };
   }
-  if (command.name === "get") {
-    return {
-      kind: "get",
-      id: requiredValue(values.id, command.positionals[0]?.missingError ?? command.extraArgsError),
-      format: stores.format ?? "html",
-      json: stores.json === true,
-      apiUrl,
-      profile,
-      profileExplicit,
-    };
-  }
-  if (command.name === "share") {
-    rejectExclusiveFlags(command, stores);
+  if (command === "share") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    const id = args[0];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove share <id>");
+    }
+    if (args.length > 1) {
+      throw new CliError(
+        "INVALID_INPUT",
+        password === "prompt"
+          ? "--password takes no value. It prompts for the password, so the password stays out of shell history."
+          : "Unexpected extra arguments.",
+      );
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    const actions = [revoke, password, removePassword].filter((value) => value !== undefined).length;
+    if (actions > 1) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "Use only one of --password, --password-stdin, --remove-password, and --revoke.",
+      );
+    }
     return {
       kind: "share",
-      id: requiredValue(values.id, command.positionals[0]?.missingError ?? command.extraArgsError),
-      revoke: stores.revoke === true,
-      password: stores.password ?? null,
-      removePassword: stores.removePassword === true,
-      json: stores.json === true,
-      apiUrl,
-      profile,
-      profileExplicit,
+      id,
+      revoke: revoke ?? false,
+      password: password ?? null,
+      removePassword: removePassword ?? false,
+      ...options,
     };
   }
-
-  throw new CliError("INVALID_INPUT", `Unknown command '${command.name}'. Run: pnpm factrove --help`);
+  throw new CliError("INVALID_INPUT", `Unknown command '${command}'. Run: factrove --help`);
 }
 
 export function apiKeyForInvocation(invocation: CliInvocation, env: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -177,6 +357,7 @@ export function apiKeyForInvocation(invocation: CliInvocation, env: NodeJS.Proce
 
 export function cliWantsJson(argv: readonly string[]): boolean {
   let json = false;
+  let explicitJson = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) {
@@ -187,6 +368,20 @@ export function cliWantsJson(argv: readonly string[]): boolean {
     }
     if (arg === "--json") {
       json = true;
+      explicitJson = true;
+      continue;
+    }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = inline ? arg.slice("--output=".length) : argv[index + 1];
+      if (!inline && value !== undefined && !value.startsWith("-")) {
+        index += 1;
+      }
+      if (value === "json") {
+        json = true;
+      } else if (value === "text" && !explicitJson) {
+        json = false;
+      }
       continue;
     }
     if (OPTIONS_WITH_VALUES.has(arg)) {
@@ -211,231 +406,8 @@ export function safeApiOrigin(value: string): string {
   }
 }
 
-function collectArgs(argv: readonly string[]): { positionals: string[]; stores: ParsedStores } {
-  const positionals: string[] = [];
-  const stores: ParsedStores = {};
-  const assigned = new Map<string, string>();
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === undefined) {
-      continue;
-    }
-    if (arg === "--") {
-      positionals.push(...argv.slice(index + 1));
-      break;
-    }
-    if (arg.startsWith("-")) {
-      const matched = findFlagByArg(arg);
-      if (matched === undefined) {
-        throw new CliError("INVALID_INPUT", `Unknown option '${arg}'. Run: pnpm factrove --help`);
-      }
-      const { flag, inlineValue } = matched;
-      if (flag.rejectInlineValue && inlineValue !== undefined) {
-        throw new CliError("INVALID_INPUT", flag.rejectInlineValueError ?? `Missing value for ${flag.names[0]}.`);
-      }
-      let value: string | boolean;
-      if (flagTakesValue(flag)) {
-        const raw = inlineValue ?? argv[index + 1];
-        if (inlineValue === undefined) {
-          index += 1;
-        }
-        value = readOptionValue(flag, raw, inlineValue !== undefined);
-      } else {
-        value = flag.booleanValue ?? true;
-      }
-      writeStore(stores, assigned, flag, value);
-      continue;
-    }
-    positionals.push(arg);
-  }
-
-  return { positionals, stores };
-}
-
-function writeStore(
-  stores: ParsedStores,
-  assigned: Map<string, string>,
-  flag: CliFlagSpec,
-  value: string | boolean,
-): void {
-  const key = flag.onceGroup ?? flag.store;
-  const label = flag.onceGroupName ?? flag.names[0] ?? flag.id;
-  if (!flag.repeatable && assigned.has(key)) {
-    throw new CliError("INVALID_INPUT", `${label} was provided more than once.`);
-  }
-  assigned.set(key, label);
-  if (flag.store === "json") {
-    stores.json = Boolean(value);
-    return;
-  }
-  if (flag.store === "revoke") {
-    stores.revoke = Boolean(value);
-    return;
-  }
-  if (flag.store === "removePassword") {
-    stores.removePassword = Boolean(value);
-    return;
-  }
-  if (flag.store === "password") {
-    stores.password = value === "stdin" ? "stdin" : "prompt";
-    return;
-  }
-  if (flag.store === "access") {
-    stores.access = value === "org_shared" ? "org_shared" : "private";
-    return;
-  }
-  if (flag.store === "format") {
-    stores.format = value === "markdown" ? "markdown" : "html";
-    return;
-  }
-  if (flag.store === "apiUrl" && typeof value === "string") {
-    stores.apiUrl = value;
-    return;
-  }
-  if (flag.store === "apiKey" && typeof value === "string") {
-    stores.apiKey = value;
-    return;
-  }
-  if (flag.store === "profile" && typeof value === "string") {
-    stores.profile = value;
-  }
-}
-
-function readOptionValue(flag: CliFlagSpec, raw: string | undefined, inline: boolean): string {
-  const name = flag.names[0] ?? flag.id;
-  if (raw === undefined || (!inline && raw.startsWith("-"))) {
-    throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
-  }
-  const value = raw.trim();
-  if (value.length === 0) {
-    throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
-  }
-  if (flag.kind === "enum" && flag.values && !flag.values.includes(value)) {
-    throw new CliError("INVALID_INPUT", flag.parseError ?? `Invalid value for ${name}.`);
-  }
-  return value;
-}
-
-function rejectConfigureFlags(command: CliCommandSpec, stores: ParsedStores): void {
-  if (stores.access !== undefined || stores.format !== undefined || stores.json === true || stores.revoke !== undefined) {
-    throw new CliError(
-      "INVALID_INPUT",
-      command.configureAcceptsError ?? "configure accepts --profile, --api-key, and --api-url.",
-    );
-  }
-}
-
-function rejectWrongCommandFlags(command: CliCommandSpec, stores: ParsedStores): void {
-  const seen = new Set<string>();
-  for (const id of command.rejectFlagIds ?? []) {
-    const flag = cliFlags.find((entry) => entry.id === id);
-    if (flag === undefined || !storeIsSet(stores, flag) || commandAllowsFlag(command, flag)) {
-      continue;
-    }
-    seen.add(flag.id);
-    if (flag.wrongCommandError !== undefined) {
-      throw new CliError("INVALID_INPUT", flag.wrongCommandError);
-    }
-  }
-  for (const flag of cliFlags) {
-    if (seen.has(flag.id) || !storeIsSet(stores, flag) || commandAllowsFlag(command, flag) || flag.wrongCommandError === undefined) {
-      continue;
-    }
-    throw new CliError("INVALID_INPUT", flag.wrongCommandError);
-  }
-}
-
-function storeIsSet(stores: ParsedStores, flag: CliFlagSpec): boolean {
-  return storeValueIsSet(stores, flag.store);
-}
-
-function readPositionals(
-  command: CliCommandSpec,
-  rest: readonly string[],
-  stores: ParsedStores,
-): Record<string, string> {
-  const values: Record<string, string> = {};
-  const required = command.positionals.filter((positional) => positional.required);
-  if (rest[0] === undefined && required[0] !== undefined) {
-    throw new CliError("INVALID_INPUT", required[0].missingError);
-  }
-  if (rest.length > command.positionals.length) {
-    throw new CliError("INVALID_INPUT", extraArgsMessage(command, stores));
-  }
-  for (const [index, positional] of command.positionals.entries()) {
-    const value = rest[index];
-    if (value === undefined) {
-      if (positional.required) {
-        throw new CliError("INVALID_INPUT", positional.missingError);
-      }
-      continue;
-    }
-    if (positional.validate === "uuid" && !ARTIFACT_ID.test(value)) {
-      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
-    }
-    values[positional.name] = value;
-  }
-  return values;
-}
-
-function extraArgsMessage(command: CliCommandSpec, stores: ParsedStores): string {
-  if (command.extraArgsErrorWhenStore?.password !== undefined && stores.password === "prompt") {
-    return command.extraArgsErrorWhenStore.password;
-  }
-  return command.extraArgsError;
-}
-
-function rejectExclusiveFlags(command: CliCommandSpec, stores: ParsedStores): void {
-  const exclusive = command.exclusiveStores;
-  if (exclusive === undefined || exclusive.length === 0) {
-    return;
-  }
-  const used = exclusive.filter((store) => storeValueIsSet(stores, store));
-  if (used.length > 1) {
-    throw new CliError("INVALID_INPUT", command.exclusiveFlagError ?? "Conflicting options.");
-  }
-}
-
-function storeValueIsSet(stores: ParsedStores, store: string): boolean {
-  if (store === "json") {
-    return stores.json === true;
-  }
-  if (store === "revoke") {
-    return stores.revoke !== undefined;
-  }
-  if (store === "removePassword") {
-    return stores.removePassword !== undefined;
-  }
-  if (store === "password") {
-    return stores.password !== undefined;
-  }
-  if (store === "access") {
-    return stores.access !== undefined;
-  }
-  if (store === "format") {
-    return stores.format !== undefined;
-  }
-  if (store === "apiUrl") {
-    return stores.apiUrl !== undefined;
-  }
-  if (store === "apiKey") {
-    return stores.apiKey !== undefined;
-  }
-  if (store === "profile") {
-    return stores.profile !== undefined;
-  }
-  return false;
-}
-
-function requiredValue(value: string | undefined, missing: string): string {
-  if (value === undefined) {
-    throw new CliError("INVALID_INPUT", missing);
-  }
-  return value;
-}
-
-function requestsHelp(argv: readonly string[]): boolean {
+function requestedHelp(argv: readonly string[]): HelpInvocation | undefined {
+  let sawHelp = false;
   const positionals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -446,7 +418,8 @@ function requestsHelp(argv: readonly string[]): boolean {
       break;
     }
     if (arg === "--help" || arg === "-h") {
-      return true;
+      sawHelp = true;
+      continue;
     }
     if (OPTIONS_WITH_VALUES.has(arg)) {
       const next = argv[index + 1];
@@ -460,7 +433,59 @@ function requestsHelp(argv: readonly string[]): boolean {
     }
     positionals.push(arg);
   }
-  return positionals[0] === "help";
+  if (positionals[0] === "help") {
+    sawHelp = true;
+    positionals.shift();
+  }
+  if (!sawHelp) {
+    return undefined;
+  }
+  const command = positionals[0];
+  if (command === "upload" || command === "get" || command === "share" || command === "configure") {
+    return { kind: "help", command };
+  }
+  return { kind: "help", command: null };
+}
+
+function readOption(argv: readonly string[], arg: string, name: string, index: number): string {
+  const inlinePrefix = `${name}=`;
+  const raw = arg.startsWith(inlinePrefix) ? arg.slice(inlinePrefix.length) : argv[index + 1];
+  if (raw === undefined || (!arg.startsWith(inlinePrefix) && raw.startsWith("-"))) {
+    throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
+  }
+  const value = raw.trim();
+  if (value.length === 0) {
+    throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
+  }
+  return value;
+}
+
+function parseAccess(value: string): AccessType {
+  if (value === "private" || value === "org_shared") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "access must be private or org_shared.");
+}
+
+function parseFormat(value: string): ContentFormat {
+  if (value === "html" || value === "markdown") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "format must be html or markdown.");
+}
+
+function parseOutput(value: string): OutputFormat {
+  if (value === "json" || value === "text") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "output must be json or text.");
+}
+
+function assignOnce<T>(current: T | undefined, next: T, name: string): T {
+  if (current !== undefined) {
+    throw new CliError("INVALID_INPUT", `${name} was provided more than once.`);
+  }
+  return next;
 }
 
 function resolveApiUrl(flag: string | undefined, env: NodeJS.ProcessEnv, stored: string | undefined): string {
@@ -470,6 +495,10 @@ function resolveApiUrl(flag: string | undefined, env: NodeJS.ProcessEnv, stored:
   const fromEnv = env.FACTROVE_API_URL?.trim();
   if (fromEnv) {
     return fromEnv;
+  }
+  const fromEndpoint = env.FACTROVE_ENDPOINT_URL?.trim();
+  if (fromEndpoint) {
+    return fromEndpoint;
   }
   if (stored) {
     return stored;

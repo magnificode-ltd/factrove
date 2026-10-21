@@ -258,7 +258,7 @@ function collectJsonSchemas(name: string, schema: z.ZodType): Record<string, unk
   const rest = { ...converted };
   delete rest.$defs;
   delete rest.$schema;
-  if (name === "UploadForm") {
+  if (name === "UploadForm" || name === "ReplaceForm") {
     const properties = asRecord(rest.properties);
     const file = asRecord(properties.file);
     if (Object.keys(file).length > 0) {

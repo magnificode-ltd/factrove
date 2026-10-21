@@ -36,6 +36,11 @@ export const apiErrorCatalog = [
     description: "The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body."
   },
   {
+    status: 409,
+    code: "CONTENT_CONFLICT",
+    description: "Another replace of the same artifact revision finished first. Upload again to replace the current content."
+  },
+  {
     status: 413,
     code: "FILE_TOO_LARGE",
     description: "The upload is larger than the 10 MiB HTML limit."

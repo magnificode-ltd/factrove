@@ -129,6 +129,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261020120000_add_artifact_share",
       "20261020143000_pair_artifact_share_columns",
       "20261021090000_add_share_password",
+      "20261021170000_add_artifact_object_key",
     ]);
   });
 
@@ -339,9 +340,56 @@ describe("PostgreSQL artifact persistence", () => {
 
     const deleted = await repository.delete(created.id);
     expect(deleted.id).toBe(created.id);
+    expect(deleted.objectKey).toBe(`${created.id}.html`);
+    expect(deleted.contentRevision).toBe(0);
     expect(await repository.findById(created.id)).toBeNull();
     await expect(repository.update(created.id, { sizeBytes: 1 })).rejects.toMatchObject({ code: "P2025" });
     await expect(repository.delete(created.id)).rejects.toMatchObject({ code: "P2025" });
+  });
+
+  it("commits a new object key only while the revision still matches", async () => {
+    const created = await repository.create(artifactInput());
+    expect(created.objectKey).toBe(`${created.id}.html`);
+    expect(created.contentRevision).toBe(0);
+    const uploadedAt = new Date("2026-10-21T12:00:00.000Z");
+    const nextKey = `${created.id}/${randomUUID()}.html`;
+    const committed = await repository.commitContent({
+      id: created.id,
+      expectedRevision: created.contentRevision,
+      objectKey: nextKey,
+      sizeBytes: 40,
+      uploadedAt,
+    });
+    expect(committed).toBe(true);
+    const staleKey = `${created.id}/${randomUUID()}.html`;
+    const stale = await repository.commitContent({
+      id: created.id,
+      expectedRevision: created.contentRevision,
+      objectKey: staleKey,
+      sizeBytes: 80,
+      uploadedAt: new Date("2026-10-21T13:00:00.000Z"),
+    });
+    expect(stale).toBe(false);
+    const missing = await repository.commitContent({
+      id: randomUUID(),
+      expectedRevision: 0,
+      objectKey: nextKey,
+      sizeBytes: 1,
+      uploadedAt,
+    });
+    expect(missing).toBe(false);
+
+    const stored = await repository.findById(created.id);
+    expect(stored?.objectKey).toBe(nextKey);
+    expect(stored?.sizeBytes).toBe(40);
+    expect(stored?.contentRevision).toBe(1);
+    expect(stored?.uploadedAt?.toISOString()).toBe(uploadedAt.toISOString());
+    expect(stored?.createdAt.toISOString()).toBe(created.createdAt.toISOString());
+    expect(stored?.accessType).toBe(created.accessType);
+    expect(stored?.shareToken).toBeNull();
+    await expect(
+      prisma.$executeRawUnsafe(`UPDATE "artifact" SET "object_key" = '   ' WHERE "id" = $1::uuid`, created.id),
+    ).rejects.toThrow(/artifact_object_key_not_blank|23514/);
   });
 
   it("stores a share token for the owner and looks public links up by hash", async () => {
@@ -429,8 +477,8 @@ describe("PostgreSQL artifact persistence", () => {
     const id = randomUUID();
     await expect(
       prisma.$executeRawUnsafe(
-        `INSERT INTO "artifact" ("id", "creator_user_id", "organization_id", "access_type", "mime_type", "size_bytes", "updated_at")
-         VALUES ($1::uuid, $2, $3, 'public', 'text/html', 1, NOW())`,
+        `INSERT INTO "artifact" ("id", "creator_user_id", "organization_id", "access_type", "mime_type", "size_bytes", "object_key", "updated_at")
+         VALUES ($1::uuid, $2, $3, 'public', 'text/html', 1, $1::text || '.html', NOW())`,
         id,
         localUserFixture.id,
         localOrganizationFixture.id,

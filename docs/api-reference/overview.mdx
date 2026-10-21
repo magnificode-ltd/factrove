@@ -38,6 +38,8 @@ Better Auth `/api/auth` routes use Better Auth's own JSON.
 
 Public-view `429 RATE_LIMITED` and Markdown `503 CONVERSION_UNAVAILABLE` do not set `Retry-After`.
 
+`PUT /api/v1/artifacts/{id}/content` replaces HTML for the owner. Validation matches create. A `409 CONTENT_CONFLICT` means another replace finished first. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying.
+
 ## Public shares
 
 Anonymous detail, unlock, and HTML are under `/api/v1/public/artifacts/{id}/{token}`. Send an unlock grant in `X-Factrove-Share-Grant`. See [Sharing links](/guides/sharing-links).

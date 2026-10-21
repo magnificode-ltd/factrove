@@ -5,7 +5,9 @@ description: Artifacts, access types, organizations, and how viewer and share UR
 
 ## Artifact
 
-An artifact is one uploaded HTML document. The API stores metadata in PostgreSQL and the bytes in object storage. The storage key is `{artifactId}.html`, derived from the id. The database does not store a file path.
+An artifact is one uploaded HTML document. The API stores metadata in PostgreSQL and the bytes in object storage. The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`.
+
+Replacing content keeps the same id, access, and share token. Another replace of the same revision is `409 CONTENT_CONFLICT`. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying.
 
 Each artifact has:
 

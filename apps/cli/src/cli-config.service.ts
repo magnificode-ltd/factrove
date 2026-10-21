@@ -25,7 +25,7 @@ export class CliConfigService {
   requireApiKey(): string {
     const key = apiKeyForInvocation(this.load());
     if (!key) {
-      throw new CliError("INVALID_INPUT", "An API key is required. Run: pnpm factrove configure");
+      throw new CliError("INVALID_INPUT", "An API key is required. Run: factrove configure");
     }
     return key;
   }

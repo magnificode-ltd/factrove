@@ -7,6 +7,8 @@ export type ArtifactRecord = {
   accessType: AccessType;
   mimeType: string;
   sizeBytes: number;
+  objectKey: string;
+  contentRevision: number;
   createdAt: Date;
   updatedAt: Date;
   uploadedAt: Date | null;
@@ -22,6 +24,7 @@ export type CreateArtifactInput = {
   accessType: AccessType;
   mimeType: string;
   sizeBytes: number;
+  objectKey?: string;
   uploadedAt?: Date | null;
 };
 
