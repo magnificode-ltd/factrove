@@ -1,5 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Transform } from "node:stream";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors, type CallHandler, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   artifactDtoSchema,
@@ -11,7 +12,7 @@ import {
   type ContentFormat,
   type ShareEnvelope,
 } from "@factrove/contracts";
-import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
+import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES, multipartFilenameParameter } from "../rendering/html-policy.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
 import { jsonBody } from "./json-body.js";
@@ -29,6 +30,33 @@ type JsonRequest = HeaderRequest & {
   body?: unknown;
 };
 
+type MultipartRequest = HeaderRequest & {
+  pipe: (destination: NodeJS.WritableStream, options?: { end?: boolean }) => NodeJS.WritableStream;
+  multipartChunks?: Buffer[];
+};
+
+// Records the file part's bytes so the upload can see whether the header used filename*.
+@Injectable()
+class CaptureMultipartFilename implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler) {
+    const request = context.switchToHttp().getRequest<MultipartRequest>();
+    const chunks: Buffer[] = [];
+    request.multipartChunks = chunks;
+    const originalPipe = request.pipe.bind(request);
+    request.pipe = (destination, options) => {
+      const tee = new Transform({
+        transform(chunk: Buffer | string, _encoding, callback) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          callback(null, chunk);
+        },
+      });
+      originalPipe(tee);
+      return tee.pipe(destination, options);
+    };
+    return next.handle();
+  }
+}
+
 const htmlUpload = FileInterceptor("file", {
   limits: {
     // Busboy emits its limit when the buffered size reaches this ceiling.
@@ -37,6 +65,14 @@ const htmlUpload = FileInterceptor("file", {
     fields: 8,
     fieldSize: 1024,
     parts: 12,
+  },
+  fileFilter(req, file, callback) {
+    const request = req as MultipartRequest;
+    const header = request.headers["content-type"];
+    const contentType = Array.isArray(header) ? header[0] : header;
+    const parameter = multipartFilenameParameter(Buffer.concat(request.multipartChunks ?? []), contentType);
+    Object.assign(file, { filenameParameter: parameter });
+    callback(null, true);
   },
 });
 
@@ -48,7 +84,7 @@ export class ArtifactsController {
 
   @Post()
   @HttpCode(201)
-  @UseInterceptors(htmlUpload)
+  @UseInterceptors(CaptureMultipartFilename, htmlUpload)
   async upload(@Req() request: HeaderRequest, @UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
     const artifact = await this.artifacts.upload(request, file, body);
     return { artifact: artifactDtoSchema.parse(artifact) };
@@ -56,7 +92,7 @@ export class ArtifactsController {
 
   // Replaces the current HTML. The same share token keeps serving whatever bytes are stored.
   @Put(":id/content")
-  @UseInterceptors(htmlUpload)
+  @UseInterceptors(CaptureMultipartFilename, htmlUpload)
   async replaceContent(
     @Req() request: HeaderRequest,
     @Param("id") id: string,

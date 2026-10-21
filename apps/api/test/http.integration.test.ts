@@ -999,6 +999,31 @@ describe("HTTP API", () => {
     expect((await upload(baseUrl, "👍.html", bytes)).name).toBe("👍");
   });
 
+  it("keeps a filename* value that busboy already decoded", async () => {
+    const boundary = "----factrove-filename-star";
+    const bytes = Buffer.from("<p>star</p>");
+    const body = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n` +
+          `Content-Type: text/html\r\n\r\n`,
+        "utf8",
+      ),
+      bytes,
+      Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
+    ]);
+    const response = await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${ownerApiKey}`,
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+    });
+    expect(response.status).toBe(201);
+    expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("caf\u00C3\u00A9");
+  });
+
   it("rejects a trailing break and a C1 control in a submitted name", async () => {
     const bytes = new TextEncoder().encode("<p>controls</p>");
     const trailing = await postFile(baseUrl, "break.html", bytes, { name: "hello\n" });
@@ -1197,7 +1222,7 @@ describe("HTTP API", () => {
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
   });
 
-  it("keeps the new object when a content commit drops its connection", async () => {
+  it("lands the new object and name together when a content commit drops its connection", async () => {
     const original = new TextEncoder().encode("<p>before-drop</p>");
     const next = new TextEncoder().encode("<p>after-drop</p>");
     const artifact = await upload(baseUrl, "drop.html", original, { name: "Before drop" });
@@ -1258,7 +1283,7 @@ describe("HTTP API", () => {
       expect(after.objectKey).toBe(newKey);
       expect(after.sizeBytes).toBe(next.byteLength);
       expect(after.contentRevision).toBe(before.contentRevision + 1);
-      expect(after.name).toBe("Before drop");
+      expect(after.name).toBe("After drop");
       expect(Buffer.from(store.objects.get(after.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
       const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
       expect(content.status).toBe(200);
@@ -1271,27 +1296,58 @@ describe("HTTP API", () => {
     }
   });
 
-  it("does not keep a name from a replace that loses to one that landed after it", async () => {
+  it("returns 200 with its name when a nameless replace lands after this write", async () => {
     const bytes = new TextEncoder().encode("<p>named-race</p>");
+    const laterBytes = new TextEncoder().encode("<p>later-nameless</p>");
     const artifact = await upload(baseUrl, "named-race.html", bytes, { name: "Original" });
     const repository = app.get(ArtifactsRepository);
     const originalCommit = repository.commitContent.bind(repository);
+    let laterKey = "";
     repository.commitContent = async (input) => {
       const committed = await originalCommit(input);
+      laterKey = `${artifact.id}/${randomUUID()}.html`;
+      store.objects.set(laterKey, laterBytes);
       await originalCommit({
         ...input,
         expectedRevision: input.expectedRevision + 1,
-        objectKey: `${artifact.id}/${randomUUID()}.html`,
+        objectKey: laterKey,
+        sizeBytes: laterBytes.byteLength,
         name: undefined,
       });
       return committed;
     };
     try {
-      const lost = await putContent(baseUrl, artifact.id, "lost.html", bytes, { name: "Lost the race" });
-      expect(lost.status).toBe(409);
-      expect((await errorOf(lost)).code).toBe("CONTENT_CONFLICT");
+      const response = await putContent(baseUrl, artifact.id, "lost.html", bytes, { name: "Lost the race" });
+      expect(response.status).toBe(200);
+      expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("Lost the race");
       const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
-      expect(row.name).toBe("Original");
+      expect(row.objectKey).toBe(laterKey);
+      expect(row.name).toBe("Lost the race");
+      expect(row.sizeBytes).toBe(laterBytes.byteLength);
+      expect(Buffer.from(store.objects.get(row.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(laterBytes));
+    } finally {
+      repository.commitContent = originalCommit;
+    }
+  });
+
+  it("returns the explicit name when a lost acknowledgement already shows this object", async () => {
+    const original = new TextEncoder().encode("<p>before-ack</p>");
+    const next = new TextEncoder().encode("<p>after-ack</p>");
+    const artifact = await upload(baseUrl, "ack.html", original, { name: "Before ack" });
+    const repository = app.get(ArtifactsRepository);
+    const originalCommit = repository.commitContent.bind(repository);
+    repository.commitContent = async (input) => {
+      await originalCommit(input);
+      throw new Error("acknowledgement lost");
+    };
+    try {
+      const response = await putContent(baseUrl, artifact.id, "acked.html", next, { name: "Landed name" });
+      expect(response.status).toBe(200);
+      expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("Landed name");
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(row.name).toBe("Landed name");
+      expect(row.sizeBytes).toBe(next.byteLength);
+      expect(Buffer.from(store.objects.get(row.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
     } finally {
       repository.commitContent = originalCommit;
     }
@@ -1385,6 +1441,38 @@ describe("HTTP API", () => {
     const received = Buffer.from(await content.arrayBuffer());
     expect(received.byteLength).toBe(row.sizeBytes);
     expect(received.equals(Buffer.from(stored ?? new Uint8Array()))).toBe(true);
+  });
+
+  it("ends parallel named replaces with content and name from the same request", async () => {
+    const artifact = await upload(baseUrl, "named-parallel.html", new TextEncoder().encode("<p>seed</p>"), {
+      name: "seed",
+    });
+    const bodies = Array.from({ length: 20 }, (_, index) => {
+      const marker = String(index).padStart(2, "0");
+      return {
+        name: `race-${marker}`,
+        bytes: new TextEncoder().encode(`<p>${marker}${"y".repeat(80 + index)}</p>`),
+      };
+    });
+    const responses = await Promise.all(
+      bodies.map((body, index) => putContent(baseUrl, artifact.id, `named-race-${index}.html`, body.bytes, { name: body.name })),
+    );
+    const statuses = responses.map((response) => response.status);
+    expect(statuses.every((status) => status === 200 || status === 409)).toBe(true);
+    expect(statuses).toContain(200);
+    for (const response of responses) {
+      if (response.status === 409) {
+        expect((await errorOf(response)).code).toBe("CONTENT_CONFLICT");
+      } else {
+        await response.arrayBuffer();
+      }
+    }
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const stored = store.objects.get(row.objectKey);
+    const winner = bodies.find((body) => stored && Buffer.from(stored).equals(Buffer.from(body.bytes)));
+    expect(winner).toBeDefined();
+    expect(row.name).toBe(winner?.name);
+    expect(row.sizeBytes).toBe(winner?.bytes.byteLength);
   });
 
   it("reads a legacy object from the key stored on its row", async () => {

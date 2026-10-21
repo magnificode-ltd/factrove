@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { artifactDtoSchema, publicArtifactSchema } from "../packages/contracts/dist/index.js";
 import { buildOpenApiDocument } from "../packages/contracts/dist/openapi.js";
 
 const helloBytes = readFileSync(new URL("../fixtures/hello.html", import.meta.url)).byteLength;
@@ -20,6 +21,22 @@ test("generated upload samples and error examples match the running API", () => 
   }
 
   assert.equal(upload.responses["201"].content["application/json"].example.artifact.sizeBytes, helloBytes);
+  assert.equal(artifactDtoSchema.safeParse(upload.responses["201"].content["application/json"].example.artifact).success, true);
+  assert.equal(
+    artifactDtoSchema.safeParse(replace.responses["200"].content["application/json"].example.artifact).success,
+    true,
+  );
+  assert.equal(
+    artifactDtoSchema.safeParse(doc.paths["/api/v1/artifacts"].get.responses["200"].content["application/json"].example.items[0]).success,
+    true,
+  );
+  const publicArtifact = doc.paths["/api/v1/public/artifacts/{id}/{token}"].get.responses["200"].content["application/json"].example.artifact;
+  assert.equal(publicArtifactSchema.safeParse(publicArtifact).success, true);
+  assert.equal(replace.responses["400"].content["application/json"].example.error.code, "INVALID_REQUEST");
+  assert.equal(
+    replace.responses["400"].content["application/json"].example.error.message,
+    "accessType cannot be changed when replacing content.",
+  );
   const upload400 = upload.responses["400"].content["application/json"];
   assert.equal(upload400.example, undefined);
   assert.ok(upload400.examples.INVALID_REQUEST);

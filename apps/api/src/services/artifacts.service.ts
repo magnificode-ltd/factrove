@@ -585,10 +585,14 @@ export class ArtifactsService {
   }
 
   // Writes a new object, then points the row at it only if the revision is unchanged.
+  // A name sent with this request is set in that same update. Omitting it leaves the column.
   // A lost storage acknowledgement deletes that object when it can and leaves the row alone.
-  // One replace wins a revision. The others get 409 and their objects are removed.
+  // A commit that returns false lost the revision. The response is 409 and the name was not written.
+  // A commit that returns true is this request's write. The response is 200 even if a later
+  // replace has moved the pointer since.
   // A commit that throws has an unknown outcome. The new object stays, because the
-  // transaction can still land after a read of the previous key.
+  // transaction can still land after a read of the previous key. When that read already
+  // shows this request's object, the name landed with it and the response is 200.
   private async publishReplacement(record: ArtifactRecord, bytes: Uint8Array, name?: string): Promise<ArtifactRecord> {
     const previousKey = storedObjectKey(record.id, record.objectKey);
     const newKey = immutableContentKey(record.id, randomUUID());
@@ -604,15 +608,15 @@ export class ArtifactsService {
       throw error;
     }
 
+    let committed = false;
     try {
-      // The name stays out of this statement. A lost acknowledgement can still commit
-      // the new object, and that delayed commit must not leave a new name.
-      await this.artifacts.commitContent({
+      committed = await this.artifacts.commitContent({
         id: record.id,
         expectedRevision: record.contentRevision,
         objectKey: newKey,
         sizeBytes: bytes.byteLength,
         uploadedAt,
+        ...(name === undefined ? {} : { name }),
       });
     } catch (error) {
       const visible = await this.visibleObjectKey(record.id);
@@ -627,34 +631,26 @@ export class ArtifactsService {
     }
 
     const current = await this.artifacts.findById(record.id);
+    if (committed && current) {
+      if (previousKey !== newKey && current.objectKey !== previousKey) {
+        await this.deleteStoredQuietly(previousKey);
+      }
+      return current;
+    }
+
     const decision = decideContentPublish({
       newKey,
       previousKey,
       visibleKey: current?.objectKey ?? null,
     });
+    if (decision.outcome === "published" && current && current.objectKey === newKey) {
+      if (decision.deleteKey) {
+        await this.deleteStoredQuietly(decision.deleteKey);
+      }
+      return current;
+    }
     if (decision.deleteKey) {
       await this.deleteStoredQuietly(decision.deleteKey);
-    }
-    if (decision.outcome === "published" && current?.objectKey === newKey) {
-      if (name === undefined) {
-        return current;
-      }
-      // Only the acknowledged winner is renamed, and only while its revision and object are still current.
-      // A 409 from a later replace, or a commit that has not been acknowledged, leaves the previous name.
-      await this.artifacts.renameIfCurrent({
-        id: record.id,
-        expectedRevision: current.contentRevision,
-        objectKey: newKey,
-        name,
-      });
-      const named = await this.artifacts.findById(record.id);
-      if (named?.objectKey === newKey && named.name === name) {
-        return named;
-      }
-      if (!named || named.objectKey !== newKey) {
-        throw contentConflict();
-      }
-      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
     if (!current) {
       throw artifactNotFound();
@@ -847,12 +843,15 @@ function readUpload(file: unknown): { filename: string; bytes: Uint8Array } | un
   if (typeof file !== "object" || file === null) {
     return undefined;
   }
-  const record = file as { originalname?: unknown; buffer?: unknown };
+  const record = file as { originalname?: unknown; buffer?: unknown; filenameParameter?: unknown };
   if (typeof record.originalname !== "string" || !Buffer.isBuffer(record.buffer)) {
     return undefined;
   }
   return {
-    filename: decodeMultipartFilename(record.originalname),
+    filename: decodeMultipartFilename(
+      record.originalname,
+      record.filenameParameter === "extended" ? "extended" : "filename",
+    ),
     bytes: Uint8Array.from(record.buffer),
   };
 }

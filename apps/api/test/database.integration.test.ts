@@ -409,19 +409,6 @@ describe("PostgreSQL artifact persistence", () => {
     const stored = await repository.findById(named.id);
     expect(stored?.name).toBe("Renamed calendar");
     expect(stored?.objectKey).toBe(renamedKey);
-    const renamedRow = stored;
-    expect(await repository.renameIfCurrent({
-      id: named.id,
-      expectedRevision: (renamedRow?.contentRevision ?? 0) + 1,
-      objectKey: renamedKey,
-      name: "Too late",
-    })).toBe(false);
-    expect(await repository.renameIfCurrent({
-      id: named.id,
-      expectedRevision: renamedRow?.contentRevision ?? -1,
-      objectKey: `${named.id}/other.html`,
-      name: "Wrong object",
-    })).toBe(false);
     expect((await repository.findById(named.id))?.name).toBe("Renamed calendar");
     const shared = await repository.saveShare(named.id, "share-token-value", "c".repeat(64));
     expect((await repository.findShared(named.id, "c".repeat(64)))?.name).toBe("Renamed calendar");

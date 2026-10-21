@@ -429,7 +429,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Replace an artifact's stored HTML",
     description:
-      "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` is written only after the content revision update is acknowledged and the row still points at this request's object, using a conditional update of that revision and object key. Omit `name` to keep the current name. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. A content commit that throws can still land later; that landing does not change the name. If the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+      "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` is set in the same conditional update as the new object and the revision check. Omit `name` and that update does not change the column, so the current name stays. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. When this request's update lands, the response is 200 even if a later replace has landed since. A content commit that throws can still land later, and that landing sets the name when this request included one. If the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
@@ -446,7 +446,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ArtifactEnvelope"
       },
       "400": {
-        description: `Invalid multipart body, accessType on replace, name, or UTF-8. An invalid name uses the same NFC, trim, and control-character rule as upload and is \`400 INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\``,
+        description: `Invalid multipart body, accessType on replace, name, or UTF-8. An invalid name uses the same NFC, trim, and control-character rule as upload and is code \`INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\``,
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
@@ -463,7 +463,7 @@ export const httpOperations: HttpOperation[] = [
       "415": { description: "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.", schemaName: "ApiError" },
       "500": {
         description:
-          "The replace commit threw after the object was written. The new bytes may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
+          "The replace commit threw after the object was written. The new bytes, and the name when this request sent one, may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
         schemaName: "ApiError"
       },
       "503": {

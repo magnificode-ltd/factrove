@@ -51,8 +51,7 @@ export class ArtifactsRepository {
 
   // Commits one immutable object. Share columns, access, and createdAt stay as they are.
   // The update matches the revision the caller read, so a concurrent replace cannot share this write.
-  // name is included only when the caller passes it. The service leaves it unset here: a commit
-  // that throws can still land, and that landing must not change the name.
+  // name is set only when the caller passes it. Omitting name leaves the column unchanged.
   async commitContent(input: {
     id: string;
     expectedRevision: number;
@@ -70,25 +69,6 @@ export class ArtifactsRepository {
         contentRevision: { increment: 1 },
         ...(input.name === undefined ? {} : { name: input.name }),
       },
-    });
-    return updated.count === 1;
-  }
-
-  // Sets the library name only while this revision and object key are still the current ones.
-  // It does not change the object, the size, or the revision.
-  async renameIfCurrent(input: {
-    id: string;
-    expectedRevision: number;
-    objectKey: string;
-    name: string;
-  }): Promise<boolean> {
-    const updated = await this.prisma.artifact.updateMany({
-      where: {
-        id: input.id,
-        contentRevision: input.expectedRevision,
-        objectKey: input.objectKey,
-      },
-      data: { name: input.name },
     });
     return updated.count === 1;
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { artifactNameFromFilename, artifactNameValueSchema, normalizeArtifactName } from "@factrove/contracts";
+import { decodeMultipartFilename, multipartFilenameParameter } from "../src/rendering/html-policy.js";
 
 describe("artifact names", () => {
   it("trims, normalizes, and keeps a name of 120 characters", () => {
@@ -33,5 +34,28 @@ describe("artifact names", () => {
     expect(artifactNameFromFilename(".html")).toBeNull();
     expect(artifactNameFromFilename(`${"b".repeat(121)}.html`)).toBeNull();
     expect(artifactNameFromFilename(`${"c".repeat(120)}.htm`)).toBe("c".repeat(120));
+  });
+
+  it("re-decodes a plain filename and keeps a filename* value", () => {
+    const mojibake = "caf\u00C3\u00A9.html";
+    expect(decodeMultipartFilename(mojibake, "filename")).toBe("caf\u00E9.html");
+    expect(decodeMultipartFilename(mojibake, "extended")).toBe(mojibake);
+    const boundary = "----factrove";
+    const contentType = `multipart/form-data; boundary=${boundary}`;
+    const extended = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n\r\n`,
+      "utf8",
+    );
+    const plain = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="caf\u00C3\u00A9.html"\r\n\r\n`,
+      "latin1",
+    );
+    const both = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="cafe.html"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n\r\n`,
+      "utf8",
+    );
+    expect(multipartFilenameParameter(extended, contentType)).toBe("extended");
+    expect(multipartFilenameParameter(plain, contentType)).toBe("filename");
+    expect(multipartFilenameParameter(both, contentType)).toBe("extended");
   });
 });
