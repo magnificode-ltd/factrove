@@ -16,9 +16,7 @@ describe("CLI argument parsing", () => {
       path: file,
       access: "private",
       json: false,
-      apiUrl: DEFAULT_API_URL,
-      profile: "default",
-      profileExplicit: false,
+      ...plainCommand(),
     });
   });
 
@@ -83,7 +81,7 @@ describe("CLI argument parsing", () => {
     expect(failure(["upload", file, "--access", "public"], {}).code).toBe("INVALID_INPUT");
     expect(failure(["upload", file, "--access", "private", "--access", "org_shared"], {}).message).toMatch(/more than once/);
     expect(failure(["upload", file, "--api-url"], {}).message).toMatch(/Missing value for --api-url/);
-    expect(failure(["upload", file, "--quiet"], {}).message).toMatch(/Unknown option/);
+    expect(failure(["upload", file, "--acl"], {}).message).toMatch(/Unknown option/);
   });
 
   it("detects --json without treating values or later positionals as flags", () => {
@@ -103,9 +101,7 @@ describe("factrove get arguments", () => {
       id: artifactId,
       format: "html",
       json: false,
-      apiUrl: DEFAULT_API_URL,
-      profile: "default",
-      profileExplicit: false,
+      ...plainCommand(),
     });
   });
 
@@ -170,9 +166,7 @@ describe("factrove share arguments", () => {
       password: null,
       removePassword: false,
       json: false,
-      apiUrl: DEFAULT_API_URL,
-      profile: "default",
-      profileExplicit: false,
+      ...plainCommand(),
     });
     expect(parseCliArgs(["share", artifactId, "--revoke", "--json"], isolated)).toMatchObject({
       kind: "share",
@@ -189,6 +183,7 @@ describe("factrove share arguments", () => {
     expect(failure(["get", artifactId, "--revoke"], {}).message).toMatch(/only valid for the share command/);
     expect(failure(["share", artifactId, "--access", "private"], {}).message).toMatch(/only valid for the upload command/);
     expect(failure(["configure", "--revoke"], {}).message).toMatch(/configure accepts/);
+    expect(failure(["configure", "--endpoint-url", "http://127.0.0.1:9", "--quiet"], {}).message).toMatch(/configure accepts/);
   });
 
   it("reads link passwords from a prompt or stdin, never from an argument", () => {
@@ -221,10 +216,134 @@ describe("factrove share arguments", () => {
     expect(failure(["share", artifactId, "--password-stdin", "--remove-password"], {}).message).toMatch(/only one of/);
     expect(failure(["share", artifactId, "--remove-password", "--revoke"], {}).message).toMatch(/only one of/);
     expect(failure(["upload", file, "--password"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["cp", "a.html", "factrove://mine/", "--password"], {}).message).toMatch(/only valid for the share command/);
+    expect(parseCliArgs(["share", artifactId, "--output", "json"], isolated)).toMatchObject({ json: true, output: "json" });
     expect(failure(["get", artifactId, "--remove-password"], {}).message).toMatch(/only valid for the share command/);
     expect(failure(["configure", "--password-stdin"], {}).message).toMatch(/only valid for the share command/);
   });
 });
+
+describe("aws s3 command arguments", () => {
+  it("maps endpoint-url, output, and profile the way flags override the environment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-s3-args-"));
+    try {
+      await writeFile(join(directory, "config"), "[profile dev]\nendpoint_url = https://from-endpoint.example\n");
+      const env = { FACTROVE_CONFIG_DIR: directory };
+      expect(parseCliArgs(["cp", "a.html", "factrove://mine/", "--profile", "dev"], env)).toMatchObject({
+        kind: "cp",
+        profile: "dev",
+        profileExplicit: true,
+        apiUrl: "https://from-endpoint.example",
+      });
+      expect(parseCliArgs(["cp", "a.html", "factrove://mine/", "--profile", "dev"], { ...env, FACTROVE_ENDPOINT_URL: "http://from-env" })).toMatchObject({
+        apiUrl: "http://from-env",
+      });
+      expect(parseCliArgs(["upload", file], { ...env, FACTROVE_ENDPOINT_URL: "http://endpoint", FACTROVE_API_URL: "http://api" })).toMatchObject({
+        apiUrl: "http://api",
+      });
+      expect(parseCliArgs(["get", artifactId, "--endpoint-url", "http://flag"], { ...env, FACTROVE_API_URL: "http://api" })).toMatchObject({
+        apiUrl: "http://flag",
+      });
+      expect(parseCliArgs(["cp", "a.html", "factrove://mine/", "--api-url", "http://same", "--endpoint-url", "http://same"], env)).toMatchObject({
+        kind: "cp",
+        apiUrl: "http://same",
+      });
+      expect(parseCliArgs(["configure", "--endpoint-url", "http://127.0.0.1:9", "--api-key", "ftrv_secret"], env)).toMatchObject({
+        kind: "configure",
+        apiUrl: "http://127.0.0.1:9",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers api_url over endpoint_url in the same profile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "factrove-s3-profile-"));
+    try {
+      await writeFile(join(directory, "config"), "[default]\napi_url = https://api.example\nendpoint_url = https://endpoint.example\n");
+      expect(parseCliArgs(["cp", "a.html", "factrove://mine/"], { FACTROVE_CONFIG_DIR: directory })).toMatchObject({
+        apiUrl: "https://api.example",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("parses cp as the s3 name for upload and get", () => {
+    expect(parseCliArgs(["s3", "cp", "./a.html", "factrove://org/", "--quiet"], isolated)).toEqual({
+      kind: "cp",
+      source: "./a.html",
+      destination: "factrove://org/",
+      format: "html",
+      json: false,
+      ...plainCommand(),
+      quiet: true,
+    });
+    expect(parseCliArgs(["cp", "factrove://mine/" + artifactId, "-", "--format", "markdown", "--output", "json"], isolated)).toMatchObject({
+      kind: "cp",
+      source: `factrove://mine/${artifactId}`,
+      destination: "-",
+      format: "markdown",
+      json: true,
+      output: "json",
+    });
+    expect(parseCliArgs(["cp", `factrove://MINE/${artifactId}.html`, "./out.html"], isolated)).toMatchObject({
+      source: `factrove://MINE/${artifactId}.html`,
+      destination: "./out.html",
+    });
+    expect(parseCliArgs(["upload", file, "--output", "json", "--quiet"], isolated)).toMatchObject({
+      kind: "upload",
+      json: true,
+      output: "json",
+      quiet: true,
+    });
+    expect(parseCliArgs(["get", artifactId, "--output", "text"], isolated)).toMatchObject({
+      kind: "get",
+      json: false,
+      output: "text",
+    });
+    expect(parseCliArgs(["s3", "help"], isolated)).toEqual({ kind: "help" });
+  });
+
+  it("rejects commands and flags the CLI does not have", () => {
+    expect(failure(["ls"], {}).message).toMatch(/Unknown command 'ls'/);
+    expect(failure(["rm", `factrove://mine/${artifactId}`], {}).message).toMatch(/Unknown command 'rm'/);
+    expect(failure(["presign", `factrove://mine/${artifactId}`], {}).message).toMatch(/Unknown command 'presign'/);
+    expect(failure(["mv", "a", "b"], {}).message).toMatch(/Unknown command 'mv'/);
+    expect(failure(["cp"], {}).message).toMatch(/source and a destination/);
+    expect(failure(["cp", "a.html", "factrove://mine/", "extra"], {}).message).toMatch(/extra arguments/);
+    expect(failure(["cp", "a.html", "factrove://mine/", "--format", "markdown"], {}).message).toMatch(/only valid when copying an artifact/);
+    expect(failure(["cp", "a.html", "factrove://mine/", "--access", "private"], {}).message).toMatch(/URI scope/);
+    expect(failure(["cp", `factrove://mine/${artifactId}`, "-", "--revoke"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["upload", file, "--json", "--output", "text"], {}).message).toMatch(/conflicts/);
+    expect(failure(["upload", file, "--output", "text", "--json"], {}).message).toMatch(/conflicts/);
+    expect(failure(["upload", "-"], {}).message).toMatch(/Unknown option '-'/);
+    expect(failure(["get", "-"], {}).message).toMatch(/Unknown option '-'/);
+    expect(failure(["s3", "upload", file], {}).message).toMatch(/only accepts cp/);
+    expect(failure(["s3", "get", artifactId], {}).message).toMatch(/only accepts cp/);
+    expect(failure(["s3", "share", artifactId], {}).message).toMatch(/only accepts cp/);
+    expect(failure(["cp", "--output", "table", "a.html", "factrove://mine/"], {}).message).toMatch(/json or text/);
+    expect(failure(["cp", "--endpoint-url", "http://a", "--api-url", "http://b", "a.html", "factrove://mine/"], {}).message).toMatch(/different values/);
+    expect(failure(["cp", "a.html", "factrove://mine/", "--query", "id"], {}).message).toMatch(/Unknown option/);
+    expect(parseCliArgs(["upload", "--", "-"], isolated)).toMatchObject({ kind: "upload", path: "-" });
+    expect(parseCliArgs(["cp", "-", "factrove://mine/"], isolated)).toMatchObject({ kind: "cp", source: "-", destination: "factrove://mine/" });
+    expect(cliWantsJson(["cp", "--output", "json", "a.html", "factrove://mine/"])).toBe(true);
+    expect(cliWantsJson(["cp", "--output", "text", "--json", "a.html", "factrove://mine/"])).toBe(true);
+    expect(cliWantsJson(["cp", "--json", "--output", "text", "a.html", "factrove://mine/"])).toBe(true);
+    expect(cliWantsJson(["cp", "--output", "text", "a.html", "factrove://mine/"])).toBe(false);
+    expect(cliWantsJson(["cp", "--output=json", "a.html", "factrove://mine/"])).toBe(true);
+  });
+});
+
+function plainCommand() {
+  return {
+    output: "text" as const,
+    quiet: false,
+    apiUrl: DEFAULT_API_URL,
+    profile: "default",
+    profileExplicit: false,
+  };
+}
 
 function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {
   const parsed = parseCliArgs(argv, { ...isolated, ...env });

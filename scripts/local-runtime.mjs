@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -82,7 +83,15 @@ export function webLaunchEnv(parent, apiEnv) {
 }
 
 const cliDevEnvKeys = ["FACTROVE_API_URL", "FACTROVE_PROFILE"];
-const optionsWithValues = new Set(["--access", "--api-url", "--api-key", "--format", "--profile"]);
+const optionsWithValues = new Set([
+  "--access",
+  "--api-url",
+  "--api-key",
+  "--endpoint-url",
+  "--format",
+  "--output",
+  "--profile",
+]);
 
 export function cliEnvFilePath(env) {
   const override = env.FACTROVE_CLI_ENV_FILE?.trim() ?? "";
@@ -137,11 +146,12 @@ export function launcherSkipsEnvFile(argv) {
     }
     positionals.push(arg);
   }
-  return positionals[0] === "help";
+  return positionals[0] === "help" || (positionals[0] === "s3" && positionals[1] === "help");
 }
 
 export function launcherWantsJson(argv) {
   let json = false;
+  let explicitJson = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") {
@@ -149,6 +159,20 @@ export function launcherWantsJson(argv) {
     }
     if (arg === "--json") {
       json = true;
+      explicitJson = true;
+      continue;
+    }
+    if (arg === "--output" || arg.startsWith("--output=")) {
+      const inline = arg.startsWith("--output=");
+      const value = inline ? arg.slice("--output=".length) : argv[index + 1];
+      if (!inline && value !== undefined && !value.startsWith("-")) {
+        index += 1;
+      }
+      if (value === "json") {
+        json = true;
+      } else if (value === "text" && !explicitJson) {
+        json = false;
+      }
       continue;
     }
     if (optionsWithValues.has(arg)) {
@@ -159,6 +183,41 @@ export function launcherWantsJson(argv) {
     }
   }
   return json;
+}
+
+const defaultE2eArtifactsDir = "/opt/cursor/artifacts";
+
+export function e2eSessionDirectory(env, options = {}) {
+  const requested = typeof env.FACTROVE_E2E_ARTIFACTS_DIR === "string" ? env.FACTROVE_E2E_ARTIFACTS_DIR.trim() : "";
+  if (requested.length > 0 && ensureWritableDirectory(requested)) {
+    return requested;
+  }
+  const existingDir = options.existingDir ?? defaultE2eArtifactsDir;
+  if (isWritableDirectory(existingDir)) {
+    return existingDir;
+  }
+  return options.fallbackDir ?? tmpdir();
+}
+
+function ensureWritableDirectory(directory) {
+  try {
+    mkdirSync(directory, { recursive: true });
+  } catch {
+    return false;
+  }
+  return isWritableDirectory(directory);
+}
+
+function isWritableDirectory(directory) {
+  try {
+    if (!statSync(directory).isDirectory()) {
+      return false;
+    }
+    accessSync(directory, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function legacyRootEnvWarning(rootEnvPath) {

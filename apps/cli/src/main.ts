@@ -4,6 +4,7 @@ import { CliConfigService } from "./cli-config.service.js";
 import { CliModule } from "./cli.module.js";
 import { formatFailure } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
+import { CpCommand } from "./cp.command.js";
 import { GetCommand } from "./get.command.js";
 import { cliWantsJson, helpText } from "./parse-args.js";
 import { ShareCommand } from "./share.command.js";
@@ -29,6 +30,8 @@ async function run(): Promise<void> {
       await app.get(GetCommand).execute();
     } else if (invocation.kind === "share") {
       await app.get(ShareCommand).execute();
+    } else if (invocation.kind === "cp") {
+      await app.get(CpCommand).execute();
     } else {
       await app.get(UploadCommand).execute();
     }

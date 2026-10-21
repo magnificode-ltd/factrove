@@ -1,9 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
+import type { FactroveClient } from "@factrove/api-client";
+import { callApi } from "./api-call.js";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
-import { safeApiOrigin } from "./parse-args.js";
 
 @Injectable()
 export class GetCommand {
@@ -18,18 +18,9 @@ export class GetCommand {
       throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
     }
 
-    let content;
-    try {
-      content = await this.client.getArtifactContent(invocation.id, { format: invocation.format });
-    } catch (error) {
-      if (error instanceof FactroveApiError && error.code === "NETWORK_ERROR") {
-        throw new CliError(
-          "NETWORK_ERROR",
-          `Could not reach the Factrove API at ${safeApiOrigin(invocation.apiUrl)}.`,
-        );
-      }
-      throw error;
-    }
+    const content = await callApi(invocation.apiUrl, () =>
+      this.client.getArtifactContent(invocation.id, { format: invocation.format }),
+    );
 
     if (invocation.json) {
       process.stdout.write(`${JSON.stringify(content)}\n`);

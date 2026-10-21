@@ -40,7 +40,7 @@ pnpm factrove upload ./report.html --access org_shared --json
 
 The default access type is `private`. Plain output is the viewer URL. JSON output is the shared API response envelope containing the artifact metadata and URLs. Errors go to stderr, return a nonzero exit code, and explain local input, network, or API failures.
 
-The CLI obtains its API origin from `--api-url`, then `FACTROVE_API_URL`, then the local default. It requires no login, key, or database/storage credentials. Each upload creates a new artifact; automatic retries, overwriting, and additional CLI commands are later features.
+The CLI obtains its API origin from `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile, then the local default. It requires no login, key, or database/storage credentials. Each upload creates a new artifact; automatic retries, overwriting, and further CLI commands are later features. `cp` is the aws s3 name for upload and get. That mapping is [CLI_S3_COMPATIBILITY.md](CLI_S3_COMPATIBILITY.md).
 
 ## Local identity and access classification
 
@@ -193,7 +193,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](../prd/post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](../prd/post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, versioning, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](../prd/post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](../prd/post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, versioning, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

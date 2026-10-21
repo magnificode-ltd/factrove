@@ -1,9 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
+import type { FactroveClient } from "@factrove/api-client";
+import { callApi } from "./api-call.js";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
-import { helpText, safeApiOrigin } from "./parse-args.js";
+import { helpText } from "./parse-args.js";
 import { UploadFileService } from "./upload-file.service.js";
 
 @Injectable()
@@ -26,23 +27,14 @@ export class UploadCommand {
 
     const upload = await this.files.read(invocation.path);
     const file = new Blob([arrayBufferOf(upload.bytes)], { type: "text/html" });
-    let envelope;
-    try {
-      // One request only. Retrying POST /artifacts would create another artifact.
-      envelope = await this.client.uploadArtifact({
+    // One request only. Retrying POST /artifacts would create another artifact.
+    const envelope = await callApi(invocation.apiUrl, () =>
+      this.client.uploadArtifact({
         file,
         filename: upload.filename,
         accessType: invocation.access,
-      });
-    } catch (error) {
-      if (error instanceof FactroveApiError && error.code === "NETWORK_ERROR") {
-        throw new CliError(
-          "NETWORK_ERROR",
-          `Could not reach the Factrove API at ${safeApiOrigin(invocation.apiUrl)}.`,
-        );
-      }
-      throw error;
-    }
+      }),
+    );
 
     if (invocation.json) {
       process.stdout.write(`${JSON.stringify(envelope)}\n`);

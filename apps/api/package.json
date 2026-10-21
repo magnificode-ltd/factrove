@@ -8,7 +8,7 @@
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
     "dev": "pnpm build && node dist/main.js",
-    "test": "prisma generate && vitest run && NODE_ENV=production vitest run --config vitest.rate-limit.config.ts",
+    "test": "prisma generate && node ../../scripts/build-cli-if-needed.mjs && vitest run && NODE_ENV=production vitest run --config vitest.rate-limit.config.ts",
     "db:generate-schema": "prisma generate && auth generate --config ./auth-schema.config.ts --yes",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "pnpm build && node dist/database/seed/seed.js",
