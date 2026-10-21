@@ -14,7 +14,9 @@ describe("artifact names", () => {
     expect(normalizeArtifactName("")).toBeNull();
     expect(normalizeArtifactName("hello\nthere")).toBeNull();
     expect(normalizeArtifactName("hello\u0000")).toBeNull();
-    expect(normalizeArtifactName("hello\u2028")).toBeNull();
+    expect(normalizeArtifactName("hel\u2028lo")).toBeNull();
+    expect(normalizeArtifactName("hel\u2029lo")).toBeNull();
+    expect(normalizeArtifactName("hel\u007Flo")).toBeNull();
     expect(normalizeArtifactName("n".repeat(121))).toBeNull();
   });
 
