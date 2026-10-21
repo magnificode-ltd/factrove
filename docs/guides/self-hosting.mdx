@@ -1,17 +1,19 @@
 ---
 title: Self-hosting and local development
-description: Environment, local PostgreSQL and object storage, and the origins used to build links.
+description: Local infrastructure, production startup, origins, object storage, backups, and rollback.
 ---
 
-Factrove is meant to be run as your own install. This guide matches the repository's local setup and the environment keys the API and CLI actually read.
+Factrove is meant to be run as your own install. Docker Compose in this repository starts PostgreSQL and Garage for local development. It does not start the API or the web app.
 
 ## Applications
 
-| Process | Default origin | Environment file |
+| Process | Default bind | How it starts |
 | --- | --- | --- |
-| Web app | `http://localhost:3000` | `NEXT_PUBLIC_API_URL` copied from `apps/api/.env` |
-| API | `http://localhost:3001` | `apps/api/.env` |
-| CLI | talks to the API origin | `apps/cli/.env` for `pnpm factrove` only |
+| Web app | `0.0.0.0:3000` from `next start` | `pnpm --filter @factrove/web start` |
+| API | `127.0.0.1:3001` unless `HOST` and `PORT` say otherwise | `pnpm --filter @factrove/api start` |
+| CLI | no listener | `pnpm factrove` or `node apps/cli/dist/main.js` |
+
+The web app calls `NEXT_PUBLIC_API_URL`. The API writes absolute API URLs from `API_PUBLIC_ORIGIN`. Those two values are independent.
 
 Copy the committed examples. Do not commit real secrets.
 
@@ -20,7 +22,11 @@ cp apps/api/.env.example apps/api/.env
 cp apps/cli/.env.example apps/cli/.env
 ```
 
-## Local services
+Set `BETTER_AUTH_SECRET` in `apps/api/.env` to at least 32 characters before the API starts. The example value is a local placeholder.
+
+## Local development
+
+Compose is local infrastructure. `pnpm dev` is the development server. It runs Next's dev server bound to `127.0.0.1:3000` and the API on `127.0.0.1:3001`. It is not the production start path.
 
 ```bash
 pnpm infra:up
@@ -29,9 +35,56 @@ pnpm db:seed
 pnpm dev
 ```
 
-`pnpm infra:up` starts PostgreSQL (`127.0.0.1:5432`) and Garage (`127.0.0.1:3900`) and creates the `factrove` bucket. `pnpm infra:down` stops them and keeps the volumes. `pnpm infra:reset` deletes those volumes after you confirm.
+`pnpm infra:up` starts PostgreSQL (`127.0.0.1:5432`) and Garage (`127.0.0.1:3900`) and creates the `factrove` bucket. `pnpm infra:down` stops them and keeps the volumes. `pnpm infra:reset` deletes those volumes after you confirm. Neither command deletes objects in a remote bucket or the CLI files under `~/.factrove`.
 
-The API example file already matches that Compose database and Garage credentials. For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, leave `S3_ENDPOINT` unset, and use the usual AWS credential chain. The API does not create an AWS bucket.
+The API example file already matches that Compose database and Garage credentials.
+
+## Production
+
+One supported topology is a TLS reverse proxy in front of the two Node processes, with PostgreSQL and S3-compatible storage reachable from the API. Run the commands below from the repository root.
+
+1. Install dependencies: `pnpm install --frozen-lockfile`.
+2. Write production settings in `apps/api/.env`, including `NEXT_PUBLIC_API_URL`, before the web build.
+3. Apply migrations: `pnpm db:migrate`. Startup does not migrate.
+4. Build: `pnpm build`.
+5. Start the API and the web app as two processes.
+
+```bash
+pnpm --filter @factrove/api start
+pnpm --filter @factrove/web start -- --hostname 127.0.0.1 --port 3000
+```
+
+`pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. The process listens on `HOST` (default `127.0.0.1`) and `PORT` (default `3001`) and loads `apps/api/.env`. `next start` listens on `0.0.0.0:3000` unless you pass `--hostname` and `--port`. Bind both to loopback when the proxy runs on the same machine. If the proxy is on another machine, set `HOST` to the interface that machine can reach.
+
+Run each start command under a process supervisor that restarts it when it exits. A supervisor's working directory can be the repository root. The API reads `apps/api/.env` itself. `next start` cannot change `NEXT_PUBLIC_API_URL` after the build.
+
+Terminate TLS at the proxy. Route the web origin, such as `https://library.example.com`, to the web process, and the API origin, such as `https://api.example.com`, to the API process. Forward `X-Forwarded-For`. Set `TRUSTED_PROXIES` to that proxy, for example `127.0.0.1` when the proxy connects from loopback. Leave `TRUSTED_PROXIES` unset when clients connect to the API directly. Do not log `access` or `ticket` query strings on content URLs.
+
+Health check, with no credentials:
+
+```bash
+curl -fsS http://127.0.0.1:3001/api/v1/health
+```
+
+A ready API returns `{"status":"ok"}`.
+
+<Warning>
+Set `NEXT_PUBLIC_API_URL` before `pnpm build` or `next build`. Next.js fixes that origin in the client bundle. Changing it requires a rebuild. `next start` cannot change it.
+</Warning>
+
+## Object storage
+
+For the local Garage service, keep the example values: `S3_ENDPOINT=http://127.0.0.1:3900`, `S3_FORCE_PATH_STYLE=true`, and the Garage access key pair. The API does not create an AWS bucket. `pnpm infra:up` creates the local `factrove` bucket.
+
+For an existing AWS bucket, or any non-Garage endpoint:
+
+- Set `S3_BUCKET` and `S3_REGION`.
+- Remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`.
+- Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or remove both. The storage client uses that pair whenever both are set, so the Garage values `factrove-local` and `factrove-local-secret` keep an instance role or `AWS_PROFILE` from being selected.
+- When the key is temporary, set `AWS_SESSION_TOKEN` as well. The API sends the token only together with the access key and secret. With both keys removed, the AWS SDK default chain reads the environment, including a profile or a task role.
+- The API calls `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object keys it generates.
+- With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`.
+- A non-loopback `S3_ENDPOINT` must be `https`. `http` is accepted only for `localhost`, `127.0.0.1`, and `::1`.
 
 ## Origins that build links
 
@@ -40,7 +93,7 @@ The API example file already matches that Compose database and Garage credential
 | `WEB_ORIGIN` | Browser origin of the web app |
 | `API_PUBLIC_ORIGIN` | Origin the API uses when it writes absolute API URLs |
 | `PUBLIC_BASE_URL` | Origin for viewer URLs and public share links. Defaults to `WEB_ORIGIN` |
-| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API |
+| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API. Read at web build time |
 | `AUTH_COOKIE_DOMAIN` | Parent cookie domain when the web app and API use different hosts |
 
 `PUBLIC_BASE_URL` must be an absolute `http` or `https` origin with no path, query, or hash. A trailing slash is dropped. Setting it does not publish the app.
@@ -49,18 +102,22 @@ Local:
 
 ```text
 PUBLIC_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_API_URL=http://localhost:3001
 ```
 
-A placeholder you operate:
+A placeholder you operate. Set `NEXT_PUBLIC_API_URL` before building the web app. Changing it requires a rebuild.
 
 ```text
 PUBLIC_BASE_URL=https://library.example.com
 WEB_ORIGIN=https://library.example.com
 API_PUBLIC_ORIGIN=https://api.example.com
+NEXT_PUBLIC_API_URL=https://api.example.com
 AUTH_COOKIE_DOMAIN=example.com
 ```
 
 When those hosts differ, `AUTH_COOKIE_DOMAIN` must cover them. `localhost` and `127.0.0.1` are different hosts, and a cookie domain cannot cover either, so keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same one.
+
+Copying `apps/api/.env.example` and changing only `API_PUBLIC_ORIGIN` leaves `NEXT_PUBLIC_API_URL=http://localhost:3001`. The browser then calls the visitor's own machine.
 
 ## Auth and share keys
 
@@ -72,7 +129,7 @@ When those hosts differ, `AUTH_COOKIE_DOMAIN` must cover them. `localhost` and `
 
 Resolution is listed in [CLI](/guides/cli). In short: `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the profile `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
 
-An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. `factrove configure` writes the profile files mode 0600.
+An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. `factrove configure` writes the profile files mode 0600. Create the key with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session) or in the web app at `/account/api-keys`.
 
 ## Checks
 
@@ -83,16 +140,42 @@ pnpm lint
 pnpm test
 ```
 
-`pnpm e2e` starts a separate Compose project and needs Playwright Chromium.
+`pnpm e2e` starts a separate Compose project and needs Playwright Chromium. These checks are for development. They do not start the production processes.
+
+## Backup and restore
+
+Take the database, the object bytes, and the key material together. A successful replacement deletes the previous object after the new one is published, so a later database row no longer names the bytes you replaced.
+
+1. Stop API writers so a replacement cannot delete an object while you copy it.
+2. Dump PostgreSQL, including `artifact.object_key` and `artifact.size_bytes`.
+3. Copy every object named by the current `object_key` values.
+4. Store `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` with that backup, outside the dump. Sessions and share tokens cannot be read without the same material. When `SHARE_TOKEN_KEY` is unset, the share key is derived from `BETTER_AUTH_SECRET`.
+
+Restoring a historical backup means restoring that dump and the object copies taken with it, then starting the app with the same secrets. It does not recreate objects a later replacement deleted, and it does not include rows written after the dump.
+
+Preserving the content that is live now is a different operation. Export the mapping before you remove the schema that records it:
+
+```sql
+select id, object_key, size_bytes from artifact order by id;
+```
 
 ## Object-key migration
 
 Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration.
 
-Rolling back after that cutover means:
+Rolling back that cutover while keeping the bytes that are live now:
 
-1. Stop the old app processes
-2. Restore the schema
-3. Copy each current object back to `{artifactId}.html` and point the row at that key
+1. Stop every API process.
+2. Export the current mapping with the query above.
+3. Copy each current object to the legacy key `{id}.html` in the same bucket and verify the copy before you change the schema.
+4. Restore the previous schema and application. The previous application reads `{artifactId}.html`.
 
 New objects live at `{artifactId}/{contentId}.html`. Older rows may still use `{artifactId}.html`. The public filename stays `{artifactId}.html`. HTTP responses and the CLI omit the object key.
+
+## Removing an install
+
+Stopping the API and web processes leaves PostgreSQL and object storage in place. `pnpm infra:down` stops the local Compose services and keeps their volumes. `pnpm infra:reset` deletes the local PostgreSQL and Garage volumes after confirmation. Objects in a remote bucket stay. CLI credentials in `~/.factrove` stay until you delete those files.
+
+There is no artifact-delete command and no route that changes access after upload. See [Current limits](/concepts#current-limits).
+
+Failures during startup are collected in [Troubleshooting](/guides/troubleshooting).

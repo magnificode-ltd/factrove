@@ -303,7 +303,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an API key",
     description:
-      "Requires a browser session. A request that also sends `Authorization` is 401 with message `API key management requires a browser session.` The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+      "Requires a browser session. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -322,7 +322,12 @@ export const httpOperations: HttpOperation[] = [
         description:
           "Empty or missing name is Better Auth `NAME_REQUIRED` (`API Key name is required.`). A name longer than 32 characters is `INVALID_NAME_LENGTH`."
       },
-      "401": { description: "No browser session, or Authorization was also sent." }
+      "401": { description: "No browser session, or Authorization was also sent." },
+      "403": {
+        description:
+          "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      }
     }
   },
   {
@@ -350,7 +355,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Revoke an API key",
     description:
-      "Requires a browser session. Another user's key id is 404. After delete, that key fails closed on product routes.",
+      "Requires a browser session. Do not send `Authorization`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. Another user's key id is 404. After delete, that key fails closed on product routes.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -366,6 +371,11 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "DeleteApiKeyResponse"
       },
       "401": { description: "No browser session, or Authorization was also sent." },
+      "403": {
+        description:
+          "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      },
       "404": { description: "The key id is unknown to this session." }
     }
   },

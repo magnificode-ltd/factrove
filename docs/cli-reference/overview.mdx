@@ -3,11 +3,20 @@ title: CLI overview
 description: Install and configure the Factrove CLI, then read the exact help pages generated from the command spec.
 ---
 
-The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. From this repository, run it with `pnpm factrove`. That launcher reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The built binary `node apps/cli/dist/main.js` does not read that file.
+The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. It ships inside this repository, not as a published `bin`. From the repository root, install dependencies and build the CLI plus the workspace packages it imports. The launcher refuses to start until `apps/cli/dist/main.js` exists.
 
-The program help uses the name `factrove`. The pages that follow reprint `factrove --help` and each `factrove <command> --help` text word for word.
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @factrove/cli... build
+```
+
+Run it with `pnpm factrove`. That launcher reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The built binary `node apps/cli/dist/main.js` does not read that file. Set `BETTER_AUTH_SECRET` and start the API before configure. See [Quickstart](/quickstart) and [Troubleshooting](/guides/troubleshooting).
+
+The program help uses the name `factrove`. The pages that follow reprint `factrove --help` and each `factrove <command> --help` text word for word, then list flags that help text omits.
 
 ## Configure once
+
+Create a key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). Then, from the repository root:
 
 ```bash
 pnpm factrove configure

@@ -1,13 +1,13 @@
 ---
 title: Concepts
-description: Artifacts, access types, organizations, and how viewer and share URLs are built.
+description: Artifacts, HTML delivery, access, organization membership, and how links are built.
 ---
 
 ## Artifact
 
 An artifact is one uploaded HTML document. The API stores metadata in PostgreSQL and the bytes in object storage. The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`.
 
-Replacing content keeps the same id, access, and share token. Another replace of the same revision is `409 CONTENT_CONFLICT`. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying.
+Replacing content keeps the same id, access, and share token. Another replace of the same revision is `409 CONTENT_CONFLICT`. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying. Factrove currently exposes only the current content. Replacement provides no version-history or undo interface and normally removes the previous object.
 
 Each artifact has:
 
@@ -19,7 +19,46 @@ Each artifact has:
 - a viewer URL and a content URL
 - whether a public share is active, and whether that share has a password
 
-Uploads are HTML only (`.html` or `.htm`, at most 10 MiB). Markdown is an on-request conversion of the stored HTML. It is not saved.
+## Prepare an artifact
+
+Uploads are one non-empty UTF-8 `.html` or `.htm` file of at most 10,485,760 bytes. The API rejects an empty file, a file that is not valid UTF-8 (`400 INVALID_REQUEST`), a larger file (`413 FILE_TOO_LARGE`), and any other extension (`415 UNSUPPORTED_FILE_TYPE`).
+
+The viewer iframe uses `sandbox="allow-scripts"`. The HTML response sends this content security policy:
+
+- `sandbox allow-scripts`
+- `default-src 'none'`
+- `script-src 'unsafe-inline'`
+- `style-src 'unsafe-inline'`
+- `img-src data: blob:`
+- `font-src data: blob:`
+- `connect-src 'none'`
+- `form-action 'none'`
+- `object-src 'none'`
+- `frame-src 'none'`
+- `child-src 'none'`
+- `worker-src 'none'`
+- `base-uri 'none'`
+- `frame-ancestors` set to `PUBLIC_BASE_URL`, plus `WEB_ORIGIN` when that origin is different
+
+A self-contained file with inline scripts, inline styles, and images or fonts embedded as `data:` or `blob:` URLs can render. A CDN library, a linked stylesheet, a relative asset, an API request, a form, and a nested frame do not work under this policy. `frame-ancestors` keeps an arbitrary third-party site from framing the artifact. These are the delivery rules the viewer applies. They are not a broader security guarantee.
+
+## Markdown conversion
+
+`get --format markdown` and `GET /api/v1/artifacts/{id}/content?format=markdown` convert the stored HTML on the way out. Markdown is not saved. The converter parses the stored HTML. It does not run JavaScript, so text that a script would insert is absent. It drops `script`, `style`, `noscript`, `iframe`, `object`, `embed`, `template`, `link`, `meta`, `title`, `base`, `svg`, and `math`. Treat the result as best-effort text. It does not preserve layout, interactive behavior, or dynamically generated content.
+
+Limits, from the converter and its worker pool:
+
+| Limit | Value | Failure |
+| --- | --- | --- |
+| Input | 10,485,760 bytes | `413 CONTENT_TOO_LARGE` |
+| Output | 16 MiB | `422 CONTENT_TOO_COMPLEX` |
+| Time | 5 seconds | `422 CONTENT_TOO_COMPLEX` |
+| Nesting | deeper than 100 levels is flattened to visible text | none |
+| Memory | worker old-generation cap 256 MiB | `422 CONTENT_TOO_COMPLEX` |
+| Other complexity | parser or render failure inside those bounds | `422 CONTENT_TOO_COMPLEX` |
+| Pool busy | see below | `503 CONVERSION_UNAVAILABLE` |
+
+`503 CONVERSION_UNAVAILABLE` does not set `Retry-After`. `MARKDOWN_CONVERSION_CONCURRENCY` is how many conversions run at once (1 to 4, default 2). `MARKDOWN_CONVERSION_QUEUE` is how many may wait (0 to 8, default 2). A non-integer uses the default. An integer outside the range is clamped. A full queue returns `503 CONVERSION_UNAVAILABLE`.
 
 ## Access
 
@@ -35,17 +74,28 @@ The library has two views:
 
 A private artifact can still record an organization. That does not put it in the organization list.
 
+## Organization membership
+
+User and Organization come from Better Auth. Runtime sign-in is email and password. Organization HTTP routes stay unmounted. Membership is read from the `member` table.
+
+Signup creates a user and no membership. `pnpm db:seed` upserts the fixture user `local-user` and the organization `local-org` and does not insert a member row. `local-user` has no password. `pnpm db:claim-local-artifacts` adds memberships only for organizations already referenced by artifacts it reassigns from `local-user`.
+
+An administrator provisions membership by inserting a row. With exactly one membership, that organization is current for an API key and for a session that has no active organization. The columns match the `member` table:
+
+```sql
+insert into member (id, "organizationId", "userId", role, "createdAt")
+values ('member-example', 'local-org', '<user-id>', 'member', now());
+```
+
+Look up `<user-id>` with `select id from "user" where email = 'you@example.com'`. The organization id must already exist. `local-org` is the seeded organization.
+
+The current organization is the session's active organization when the user is a member of it. Otherwise it is the user's only membership. With more than one membership and no active organization, it is null. An API key has no active organization, so it uses the sole-membership rule. `factrove upload --access org_shared` needs that current organization. The example fails with `400 ORGANIZATION_REQUIRED` until the membership exists.
+
 ## Identity
 
-User and Organization come from Better Auth. Runtime sign-in is email and password. Organization HTTP routes stay unmounted. Membership is read from the member table.
+Product routes accept a session cookie or `Authorization: Bearer <api-key>`. They do not accept `x-api-key` as a credential. Create keys in the web app, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). The secret is shown once. The plugin stores a hash.
 
-The current organization is the session's active organization when the user is a member of it. Otherwise it is the user's only membership. With more than one membership and no active organization, it is null. An API key has no active organization, so it uses the sole-membership rule.
-
-## Credentials
-
-Product routes accept a session cookie or `Authorization: Bearer <api-key>`. They do not accept `x-api-key` as a credential. Create keys in the web app. The secret is shown once. The plugin stores a hash.
-
-The CLI sends the bearer key. Managing keys requires a browser session.
+The CLI sends the bearer key. Managing keys requires a browser session and rejects `Authorization`.
 
 ## Links
 
@@ -61,3 +111,9 @@ The CLI sends the bearer key. Managing keys requires a browser session.
 Local examples use `http://localhost:3000` and `http://localhost:3001`. A self-hosted install uses whatever origin you configure, such as `https://library.example.com`.
 
 The share token is not the stored column. The API stores ciphertext and a hash. Rotating the key material that encrypts tokens makes existing public URLs return 404.
+
+## Current limits
+
+The HTTP API has no artifact-delete route and no route that changes `accessType` after upload. Replacement rejects `accessType` and keeps the access chosen at create. The CLI has no delete command.
+
+Stopping the API and web processes leaves PostgreSQL and object storage in place. `pnpm infra:down` stops local PostgreSQL and Garage and keeps their volumes. `pnpm infra:reset` deletes those local volumes after confirmation. Objects in a remote bucket stay. Saved CLI credentials under `~/.factrove` stay until those files are deleted. Details are in [Self-hosting](/guides/self-hosting#removing-an-install).

@@ -3,6 +3,11 @@
   "name": "Factrove",
   "theme": "mint",
   "description": "Guides and references for Factrove, a self-hostable library for HTML artifacts.",
+  "seo": {
+    "metatags": {
+      "canonical": "https://factrove.mintlify.app"
+    }
+  },
   "colors": {
     "primary": "#5e64d6",
     "light": "#858bee",
@@ -29,9 +34,10 @@
           {
             "group": "Guides",
             "pages": [
-              "guides/sharing-links",
               "guides/self-hosting",
-              "guides/cli"
+              "guides/cli",
+              "guides/sharing-links",
+              "guides/troubleshooting"
             ]
           }
         ]

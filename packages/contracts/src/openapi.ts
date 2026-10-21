@@ -2,6 +2,7 @@ import { z } from "zod";
 import { apiErrorCatalog } from "./errors.js";
 import { httpOperations, namedSchemas, type HttpOperation, type HttpSecurity } from "./http.js";
 import { apiErrorSchema } from "./index.js";
+import { codeSamplesFor, requestExampleFor, responseExampleFor } from "./openapi-examples.js";
 
 export type OpenApiDocument = {
   openapi: "3.1.0";
@@ -82,7 +83,7 @@ export function buildOpenApiDocument(options?: { version?: string }): OpenApiDoc
           in: "cookie",
           name: "better-auth.session_token",
           description:
-            "Better Auth session cookie from email/password sign-in. The cookie may use a `__Secure-` or `__Host-` prefix depending on the origin. Host-only unless AUTH_COOKIE_DOMAIN is set."
+            "Better Auth session cookie from email/password sign-in. On an https API origin the name is `__Secure-better-auth.session_token`. On http it is `better-auth.session_token`. Host-only unless AUTH_COOKIE_DOMAIN is set. Use a cookie jar instead of typing the name."
         },
         accessGrant: {
           type: "apiKey",
@@ -185,7 +186,8 @@ function operationToPathItem(operation: HttpOperation): Record<string, unknown> 
                     ? zodToJsonSchema(response.schema)
                     : contentType === "text/html" || contentType === "text/markdown"
                       ? { type: "string" }
-                      : { type: "object" }
+                      : { type: "object" },
+                ...exampleFields(contentType, responseExampleFor(operation.operationId, status, response.schemaName, response.description))
               }
             ])
           );
@@ -204,12 +206,14 @@ function operationToPathItem(operation: HttpOperation): Record<string, unknown> 
       description: body.description,
       content: {
         [body.contentType]: {
-          schema: { $ref: `#/components/schemas/${body.schemaName}` }
+          schema: { $ref: `#/components/schemas/${body.schemaName}` },
+          ...(requestExampleFor(body.schemaName) !== undefined ? { example: requestExampleFor(body.schemaName) } : {})
         }
       }
     };
   }
 
+  const samples = codeSamplesFor(operation.operationId);
   return {
     operationId: operation.operationId,
     tags: [...operation.tags],
@@ -218,7 +222,21 @@ function operationToPathItem(operation: HttpOperation): Record<string, unknown> 
     security: securityRequirement(operation.security),
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(requestBody ? { requestBody } : {}),
+    ...(samples ? { "x-codeSamples": samples } : {}),
     responses
+  };
+}
+
+function exampleFields(
+  contentType: string,
+  example: { example: unknown; examples?: Record<string, { summary: string; value: unknown }> } | undefined,
+): Record<string, unknown> {
+  if (contentType !== "application/json" || example === undefined) {
+    return {};
+  }
+  return {
+    example: example.example,
+    ...(example.examples ? { examples: example.examples } : {})
   };
 }
 
@@ -262,7 +280,7 @@ function collectJsonSchemas(name: string, schema: z.ZodType): Record<string, unk
     const properties = asRecord(rest.properties);
     const file = asRecord(properties.file);
     if (Object.keys(file).length > 0) {
-      properties.file = { ...file, format: "binary", contentMediaType: "text/html" };
+      properties.file = { ...file, format: "binary", contentMediaType: "application/octet-stream" };
       rest.properties = properties;
     }
   }

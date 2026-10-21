@@ -16,3 +16,32 @@ Options:
   --access <private|org_shared>  Who can see a new artifact (default: private).
   --json                         Print one JSON line.
 ```
+
+## Accepted flags
+
+The help text above is exact. These flags are also accepted, including ones that help text does not list.
+
+- `--artifactId <id>` — Replace this artifact instead of creating a new one.
+- `--access <private|org_shared>` — Who can see a new artifact (default: private).
+- `--json` — Print one JSON line (alias: --output json).
+- `--output <json|text>` — Print one JSON line when the value is json. --output text is the plain output.
+- `--api-url, --endpoint-url <origin>` — API origin (alias: --endpoint-url).
+- `--profile <name>` — Credentials profile (default: default). Accepted on every command. Help lists it on configure.
+- `--quiet` — Accepted on upload, get, and share. It does not hide their output. Help does not list it. configure rejects it.
+- `-h, --help` — Show help.
+
+## Behavior
+
+Plain success prints only the new id. `--json` prints one `{ artifact }` line.
+
+`--artifactId` replaces content and prints the same id. The API keeps the current access and any share token. `--access` with `--artifactId` is rejected before a request is sent. Only the owner can replace. Anyone else gets `404 ARTIFACT_NOT_FOUND`.
+
+The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. See [Concepts](/concepts#organization-membership).
+
+Another replace of the same revision returns `409 CONTENT_CONFLICT`. A replace can return `500` after the new object is already committed. GET the artifact before retrying. Replacement does not keep version history and normally deletes the previous object.
+
+## Related
+
+- [CLI](/guides/cli)
+- [Upload an HTML file](/api-reference/artifacts/upload-an-html-file)
+- [Replace an artifact's stored HTML](/api-reference/artifacts/replace-an-artifacts-stored-html)

@@ -19,7 +19,40 @@ Servers in the spec:
 
 `x-api-key` does not authenticate. A present `Authorization` header that is not a valid key does not fall back to the session cookie. API key create, list, and delete require a browser session and reject `Authorization`.
 
-Cookie-authenticated writes (`POST`, `DELETE`, and other non-GET/HEAD/OPTIONS methods) also need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is `403 FORBIDDEN`. Bearer requests skip that check. The public unlock route ignores a leftover session cookie.
+Cookie-authenticated writes (`POST`, `PUT`, `DELETE`, and other non-GET/HEAD/OPTIONS methods) also need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` Bearer requests skip that check. The public unlock route ignores a leftover session cookie.
+
+## Create an API key from a session
+
+People can create a key in the web app at `/account/api-keys`. The secret is shown once. Agents can use the same session route. Do not send `Authorization` on these calls. Send `Origin` set to `WEB_ORIGIN` or `PUBLIC_BASE_URL`. On an `https` API origin the session cookie is named `__Secure-better-auth.session_token`. On `http` it is `better-auth.session_token`. A cookie jar records whichever name the server set.
+
+Sign-up signs the new account in (`autoSignIn` is on) and stores the cookie. Passwords are 8 to 128 characters. Replace the email and password before you run this. If the email is already registered, sign-up returns 422. Use the sign-in request instead, with the same cookie jar and `Origin`.
+
+```bash
+api=http://localhost:3001
+origin=http://localhost:3000
+jar=$(mktemp)
+
+curl -sS -c "$jar" -X POST "$api/api/auth/sign-up/email" \
+  -H "Content-Type: application/json" \
+  -H "Origin: $origin" \
+  -d '{"name":"Local Owner","email":"owner@example.com","password":"replace-this-password"}'
+
+curl -sS -b "$jar" -X POST "$api/api/auth/api-key/create" \
+  -H "Content-Type: application/json" \
+  -H "Origin: $origin" \
+  -d '{"name":"cli"}'
+```
+
+Sign in an existing account:
+
+```bash
+curl -sS -c "$jar" -X POST "$api/api/auth/sign-in/email" \
+  -H "Content-Type: application/json" \
+  -H "Origin: $origin" \
+  -d '{"email":"owner@example.com","password":"replace-this-password"}'
+```
+
+A successful create returns JSON that includes `key` once. A missing or disallowed `Origin` is `403 FORBIDDEN` before Better Auth handles the body. A request that also sends `Authorization` is 401 with message `API key management requires a browser session.` Point `factrove configure` at the printed key. The CLI does not print it back. See [configure](/cli-reference/configure).
 
 ## Errors
 

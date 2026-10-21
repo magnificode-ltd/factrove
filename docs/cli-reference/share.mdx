@@ -17,3 +17,31 @@ Options:
   --revoke           Remove the public link and its password.
   --json             Print one JSON line.
 ```
+
+## Accepted flags
+
+The help text above is exact. These flags are also accepted, including ones that help text does not list.
+
+- `--password` — Prompt twice for a link password. Needs a terminal.
+- `--password-stdin` — Read the link password from a pipe.
+- `--remove-password` — Keep the link and remove its password.
+- `--revoke` — Remove the public link and its password.
+- `--json` — Print one JSON line (alias: --output json).
+- `--output <json|text>` — Print one JSON line when the value is json. --output text is the plain output.
+- `--api-url, --endpoint-url <origin>` — API origin (alias: --endpoint-url).
+- `--profile <name>` — Credentials profile (default: default). Accepted on every command. Help lists it on configure.
+- `--quiet` — Accepted on upload, get, and share. It does not hide their output. Help does not list it. configure rejects it.
+- `-h, --help` — Show help.
+
+## Behavior
+
+Plain success prints the public URL and then a status line that says whether the link is password protected. `--json` prints one `{ share }` line. Upload is the command that prints only an id.
+
+`--password` prompts twice and needs a terminal. `--password-stdin` reads a pipe and removes one trailing newline. An agent can run `printf '%s' "$LINK_PASSWORD" | factrove share "$artifact_id" --password-stdin`.
+
+`--revoke` removes the link and its password. Sharing again without a password creates an unprotected link. Pass the password again to keep protection. See [Sharing links](/guides/sharing-links#lockout-recovery).
+
+## Related
+
+- [Sharing links](/guides/sharing-links)
+- [Create or update a public share](/api-reference/shares/create-or-update-a-public-share)
