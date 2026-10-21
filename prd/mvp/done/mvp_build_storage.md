@@ -4,7 +4,7 @@
 
 Store and retrieve HTML bytes through one S3 implementation aimed at a configured AWS bucket.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
 
 ## Owns
 

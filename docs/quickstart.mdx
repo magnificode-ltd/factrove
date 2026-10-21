@@ -1,0 +1,77 @@
+---
+title: Quickstart
+description: Run Factrove locally, create an API key, upload an HTML file, and open the viewer.
+---
+
+This is the local development loop from the repository. You need Node.js 24.x, at least 24.7 and below 25 (`>=24.7.0 <25` in `package.json` engines; 24.16 is pinned), pnpm 11.25, and Docker Compose v2.
+
+## 1. Install and start services
+
+```bash
+pnpm install --frozen-lockfile
+cp apps/api/.env.example apps/api/.env
+cp apps/cli/.env.example apps/cli/.env
+pnpm infra:up
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+`pnpm infra:up` starts PostgreSQL on `127.0.0.1:5432` and Garage (local S3) on `127.0.0.1:3900`. `pnpm dev` starts the API on `http://127.0.0.1:3001` and the web app on `http://127.0.0.1:3000`.
+
+Set `BETTER_AUTH_SECRET` in `apps/api/.env` to at least 32 characters before `pnpm dev`. The example value is a local placeholder.
+
+## 2. Create an account and an API key
+
+Open `http://localhost:3000/signup`, then create a key at `/account/api-keys`. The secret is shown once.
+
+In a second terminal:
+
+```bash
+pnpm factrove configure
+```
+
+The CLI stores the key in `~/.factrove/credentials` (mode 0600). It does not print the key.
+
+## 3. Upload a file
+
+```bash
+pnpm factrove upload ./fixtures/hello.html
+```
+
+Plain success prints only the artifact id. Open it at:
+
+```text
+http://localhost:3000/artifacts/{id}
+```
+
+`--json` prints the `{ artifact }` envelope on one line. Replace that artifact later with `pnpm factrove upload ./fixtures/hello.html --artifactId <id>`. If a replace returns `500`, GET the artifact before retrying.
+
+## 4. Open the library
+
+Visit `http://localhost:3000`. Use **My artifacts** or **Organization artifacts**, then Refresh after an upload.
+
+## 5. Share a link (optional)
+
+```bash
+pnpm factrove share <artifact-id>
+```
+
+That prints a public URL:
+
+```text
+http://localhost:3000/share/{id}/{token}
+```
+
+Add a password with `--password` (a prompt) or `--password-stdin`. See [Sharing links](/guides/sharing-links).
+
+## Useful follow-ups
+
+```bash
+pnpm factrove get <artifact-id>
+pnpm factrove get <artifact-id> --format markdown
+pnpm factrove upload ./fixtures/hello.html --artifactId <artifact-id>
+pnpm factrove share <artifact-id> --revoke
+```
+
+`pnpm factrove` reads `apps/cli/.env` only for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `node apps/cli/dist/main.js` does not read that file. The default API origin is `http://localhost:3001`. See [CLI](/guides/cli) for flags and precedence.

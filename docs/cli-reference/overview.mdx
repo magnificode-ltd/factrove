@@ -1,0 +1,39 @@
+---
+title: CLI overview
+description: Install and configure the Factrove CLI, then read the exact help pages generated from the command spec.
+---
+
+The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. From this repository, run it with `pnpm factrove`. That launcher reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The built binary `node apps/cli/dist/main.js` does not read that file.
+
+The program help uses the name `factrove`. The pages that follow reprint `factrove --help` and each `factrove <command> --help` text word for word.
+
+## Configure once
+
+```bash
+pnpm factrove configure
+```
+
+See [configure](/cli-reference/configure). The key is not printed.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| [factrove --help](/cli-reference/help) | Top-level help |
+| [upload](/cli-reference/upload) | Create an artifact, or replace one with `--artifactId` |
+| [get](/cli-reference/get) | Print stored HTML or converted Markdown |
+| [share](/cli-reference/share) | Create, password-protect, or revoke a public link |
+| [configure](/cli-reference/configure) | Save a profile key and API origin |
+
+`cp` is not a Factrove command. Precedence, `--endpoint-url`, `--output json`, and the differences from `aws s3` are in [CLI](/guides/cli).
+
+## Output and errors
+
+- Success exit code is `0`. Any failure is `1`.
+- Plain upload prints only the artifact id. A replace prints the same id. Plain get prints content bytes. Plain share prints the public URL and whether it is password protected.
+- `--json` and `--output json` print one JSON line on success. Errors then use `{"error":{"code":"...","message":"..."}}` on stderr.
+- `--quiet` is accepted on upload, get, and share. Help does not list it.
+- `--profile` is accepted on every command. Help lists it on configure.
+- Local codes are `FILE_NOT_FOUND`, `INVALID_INPUT`, and `NETWORK_ERROR`. API codes pass through.
+
+A replace can rarely return `500` after the new object is already committed. GET the artifact before retrying.

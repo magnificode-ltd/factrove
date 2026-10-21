@@ -1,4 +1,5 @@
 import { CliError } from "./cli-error.js";
+import { ARTIFACT_ID, helpPage, type HelpCommand } from "./command-spec.js";
 import { readStoredProfileSync, resolveApiKey, selectedProfile } from "./credentials.js";
 
 export const DEFAULT_API_URL = "http://localhost:3001";
@@ -6,7 +7,7 @@ export const DEFAULT_API_URL = "http://localhost:3001";
 export type AccessType = "private" | "org_shared";
 export type ContentFormat = "html" | "markdown";
 export type OutputFormat = "json" | "text";
-export type HelpCommand = "upload" | "get" | "share" | "configure";
+export type { HelpCommand };
 
 type CommandOptions = {
   json: boolean;
@@ -55,77 +56,6 @@ export type HelpInvocation = {
 
 export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | HelpInvocation;
 
-const TOP_LEVEL_HELP = `Usage: factrove <command> [options]
-
-Commands:
-  upload <file>                    Upload an HTML file as a new artifact and print its id.
-  upload <file> --artifactId <id>  Replace the content of an existing artifact.
-  get <id>                         Print an artifact's content (HTML, or --format markdown).
-  share <id>                       Create a public link. Add --password, --remove-password or --revoke.
-  configure                        Save your API key and API URL.
-
-Global options:
-  --api-url <origin>   API origin (alias: --endpoint-url)
-  --json               Print one JSON line (alias: --output json)
-  -h, --help           Show help. Run \`factrove <command> --help\` for details.
-
-Examples:
-  factrove upload ./hey.html
-  factrove upload ./hey.html --artifactId <artifact-id>
-  factrove get <artifact-id> --format markdown
-  factrove share <artifact-id> --password
-  factrove configure
-`;
-
-const UPLOAD_HELP = `Usage: factrove upload <file> [--artifactId <id>] [--access private|org_shared] [--json]
-
-Uploads an HTML file. Without --artifactId it creates a new artifact and prints
-only its id. With --artifactId it replaces that artifact's content and prints the same id.
-
-Options:
-  --artifactId <id>              Replace this artifact instead of creating a new one.
-  --access <private|org_shared>  Who can see a new artifact (default: private).
-  --json                         Print one JSON line.
-`;
-
-const GET_HELP = `Usage: factrove get <id> [--format html|markdown] [--json]
-
-Prints an artifact's content. HTML by default, or Markdown with --format markdown.
-
-Options:
-  --format <html|markdown>  Content to print (default: html).
-  --json                    Print one JSON line.
-`;
-
-const SHARE_HELP = `Usage: factrove share <id> [--password | --password-stdin | --remove-password | --revoke] [--json]
-
-Creates a public link, or prints the existing one.
-
-Options:
-  --password         Prompt twice for a link password. Needs a terminal.
-  --password-stdin   Read the link password from a pipe.
-  --remove-password  Keep the link and remove its password.
-  --revoke           Remove the public link and its password.
-  --json             Print one JSON line.
-`;
-
-const CONFIGURE_HELP = `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
-
-Saves an API key and API URL for a profile.
-
-Options:
-  --api-key <key>     API key. A prompt keeps it out of shell history.
-  --api-url <origin>  API origin (alias: --endpoint-url).
-  --profile <name>    Credentials profile (default: default).
-`;
-
-const HELP_PAGES: Record<HelpCommand, string> = {
-  upload: UPLOAD_HELP,
-  get: GET_HELP,
-  share: SHARE_HELP,
-  configure: CONFIGURE_HELP,
-};
-
 const OPTIONS_WITH_VALUES = new Set([
   "--access",
   "--api-url",
@@ -137,15 +67,8 @@ const OPTIONS_WITH_VALUES = new Set([
   "--profile",
 ]);
 
-// Same shape as the API UUID check: RFC 4122 versions 1-8, plus the nil and max UUIDs.
-const ARTIFACT_ID =
-  /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
-
 export function helpText(command: HelpCommand | null = null): string {
-  if (command === null) {
-    return TOP_LEVEL_HELP;
-  }
-  return HELP_PAGES[command];
+  return helpPage(command);
 }
 
 export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {

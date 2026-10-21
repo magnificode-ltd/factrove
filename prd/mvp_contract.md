@@ -1,6 +1,6 @@
 # Shared MVP contract
 
-This contract translates [the agreed MVP end state](../docs/MVP_END_STATE.md) into shared API, package, and runtime interfaces. The end-state document is authoritative for product behavior and modeling; this file defines implementation details. Contract changes are coordinated across affected task owners.
+This contract translates [the agreed MVP end state](./MVP_END_STATE.md) into shared API, package, and runtime interfaces. The end-state document is authoritative for product behavior and modeling; this file defines implementation details. Contract changes are coordinated across affected task owners.
 
 ## Runtime and local identity
 
@@ -20,7 +20,7 @@ This contract translates [the agreed MVP end state](../docs/MVP_END_STATE.md) in
 
 ## Model reference
 
-The complete, authoritative [three-model definition](../docs/MVP_END_STATE.md#three-models) lives in MVP_END_STATE.md: custom Artifact plus Better Auth's User and Organization. Better Auth's pinned core + organization configuration determines the identity schema and required supporting tables; three domain concepts does not mean exactly three SQL tables.
+The complete, authoritative [three-model definition](./MVP_END_STATE.md#three-models) lives in MVP_END_STATE.md: custom Artifact plus Better Auth's User and Organization. Better Auth's pinned core + organization configuration determines the identity schema and required supporting tables; three domain concepts does not mean exactly three SQL tables.
 
 Preserve Better Auth adapter-compatible identity names/mappings. Map Artifact's fields consistently to the documented database column names and reference the generated identities directly. Index creator/time and organization/access/time for the list queries. The organization requirement for org_shared is a SQL check; it is not a one-organization-per-user restriction. All generated identity schema and custom Artifact changes enter the same committed Prisma migration history.
 
@@ -270,7 +270,7 @@ pnpm factrove share <artifact-id> --remove-password
 pnpm factrove share <artifact-id> --revoke
 ```
 
-- The commands are `upload`, `get`, `share`, and `configure`. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/CLI.md](../docs/CLI.md). `get` writes artifact bytes to stdout.
+- The commands are `upload`, `get`, `share`, and `configure`. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](../docs/guides/cli.mdx). `get` writes artifact bytes to stdout.
 - API origin precedence: `--endpoint-url` or `--api-url` (the same value; different values are an error), then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url`, then that profile's `endpoint_url`, then a URL from `apps/cli/.env` when the command is `pnpm factrove`, then http://localhost:3001. `scripts/factrove.mjs` reads that file. `node apps/cli/dist/main.js` does not. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set `FACTROVE_ENDPOINT_URL`. A profile URL wins over the file.
 - API key precedence matches the AWS CLI as implemented for Factrove profiles. An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. Otherwise the key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`. `pnpm factrove` can fill `FACTROVE_PROFILE` from `apps/cli/.env` when the variable is unset. The file does not supply an API key.
 - `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. When the path is a symlink, the rename updates the target and leaves the symlink in place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.

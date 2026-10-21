@@ -4,7 +4,7 @@
 
 Implement the unauthenticated HTTP API connecting PostgreSQL metadata and S3 bytes.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on 01; finished against the 02 and 03 implementations.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on 01; finished against the 02 and 03 implementations.
 
 ## Owns
 

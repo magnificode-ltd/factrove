@@ -4,7 +4,7 @@
 
 Let a person or coding agent upload a local HTML file and obtain a viewer link, without credentials.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — stub-verified, October 18, 2026.** Depends on task 01. Uploads go to the task 04 API. The live API, PostgreSQL, and S3 acceptance is task 07.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — stub-verified, October 18, 2026.** Depends on task 01. Uploads go to the task 04 API. The live API, PostgreSQL, and S3 acceptance is task 07.
 
 ## Owns
 

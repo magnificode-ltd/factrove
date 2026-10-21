@@ -4,7 +4,7 @@
 
 Read one artifact's content by id as HTML or Markdown. Factrove stores only the HTML. Markdown is converted from that HTML when the caller asks for it, and the conversion is not saved.
 
-Read [the MVP end state](../../docs/MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done, October 18, 2026.** Live content reads were verified against local Garage. Real AWS was not tested.
+Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done, October 18, 2026.** Live content reads were verified against local Garage. Real AWS was not tested.
 
 ## Owns
 
@@ -18,7 +18,7 @@ The content format on `GET /api/v1/artifacts/{id}/content`, the shared contract 
 - Nesting deeper than 100 levels is flattened. Output is capped at 16 MiB. Each worker is limited to 5 seconds and 256 MiB of old-generation heap. At most `MARKDOWN_CONVERSION_CONCURRENCY` workers run at once (default 2, clamped to 1–4), and `MARKDOWN_CONVERSION_QUEUE` further conversions may wait (default 2, clamped to 0–8). A full queue is `503 CONVERSION_UNAVAILABLE`. A stored object above the 10 MiB HTML limit is `413 CONTENT_TOO_LARGE`. Time, memory, and output limits are `422 CONTENT_TOO_COMPLEX`. Invalid UTF-8 is `400 INVALID_REQUEST`. An unexpected converter failure is `500 INTERNAL_ERROR`. The stored artifact is unchanged.
 - Any other `format` is `400 INVALID_REQUEST`. Unknown ids stay `404 ARTIFACT_NOT_FOUND`. Storage failures stay `503 STORAGE_UNAVAILABLE`.
 - `contentUrl` remains the HTML URL. The viewer iframe is unchanged.
-- The CLI command is `pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>]`. Plain output is the content. `--json` prints `{ format, mediaType, content }` on one line. Origin precedence, stderr errors, and exit behavior match `upload`. The command reference is [docs/CLI.md](../../docs/CLI.md).
+- The CLI command is `pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>]`. Plain output is the content. `--json` prints `{ format, mediaType, content }` on one line. Origin precedence, stderr errors, and exit behavior match `upload`. The command reference is [docs/guides/cli.mdx](../../docs/guides/cli.mdx).
 
 ## Verification
 

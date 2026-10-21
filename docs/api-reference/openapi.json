@@ -1,0 +1,2179 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Factrove HTTP API",
+    "version": "0.1.0",
+    "description": "Generated from `@factrove/contracts` schemas and the HTTP operation catalog. Product routes live under `/api/v1`. Auth and API key management live under `/api/auth`. Do not treat this file as hand-written. Run `pnpm docs:openapi` after contract or route-catalog changes."
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "http://localhost:3001",
+      "description": "Local development API origin"
+    },
+    {
+      "url": "https://api.example.com",
+      "description": "Example self-hosted API origin"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Process liveness."
+    },
+    {
+      "name": "Auth",
+      "description": "Sessions and API keys."
+    },
+    {
+      "name": "Artifacts",
+      "description": "Upload, list, detail, and content."
+    },
+    {
+      "name": "Shares",
+      "description": "Owner public-link and password controls."
+    },
+    {
+      "name": "Public",
+      "description": "Anonymous share detail, unlock, and HTML."
+    }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "Health"
+        ],
+        "summary": "Check that the API is initialized",
+        "description": "Returns `{ status: \"ok\" }` after the process has started. No credentials.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The API is initialized.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/context": {
+      "get": {
+        "operationId": "getContext",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Return the caller and current organization",
+        "description": "Reads the session cookie or `Authorization: Bearer` API key. An API key has no active organization, so the organization is the caller's only membership, or null when they have none or more than one. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The signed-in user and current organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sign-up/email": {
+      "post": {
+        "operationId": "signUpEmail",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create an account with email and password",
+        "description": "Better Auth email/password sign-up. Email verification is off. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "description": "Display name, email, and password (8 to 128 characters).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignUpEmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account created. Better Auth JSON that includes the user."
+          },
+          "400": {
+            "description": "Better Auth validation failure, such as `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, or `INVALID_EMAIL`."
+          },
+          "422": {
+            "description": "The email is already registered. Better Auth `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`."
+          },
+          "429": {
+            "description": "Too many sign-up attempts from this client address."
+          }
+        }
+      }
+    },
+    "/api/auth/sign-in/email": {
+      "post": {
+        "operationId": "signInEmail",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Sign in with email and password",
+        "description": "Better Auth email/password sign-in. Passwords are 8 to 128 characters. Rate limited to 10 requests per 60 seconds per client address. Sets the session cookie. The response body is Better Auth JSON.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "description": "Email and password (8 to 128 characters).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInEmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in. Better Auth JSON and a session cookie."
+          },
+          "400": {
+            "description": "Better Auth validation failure, such as `INVALID_EMAIL` or `PASSWORD_TOO_LONG`."
+          },
+          "401": {
+            "description": "Unknown user or wrong password. Better Auth `INVALID_EMAIL_OR_PASSWORD`."
+          },
+          "429": {
+            "description": "Too many sign-in attempts from this client address."
+          }
+        }
+      }
+    },
+    "/api/auth/api-key/create": {
+      "post": {
+        "operationId": "createApiKey",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create an API key",
+        "description": "Requires a browser session. A request that also sends `Authorization` is 401 with message `API key management requires a browser session.` The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A name is required, 1 to 32 characters.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new key, including `key` once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateApiKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty or missing name is Better Auth `NAME_REQUIRED` (`API Key name is required.`). A name longer than 32 characters is `INVALID_NAME_LENGTH`."
+          },
+          "401": {
+            "description": "No browser session, or Authorization was also sent."
+          }
+        }
+      }
+    },
+    "/api/auth/api-key/list": {
+      "get": {
+        "operationId": "listApiKeys",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "List API keys for the session",
+        "description": "Requires a browser session. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Keys for the signed-in user, without `key`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListApiKeysResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No browser session, or Authorization was also sent."
+          }
+        }
+      }
+    },
+    "/api/auth/api-key/delete": {
+      "post": {
+        "operationId": "deleteApiKey",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Revoke an API key",
+        "description": "Requires a browser session. Another user's key id is 404. After delete, that key fails closed on product routes.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The key id to delete.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteApiKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The key was deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteApiKeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No browser session, or Authorization was also sent."
+          },
+          "404": {
+            "description": "The key id is unknown to this session."
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts": {
+      "post": {
+        "operationId": "uploadArtifact",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Upload an HTML file",
+        "description": "Accepts one non-empty `.html` or `.htm` file as multipart field `file`, optional `accessType` (`private` default, or `org_shared`). The backend assigns `text/html`. Maximum size is 10 MiB. Each request creates a new artifact. The object is written first, then the row. A storage failure leaves no row. Cookie-authenticated writes also require Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "One file and an optional access type.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid multipart body, access type, or UTF-8. Codes `INVALID_REQUEST` or `ORGANIZATION_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than 10 MiB. Code `FILE_TOO_LARGE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed. Code `STORAGE_UNAVAILABLE`. No artifact row is stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listArtifacts",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "List artifacts for the caller",
+        "description": "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. With no current organization, `view=org` is an empty list. Sorted by createdAt descending, then id descending. The whole list is returned.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "description": "`mine` or `org`. Defaults to `mine`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "mine",
+                "org"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching artifacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactListEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid view. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/content": {
+      "put": {
+        "operationId": "replaceArtifactContent",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Replace an artifact's stored HTML",
+        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT`. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "One HTML file. Do not send accessType.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same artifact id with the new size and upload time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid multipart body, accessType on replace, or UTF-8. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another replace finished first. Code `CONTENT_CONFLICT`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than 10 MiB. Code `FILE_TOO_LARGE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The replace commit threw after the object was written. The new bytes may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed before the row was updated. Code `STORAGE_UNAVAILABLE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getArtifactContent",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Download artifact HTML or converted Markdown",
+        "description": "Default format is HTML, the stored bytes, `Content-Type: text/html`. `format=markdown` converts that HTML on a worker and returns `text/markdown`. Markdown is not stored. `Accept` does not choose the format. Optional `access` is a short-lived HMAC grant for HTML in the viewer iframe and authenticates the request by itself when no Authorization or x-api-key header is present. A present credential header disables the grant. Markdown ignores it. Missing credentials without a valid grant are the same 404 as an unknown id.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "accessGrant": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "`html` or `markdown`. Omitted means `html`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "html",
+                "markdown"
+              ]
+            }
+          },
+          {
+            "name": "access",
+            "in": "query",
+            "required": false,
+            "description": "Viewer content grant. HTML only, at most five minutes, ignored when a credential header is present. A valid grant returns 200 with no cookie or bearer key.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML (`text/html`) or Markdown (`text/markdown`) bytes with charset=utf-8.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid format or UTF-8. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or unreadable artifact, including missing credentials without a valid `access` grant. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Stored HTML exceeds the Markdown input limit. Code `CONTENT_TOO_LARGE`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Conversion limits exceeded. Code `CONTENT_TOO_COMPLEX`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed (`STORAGE_UNAVAILABLE`) or the Markdown conversion pool is full (`CONVERSION_UNAVAILABLE`). Neither sets Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}": {
+      "get": {
+        "operationId": "getArtifact",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Get artifact metadata",
+        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact metadata, including whether a public share is active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a UUID. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or unreadable artifact, including missing or invalid credentials. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/share": {
+      "get": {
+        "operationId": "getArtifactShare",
+        "tags": [
+          "Shares"
+        ],
+        "summary": "Read the owner share state",
+        "description": "Only the creator can read the share. Other members who can read an org_shared artifact get the same 404 as a missing id. When the stored token cannot be decrypted with the current key, the response is `{ shared: false, shareUrl: null }`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether the artifact is shared, the public URL when it is, and password state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session or API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createArtifactShare",
+        "tags": [
+          "Shares"
+        ],
+        "summary": "Create or update a public share",
+        "description": "Creates a public link, or returns the existing one while the current key can still read the token. An optional JSON body `{ password }` sets or replaces the link password. Omitting the password keeps the current one. Passwords are 10 to 128 NFC characters, at least four distinct characters, not all whitespace, and not on the bundled common-password list. Repeating the request without a password returns the same link. Cookie writes require an allowed Origin.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Optional `{ password }`. No body keeps the current password.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateShareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The public link and whether it is password protected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session or API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeArtifactShare",
+        "tags": [
+          "Shares"
+        ],
+        "summary": "Revoke the public share",
+        "description": "Clears the share token and the password. The previous URL becomes the same 404 as a missing artifact.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`shared` is false and `shareUrl` is null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session or API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/share/password": {
+      "delete": {
+        "operationId": "removeArtifactSharePassword",
+        "tags": [
+          "Shares"
+        ],
+        "summary": "Remove the password from a shared link",
+        "description": "When the artifact is shared, the share URL stays the same, `passwordProtected` becomes false, and existing unlock grants become invalid. When the artifact is not shared, the response is `{ shared: false, shareUrl: null, passwordProtected: false }`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current share state. A shared artifact stays shared without a password. An unshared artifact stays unshared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session or API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/artifacts/{id}/{token}": {
+      "get": {
+        "operationId": "getPublicArtifact",
+        "tags": [
+          "Public"
+        ],
+        "summary": "Read a public share",
+        "description": "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Public share token from the owner share URL. The stored column is a hash, not this value.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-factrove-share-grant",
+            "in": "header",
+            "required": false,
+            "description": "Unlock grant from POST /unlock. Never a cookie and never part of a URL. The HTTP header is `X-Factrove-Share-Grant`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public artifact metadata. `contentUrl` may include a short-lived `ticket` query after a grant.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicArtifactEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The link needs a password and the grant is missing or invalid. Code `PASSWORD_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The link is not active. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/artifacts/{id}/{token}/unlock": {
+      "post": {
+        "operationId": "unlockPublicArtifact",
+        "tags": [
+          "Public"
+        ],
+        "summary": "Unlock a password-protected share",
+        "description": "No session. JSON `{ password }`. A matching password returns `{ grant: { token, expiresAt } }` valid for 15 minutes. A link with no password returns `{ grant: null }`. A wrong password is `401 PASSWORD_INCORRECT`. An inactive link is `404 ARTIFACT_NOT_FOUND`. A missing or non-JSON body is `400 INVALID_REQUEST` before any password throttle is charged. Client failures allow 10 per 10 minutes. Share failures allow 30 per 10 minutes, charged only after a wrong password. An exhausted share is `429 RATE_LIMITED` with `Retry-After` and no hash verification. A saturated Argon2 gate, or a share whose remaining slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`. This route ignores a leftover session cookie and does not apply the cookie origin guard.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Public share token from the owner share URL. The stored column is a hash, not this value.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The link password.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUnlockRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A grant for a protected link, or null when the link has no password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicUnlockEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or non-JSON body. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong password. Code `PASSWORD_INCORRECT`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The link is not active. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Includes Retry-After for share lockout.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Password verification is busy. Code `UNLOCK_UNAVAILABLE`. Includes Retry-After.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/public/artifacts/{id}/{token}/content": {
+      "get": {
+        "operationId": "getPublicArtifactContent",
+        "tags": [
+          "Public"
+        ],
+        "summary": "Download public share HTML",
+        "description": "No session. Markdown is not offered. A password-protected link needs a `ticket` query minted on a granted detail response. The ticket lasts 60 seconds and is honored at most 3 times per API process. Content on a protected link without a valid ticket is `401 PASSWORD_REQUIRED`. Reverse proxies should not log `?ticket=`.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Public share token from the owner share URL. The stored column is a hash, not this value.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": false,
+            "description": "Short-lived content ticket for a password-protected link. Not used on an open link.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML bytes with the same sandbox CSP as a signed-in viewer.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Protected content without a valid ticket. Code `PASSWORD_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The link is not active. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed while reading HTML. Code `STORAGE_UNAVAILABLE`. No Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Factrove API key, usually prefixed `ftrv_`. Send `Authorization: Bearer <key>`. Product routes do not accept `x-api-key` as a credential. A present Authorization header that is not a valid key does not fall back to the session cookie."
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "better-auth.session_token",
+        "description": "Better Auth session cookie from email/password sign-in. The cookie may use a `__Secure-` or `__Host-` prefix depending on the origin. Host-only unless AUTH_COOKIE_DOMAIN is set."
+      },
+      "accessGrant": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "access",
+        "description": "Short-lived HMAC grant for HTML content in the viewer iframe. HTML only, at most five minutes. A present Authorization or x-api-key header disables the grant. Markdown ignores it. A valid grant returns 200 without a session cookie or bearer key."
+      }
+    },
+    "headers": {
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying. The API sets this when an `ApiErrorException` includes `retryAfterSeconds`: share-lock 429 RATE_LIMITED and 503 UNLOCK_UNAVAILABLE. Public-view 429 and Markdown 503 CONVERSION_UNAVAILABLE do not set it.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_REQUEST",
+                  "ORGANIZATION_REQUIRED",
+                  "UNAUTHENTICATED",
+                  "PASSWORD_REQUIRED",
+                  "PASSWORD_INCORRECT",
+                  "FORBIDDEN",
+                  "ARTIFACT_NOT_FOUND",
+                  "CONTENT_CONFLICT",
+                  "FILE_TOO_LARGE",
+                  "CONTENT_TOO_LARGE",
+                  "UNSUPPORTED_FILE_TYPE",
+                  "CONTENT_TOO_COMPLEX",
+                  "RATE_LIMITED",
+                  "INTERNAL_ERROR",
+                  "STORAGE_UNAVAILABLE",
+                  "CONVERSION_UNAVAILABLE",
+                  "UNLOCK_UNAVAILABLE"
+                ],
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "description": "Product error envelope. Better Auth `/api/auth` routes may return a different JSON shape."
+      },
+      "ApiErrorCode": {
+        "type": "string",
+        "enum": [
+          "INVALID_REQUEST",
+          "ORGANIZATION_REQUIRED",
+          "UNAUTHENTICATED",
+          "PASSWORD_REQUIRED",
+          "PASSWORD_INCORRECT",
+          "FORBIDDEN",
+          "ARTIFACT_NOT_FOUND",
+          "CONTENT_CONFLICT",
+          "FILE_TOO_LARGE",
+          "CONTENT_TOO_LARGE",
+          "UNSUPPORTED_FILE_TYPE",
+          "CONTENT_TOO_COMPLEX",
+          "RATE_LIMITED",
+          "INTERNAL_ERROR",
+          "STORAGE_UNAVAILABLE",
+          "CONVERSION_UNAVAILABLE",
+          "UNLOCK_UNAVAILABLE"
+        ],
+        "description": "Product JSON error codes. Better Auth routes may use a different body."
+      },
+      "AccessType": {
+        "type": "string",
+        "enum": [
+          "private",
+          "org_shared"
+        ]
+      },
+      "ArtifactView": {
+        "type": "string",
+        "enum": [
+          "mine",
+          "org"
+        ]
+      },
+      "ContentFormat": {
+        "type": "string",
+        "enum": [
+          "html",
+          "markdown"
+        ]
+      },
+      "ArtifactEnvelope": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "creatorUserId": {
+                "type": "string"
+              },
+              "organizationId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "accessType": {
+                "type": "string",
+                "enum": [
+                  "private",
+                  "org_shared"
+                ]
+              },
+              "filename": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string",
+                "const": "text/html"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "uploadedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "viewerUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "contentUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "shared": {
+                "type": "boolean"
+              },
+              "passwordProtected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "creatorUserId",
+              "organizationId",
+              "accessType",
+              "filename",
+              "mimeType",
+              "sizeBytes",
+              "createdAt",
+              "updatedAt",
+              "uploadedAt",
+              "viewerUrl",
+              "contentUrl",
+              "shared",
+              "passwordProtected"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "artifact"
+        ],
+        "additionalProperties": false
+      },
+      "ArtifactListEnvelope": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "creatorUserId": {
+                  "type": "string"
+                },
+                "organizationId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "accessType": {
+                  "type": "string",
+                  "enum": [
+                    "private",
+                    "org_shared"
+                  ]
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "mimeType": {
+                  "type": "string",
+                  "const": "text/html"
+                },
+                "sizeBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "uploadedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "viewerUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "contentUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "shared": {
+                  "type": "boolean"
+                },
+                "passwordProtected": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "creatorUserId",
+                "organizationId",
+                "accessType",
+                "filename",
+                "mimeType",
+                "sizeBytes",
+                "createdAt",
+                "updatedAt",
+                "uploadedAt",
+                "viewerUrl",
+                "contentUrl",
+                "shared",
+                "passwordProtected"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ContextEnvelope": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "user",
+          "organization"
+        ],
+        "additionalProperties": false
+      },
+      "HealthEnvelope": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "ShareEnvelope": {
+        "type": "object",
+        "properties": {
+          "share": {
+            "type": "object",
+            "properties": {
+              "shared": {
+                "type": "boolean"
+              },
+              "shareUrl": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "passwordProtected": {
+                "type": "boolean"
+              },
+              "guessesLockedOut": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "shared",
+              "shareUrl",
+              "passwordProtected"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "share"
+        ],
+        "additionalProperties": false
+      },
+      "CreateShareRequest": {
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicArtifactEnvelope": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string",
+                "const": "text/html"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "uploadedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "contentUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "passwordProtected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "filename",
+              "mimeType",
+              "sizeBytes",
+              "uploadedAt",
+              "contentUrl",
+              "passwordProtected"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "artifact"
+        ],
+        "additionalProperties": false
+      },
+      "PublicUnlockRequest": {
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "PublicUnlockEnvelope": {
+        "type": "object",
+        "properties": {
+          "grant": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "token",
+                  "expiresAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "grant"
+        ],
+        "additionalProperties": false
+      },
+      "UploadForm": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "description": "One non-empty .html or .htm file, at most 10 MiB.",
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "text/html"
+          },
+          "accessType": {
+            "type": "string",
+            "enum": [
+              "private",
+              "org_shared"
+            ]
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
+      "ReplaceForm": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "description": "One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted.",
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "text/html"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "CreateApiKeyResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key"
+        ],
+        "additionalProperties": {}
+      },
+      "ListApiKeysResponse": {
+        "type": "object",
+        "properties": {
+          "apiKeys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "start": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "apiKeys",
+          "total"
+        ],
+        "additionalProperties": {}
+      },
+      "DeleteApiKeyRequest": {
+        "type": "object",
+        "properties": {
+          "keyId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "keyId"
+        ],
+        "additionalProperties": false
+      },
+      "DeleteApiKeyResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "additionalProperties": {}
+      },
+      "SignUpEmailRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "SignInEmailRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+---
+title: Concepts
+description: Artifacts, access types, organizations, and how viewer and share URLs are built.
+---
+
+## Artifact
+
+An artifact is one uploaded HTML document. The API stores metadata in PostgreSQL and the bytes in object storage. The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`.
+
+Replacing content keeps the same id, access, and share token. Another replace of the same revision is `409 CONTENT_CONFLICT`. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying.
+
+Each artifact has:
+
+- a UUID
+- a creator
+- an optional organization
+- `private` or `org_shared` access
+- filename, size, and timestamps
+- a viewer URL and a content URL
+- whether a public share is active, and whether that share has a password
+
+Uploads are HTML only (`.html` or `.htm`, at most 10 MiB). Markdown is an on-request conversion of the stored HTML. It is not saved.
+
+## Access
+
+- **private**: readable only by the creator
+- **org_shared**: readable by the creator and by members of the artifact's organization
+
+`org_shared` upload without a current organization is `400 ORGANIZATION_REQUIRED`.
+
+The library has two views:
+
+- **mine**: artifacts the caller created
+- **org**: `org_shared` artifacts in the caller's current organization, including other people's work
+
+A private artifact can still record an organization. That does not put it in the organization list.
+
+## Identity
+
+User and Organization come from Better Auth. Runtime sign-in is email and password. Organization HTTP routes stay unmounted. Membership is read from the member table.
+
+The current organization is the session's active organization when the user is a member of it. Otherwise it is the user's only membership. With more than one membership and no active organization, it is null. An API key has no active organization, so it uses the sole-membership rule.
+
+## Credentials
+
+Product routes accept a session cookie or `Authorization: Bearer <api-key>`. They do not accept `x-api-key` as a credential. Create keys in the web app. The secret is shown once. The plugin stores a hash.
+
+The CLI sends the bearer key. Managing keys requires a browser session.
+
+## Links
+
+`PUBLIC_BASE_URL` is the origin for viewer URLs and public share links. When it is unset, those links use `WEB_ORIGIN`.
+
+| Kind | Shape |
+| --- | --- |
+| Private viewer | `{PUBLIC_BASE_URL}/artifacts/{id}` |
+| Public share | `{PUBLIC_BASE_URL}/share/{id}/{token}` |
+| Authenticated content | `{API_PUBLIC_ORIGIN}/api/v1/artifacts/{id}/content` |
+| Public content | `{API_PUBLIC_ORIGIN}/api/v1/public/artifacts/{id}/{token}/content` |
+
+Local examples use `http://localhost:3000` and `http://localhost:3001`. A self-hosted install uses whatever origin you configure, such as `https://library.example.com`.
+
+The share token is not the stored column. The API stores ciphertext and a hash. Rotating the key material that encrypts tokens makes existing public URLs return 404.

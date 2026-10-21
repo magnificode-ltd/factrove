@@ -4,7 +4,7 @@
 
 Make the full upload → refresh → view loop runnable from a fresh checkout on the owner's Mac.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md), [the shared MVP contract](../../mvp_contract.md), and [the task index](../../README.md). **Status: done — local runtime verified, October 18, 2026. The AWS upload and viewer loop was not run.** Depends on 02–06 for completion.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md), [the shared MVP contract](../../mvp_contract.md), and [the task index](../../README.md). **Status: done — local runtime verified, October 18, 2026. The AWS upload and viewer loop was not run.** Depends on 02–06 for completion.
 
 ## Owns
 

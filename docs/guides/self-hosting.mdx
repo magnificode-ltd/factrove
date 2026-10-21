@@ -1,0 +1,98 @@
+---
+title: Self-hosting and local development
+description: Environment, local PostgreSQL and object storage, and the origins used to build links.
+---
+
+Factrove is meant to be run as your own install. This guide matches the repository's local setup and the environment keys the API and CLI actually read.
+
+## Applications
+
+| Process | Default origin | Environment file |
+| --- | --- | --- |
+| Web app | `http://localhost:3000` | `NEXT_PUBLIC_API_URL` copied from `apps/api/.env` |
+| API | `http://localhost:3001` | `apps/api/.env` |
+| CLI | talks to the API origin | `apps/cli/.env` for `pnpm factrove` only |
+
+Copy the committed examples. Do not commit real secrets.
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/cli/.env.example apps/cli/.env
+```
+
+## Local services
+
+```bash
+pnpm infra:up
+pnpm db:migrate
+pnpm db:seed
+pnpm dev
+```
+
+`pnpm infra:up` starts PostgreSQL (`127.0.0.1:5432`) and Garage (`127.0.0.1:3900`) and creates the `factrove` bucket. `pnpm infra:down` stops them and keeps the volumes. `pnpm infra:reset` deletes those volumes after you confirm.
+
+The API example file already matches that Compose database and Garage credentials. For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`, leave `S3_ENDPOINT` unset, and use the usual AWS credential chain. The API does not create an AWS bucket.
+
+## Origins that build links
+
+| Variable | Role |
+| --- | --- |
+| `WEB_ORIGIN` | Browser origin of the web app |
+| `API_PUBLIC_ORIGIN` | Origin the API uses when it writes absolute API URLs |
+| `PUBLIC_BASE_URL` | Origin for viewer URLs and public share links. Defaults to `WEB_ORIGIN` |
+| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API |
+| `AUTH_COOKIE_DOMAIN` | Parent cookie domain when the web app and API use different hosts |
+
+`PUBLIC_BASE_URL` must be an absolute `http` or `https` origin with no path, query, or hash. A trailing slash is dropped. Setting it does not publish the app.
+
+Local:
+
+```text
+PUBLIC_BASE_URL=http://localhost:3000
+```
+
+A placeholder you operate:
+
+```text
+PUBLIC_BASE_URL=https://library.example.com
+WEB_ORIGIN=https://library.example.com
+API_PUBLIC_ORIGIN=https://api.example.com
+AUTH_COOKIE_DOMAIN=example.com
+```
+
+When those hosts differ, `AUTH_COOKIE_DOMAIN` must cover them. `localhost` and `127.0.0.1` are different hosts, and a cookie domain cannot cover either, so keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same one.
+
+## Auth and share keys
+
+- `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies.
+- `SHARE_TOKEN_KEY` is optional. When unset, share-token encryption is derived from `BETTER_AUTH_SECRET`. Rotating the value that supplies that key revokes existing public links.
+- `TRUSTED_PROXIES` is a comma-separated list of proxy IPs or CIDRs. Set it behind a reverse proxy so the public view limit and sign-in limit see the visitor from `X-Forwarded-For`. Leave it unset when clients connect directly.
+
+## CLI configuration
+
+Resolution is listed in [CLI](/guides/cli). In short: `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the profile `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
+
+An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. `factrove configure` writes the profile files mode 0600.
+
+## Checks
+
+```bash
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+`pnpm e2e` starts a separate Compose project and needs Playwright Chromium.
+
+## Object-key migration
+
+Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration.
+
+Rolling back after that cutover means:
+
+1. Stop the old app processes
+2. Restore the schema
+3. Copy each current object back to `{artifactId}.html` and point the row at that key
+
+New objects live at `{artifactId}/{contentId}.html`. Older rows may still use `{artifactId}.html`. The public filename stays `{artifactId}.html`. HTTP responses and the CLI omit the object key.

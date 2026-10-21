@@ -2,8 +2,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { renderCliReferencePages } from "../src/cli-docs.js";
+import { APPROVED_HELP } from "../src/command-spec.js";
 import { CliError } from "../src/cli-error.js";
-import { apiKeyForInvocation, cliWantsJson, DEFAULT_API_URL, parseCliArgs } from "../src/parse-args.js";
+import { apiKeyForInvocation, cliWantsJson, DEFAULT_API_URL, helpText, parseCliArgs } from "../src/parse-args.js";
 
 const file = "./report.html";
 const artifactId = "123e4567-e89b-42d3-a456-426614174000";
@@ -327,6 +329,96 @@ function plainCommand() {
     profile: "default",
     profileExplicit: false,
   };
+}
+
+describe("approved help text", () => {
+  it("matches Tom's factrove --help pages word for word", () => {
+    expect(helpText()).toBe(TOM_APPROVED_HELP.top);
+    expect(helpText("upload")).toBe(TOM_APPROVED_HELP.upload);
+    expect(helpText("get")).toBe(TOM_APPROVED_HELP.get);
+    expect(helpText("share")).toBe(TOM_APPROVED_HELP.share);
+    expect(helpText("configure")).toBe(TOM_APPROVED_HELP.configure);
+    expect(APPROVED_HELP).toEqual(TOM_APPROVED_HELP);
+  });
+
+  it("reprints those pages in the generated CLI reference", () => {
+    const pages = Object.fromEntries(renderCliReferencePages().map((page) => [page.slug, page.mdx]));
+    expect(helpFence(pages.help)).toBe(TOM_APPROVED_HELP.top);
+    expect(helpFence(pages.upload)).toBe(TOM_APPROVED_HELP.upload);
+    expect(helpFence(pages.get)).toBe(TOM_APPROVED_HELP.get);
+    expect(helpFence(pages.share)).toBe(TOM_APPROVED_HELP.share);
+    expect(helpFence(pages.configure)).toBe(TOM_APPROVED_HELP.configure);
+  });
+});
+
+const TOM_APPROVED_HELP = {
+  top: `Usage: factrove <command> [options]
+
+Commands:
+  upload <file>                    Upload an HTML file as a new artifact and print its id.
+  upload <file> --artifactId <id>  Replace the content of an existing artifact.
+  get <id>                         Print an artifact's content (HTML, or --format markdown).
+  share <id>                       Create a public link. Add --password, --remove-password or --revoke.
+  configure                        Save your API key and API URL.
+
+Global options:
+  --api-url <origin>   API origin (alias: --endpoint-url)
+  --json               Print one JSON line (alias: --output json)
+  -h, --help           Show help. Run \`factrove <command> --help\` for details.
+
+Examples:
+  factrove upload ./hey.html
+  factrove upload ./hey.html --artifactId <artifact-id>
+  factrove get <artifact-id> --format markdown
+  factrove share <artifact-id> --password
+  factrove configure
+`,
+  upload: `Usage: factrove upload <file> [--artifactId <id>] [--access private|org_shared] [--json]
+
+Uploads an HTML file. Without --artifactId it creates a new artifact and prints
+only its id. With --artifactId it replaces that artifact's content and prints the same id.
+
+Options:
+  --artifactId <id>              Replace this artifact instead of creating a new one.
+  --access <private|org_shared>  Who can see a new artifact (default: private).
+  --json                         Print one JSON line.
+`,
+  get: `Usage: factrove get <id> [--format html|markdown] [--json]
+
+Prints an artifact's content. HTML by default, or Markdown with --format markdown.
+
+Options:
+  --format <html|markdown>  Content to print (default: html).
+  --json                    Print one JSON line.
+`,
+  share: `Usage: factrove share <id> [--password | --password-stdin | --remove-password | --revoke] [--json]
+
+Creates a public link, or prints the existing one.
+
+Options:
+  --password         Prompt twice for a link password. Needs a terminal.
+  --password-stdin   Read the link password from a pipe.
+  --remove-password  Keep the link and remove its password.
+  --revoke           Remove the public link and its password.
+  --json             Print one JSON line.
+`,
+  configure: `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
+
+Saves an API key and API URL for a profile.
+
+Options:
+  --api-key <key>     API key. A prompt keeps it out of shell history.
+  --api-url <origin>  API origin (alias: --endpoint-url).
+  --profile <name>    Credentials profile (default: default).
+`,
+} as const;
+
+function helpFence(mdx: string | undefined): string {
+  const match = mdx?.match(/```text\n([\s\S]*?)\n```/);
+  if (match?.[1] === undefined) {
+    throw new Error("generated CLI page is missing a text help fence");
+  }
+  return `${match[1]}\n`;
 }
 
 function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {

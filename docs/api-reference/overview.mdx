@@ -1,0 +1,45 @@
+---
+title: API overview
+description: How Factrove authenticates callers, shapes errors, and documents endpoints from the contract schemas.
+---
+
+Product routes live under `/api/v1`. Auth and API key management live under `/api/auth` (Better Auth). The pages in this tab are generated from `@factrove/contracts` plus the HTTP operation catalog. Re-run `pnpm docs:openapi` after those change.
+
+Servers in the spec:
+
+- `http://localhost:3001` for local development
+- `https://api.example.com` as a placeholder self-hosted origin
+
+## Authentication
+
+| Caller | How |
+| --- | --- |
+| Browser session | Cookie from `POST /api/auth/sign-in/email` or sign-up |
+| CLI and other clients | `Authorization: Bearer <api-key>` |
+
+`x-api-key` does not authenticate. A present `Authorization` header that is not a valid key does not fall back to the session cookie. API key create, list, and delete require a browser session and reject `Authorization`.
+
+Cookie-authenticated writes (`POST`, `DELETE`, and other non-GET/HEAD/OPTIONS methods) also need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is `403 FORBIDDEN`. Bearer requests skip that check. The public unlock route ignores a leftover session cookie.
+
+## Errors
+
+Product routes return:
+
+```json
+{ "error": { "code": "ARTIFACT_NOT_FOUND", "message": "Artifact was not found." } }
+```
+
+Better Auth `/api/auth` routes use Better Auth's own JSON.
+
+`Retry-After` is set only when the thrown API error includes `retryAfterSeconds`:
+
+- `429 RATE_LIMITED` on unlock lockout
+- `503 UNLOCK_UNAVAILABLE` when password verification is busy
+
+Public-view `429 RATE_LIMITED` and Markdown `503 CONVERSION_UNAVAILABLE` do not set `Retry-After`.
+
+`PUT /api/v1/artifacts/{id}/content` replaces HTML for the owner. Validation matches create. A `409 CONTENT_CONFLICT` means another replace finished first. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying.
+
+## Public shares
+
+Anonymous detail, unlock, and HTML are under `/api/v1/public/artifacts/{id}/{token}`. Send an unlock grant in `X-Factrove-Share-Grant`. See [Sharing links](/guides/sharing-links).

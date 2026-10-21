@@ -1,8 +1,11 @@
-# Factrove CLI
+---
+title: CLI
+description: Commands, flags, config precedence, and how Factrove differs from aws s3.
+---
 
-The commands are `upload`, `get`, `share`, and `configure`. Run `factrove --help` for the short list, and `factrove <command> --help` for that command's flags.
+The commands are `upload`, `get`, `share`, and `configure`. Run `factrove --help` for the short list, and `factrove <command> --help` for that command's flags. The generated pages reprint those help texts word for word.
 
-```sh
+```bash
 factrove upload ./hey.html
 factrove upload ./hey.html --artifactId <artifact-id>
 factrove get <artifact-id> --format markdown
@@ -16,11 +19,11 @@ From this repository the same commands run as `pnpm factrove`. pnpm prints the s
 
 `upload <file>` sends one HTML file and creates a new artifact. Plain success prints only the new id and a newline. `--json` prints the `{ artifact }` envelope on one line. `--access private|org_shared` chooses who can see a new artifact. The default is `private`.
 
-`upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. The API keeps the current access and the current share token, so an existing public link serves the new HTML. `--access` together with `--artifactId` is an error. A replace writes a new object and points the artifact at it. Another replace of the same revision receives 409. A later change can keep the previous object as a version.
+`upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. The API keeps the current access and the current share token, so an existing public link serves the new HTML. `--access` together with `--artifactId` is an error. A replace writes a new object and points the artifact at it. Another replace of the same revision receives `409 CONTENT_CONFLICT`. A later change can keep the previous object as a version. A replace can rarely return `500` after the new object is already committed. GET the artifact before retrying.
 
 `get <id>` prints the artifact's content. The default is HTML. `--format markdown` asks the API to convert the stored HTML on the way out. Markdown is not saved. `--json` prints `{ format, mediaType, content }` on one line.
 
-`share <id>` creates a public link, or prints the existing one. `--password` prompts twice on a terminal. `--password-stdin` reads a pipe and removes one trailing newline. `--remove-password` keeps the link and clears its password. `--revoke` removes the link and its password. A Factrove link is `{PUBLIC_BASE_URL}/share/{id}/{token}` and lasts until revoke. It can also carry a password.
+`share <id>` creates a public link, or prints the existing one. `--password` prompts twice on a terminal. `--password-stdin` reads a pipe and removes one trailing newline. `--remove-password` keeps the link and clears its password. `--revoke` removes the link and its password. A Factrove link is the public base origin plus `/share/{id}/{token}` and lasts until revoke. It can also carry a password.
 
 `configure` saves an API key and API URL for a profile. `--api-key` prompts when omitted, so the key stays out of shell history. `--api-url` sets the origin, and `--endpoint-url` is the same option. `--profile` selects the profile. The default profile name is `default`.
 

@@ -4,7 +4,7 @@
 
 Show uploaded artifacts in My artifacts / Organization artifacts, and render an artifact when clicked.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on 01; verified against the task 04 API.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on 01; verified against the task 04 API.
 
 ## Owns
 

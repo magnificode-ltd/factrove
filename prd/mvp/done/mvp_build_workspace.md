@@ -4,7 +4,7 @@
 
 Provide a small buildable baseline so database, storage, backend, web, and CLI work can proceed independently.
 
-Read [the project README](../../../README.md), [the MVP end state](../../../docs/MVP_END_STATE.md), and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Implemented by a Luna agent at medium reasoning and reviewed by the parent agent.
+Read [the project README](../../../README.md), [the MVP end state](../../MVP_END_STATE.md), and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Implemented by a Luna agent at medium reasoning and reviewed by the parent agent.
 
 ## Owns
 

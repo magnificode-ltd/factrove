@@ -4,7 +4,7 @@
 
 Persist Artifact using Better Auth's User and Organization identities, and provide the repository methods the API needs. The MVP remains unauthenticated at runtime; identity schema reuse is part of this database task.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md) and [the shared MVP contract](../../mvp_contract.md). **Status: done — October 11, 2026.** Depends on task 01's baseline.
 
 ## Owns
 
@@ -17,7 +17,7 @@ apps/api/prisma/**, apps/api/src/database/**, a backend-local schema-generation 
 - Configure Better Auth with its official Prisma adapter: `database: prismaAdapter(prisma, { provider: "postgresql" })`, and `plugins: [organization()]`. Keep this configuration backend-local and reuse the backend's Prisma setup; web/CLI do not own Better Auth database configuration. Pin compatible Better Auth, adapter, and schema-generator dependencies. The workspace currently pins Prisma 6.19.0; follow the documentation for the chosen compatible versions rather than copying Prisma 7-specific setup or upgrading Prisma implicitly.
 - Generate the Prisma identity schema from a pinned Better Auth configuration with its organization plugin. User and Organization are Better Auth's models, not independently designed Factrove models or temporary tables for a later identity migration. Keep the generator configuration/command reproducible and backend-local.
 - Retain the supporting models required by that generated configuration, including core session/account/verification and organization member/invitation models. These are library-owned schema, not additional Factrove product concepts. There is no requirement for exactly three physical tables.
-- Add Factrove's Artifact model as defined in docs/MVP_END_STATE.md, referencing the generated User and Organization models directly, using the persistence interfaces in the shared contract. Preserve adapter-compatible identity model/field mappings.
+- Add Factrove's Artifact model as defined in prd/MVP_END_STATE.md, referencing the generated User and Organization models directly, using the persistence interfaces in the shared contract. Preserve adapter-compatible identity model/field mappings.
 - Commit an initial Prisma SQL migration with foreign keys, access values, the org_shared organization check, and list indexes. The storage key is `{artifactId}.html` and is not a column. The original filename is not a column.
 - Do not add custom content, usage, upload-operation, sharing, or token tables. Do not enforce one organization per user; in particular, member.userId must not be globally unique. Generated pair-level membership constraints are a separate concern.
 - Add an explicit, idempotent seed into the actual Better Auth user/organization tables, including their required fields, for the configured local identities. No credentials or sessions are needed. Do not put demo data into ordinary application startup.
