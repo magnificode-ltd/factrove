@@ -73,7 +73,10 @@
     ]
   },
   "api": {
-    "openapi": "api-reference/openapi.json"
+    "openapi": "api-reference/openapi.json",
+    "examples": {
+      "autogenerate": false
+    }
   },
   "markdown": {
     "instructions": "Describe what the running code does. Do not invent hosted pricing, launch dates, or security guarantees. Share and viewer links are a configured base URL plus an artifact path. Show localhost and a placeholder origin such as https://library.example.com."

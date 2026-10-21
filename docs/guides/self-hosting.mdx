@@ -51,10 +51,10 @@ One supported topology is a TLS reverse proxy in front of the two Node processes
 
 ```bash
 pnpm --filter @factrove/api start
-pnpm --filter @factrove/web start -- --hostname 127.0.0.1 --port 3000
+pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 ```
 
-`pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. The process listens on `HOST` (default `127.0.0.1`) and `PORT` (default `3001`) and loads `apps/api/.env`. `next start` listens on `0.0.0.0:3000` unless you pass `--hostname` and `--port`. Bind both to loopback when the proxy runs on the same machine. If the proxy is on another machine, set `HOST` to the interface that machine can reach.
+`pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. The process listens on `HOST` (default `127.0.0.1`) and `PORT` (default `3001`) and loads `apps/api/.env`. `next start` listens on `0.0.0.0:3000` unless you pass `--hostname` and `--port`. pnpm appends those flags to `next start`. An extra `--` before them makes Next.js treat `--hostname` as a directory and the process exits. Bind both to loopback when the proxy runs on the same machine. If the proxy is on another machine, set `HOST` to the interface that machine can reach.
 
 Run each start command under a process supervisor that restarts it when it exits. A supervisor's working directory can be the repository root. The API reads `apps/api/.env` itself. `next start` cannot change `NEXT_PUBLIC_API_URL` after the build.
 
