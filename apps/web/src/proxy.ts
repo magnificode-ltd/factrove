@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   try {
     decodeURIComponent(request.nextUrl.pathname);
   } catch {
@@ -13,4 +13,3 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: "/share/:path*",
 };
-

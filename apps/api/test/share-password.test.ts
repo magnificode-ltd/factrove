@@ -135,7 +135,7 @@ describe("password attempt throttling", () => {
   });
 
   it("refunds a client slot so a later reserve can succeed", () => {
-    let now = 0;
+    const now = 0;
     const limiter = new PasswordAttemptLimiter(1, 100, 60_000, () => now);
     expect(limiter.reserveClient("198.51.100.9")).toBe(true);
     expect(limiter.reserveClient("198.51.100.9")).toBe(false);
