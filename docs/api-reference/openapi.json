@@ -109,11 +109,11 @@
           "Auth"
         ],
         "summary": "Create an account with email and password",
-        "description": "Better Auth email/password sign-up. Email verification is off. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
+        "description": "Better Auth email/password sign-up. Email verification is off. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
         "security": [],
         "requestBody": {
           "required": true,
-          "description": "Display name, email, and password.",
+          "description": "Display name, email, and password (8 to 128 characters).",
           "content": {
             "application/json": {
               "schema": {
@@ -125,6 +125,12 @@
         "responses": {
           "200": {
             "description": "Account created. Better Auth JSON that includes the user."
+          },
+          "400": {
+            "description": "Better Auth validation failure, such as `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, or `INVALID_EMAIL`."
+          },
+          "422": {
+            "description": "The email is already registered. Better Auth `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`."
           },
           "429": {
             "description": "Too many sign-up attempts from this client address."
@@ -139,11 +145,11 @@
           "Auth"
         ],
         "summary": "Sign in with email and password",
-        "description": "Better Auth email/password sign-in. Rate limited to 10 requests per 60 seconds per client address. Sets the session cookie. The response body is Better Auth JSON.",
+        "description": "Better Auth email/password sign-in. Passwords are 8 to 128 characters. Rate limited to 10 requests per 60 seconds per client address. Sets the session cookie. The response body is Better Auth JSON.",
         "security": [],
         "requestBody": {
           "required": true,
-          "description": "Email and password.",
+          "description": "Email and password (8 to 128 characters).",
           "content": {
             "application/json": {
               "schema": {
@@ -155,6 +161,12 @@
         "responses": {
           "200": {
             "description": "Signed in. Better Auth JSON and a session cookie."
+          },
+          "400": {
+            "description": "Better Auth validation failure, such as `INVALID_EMAIL` or `PASSWORD_TOO_LONG`."
+          },
+          "401": {
+            "description": "Unknown user or wrong password. Better Auth `INVALID_EMAIL_OR_PASSWORD`."
           },
           "429": {
             "description": "Too many sign-in attempts from this client address."
@@ -177,7 +189,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "A name is required.",
+          "description": "A name is required, 1 to 32 characters.",
           "content": {
             "application/json": {
               "schema": {
@@ -196,6 +208,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Name length is outside 1 to 32 characters. Better Auth `INVALID_NAME_LENGTH`."
           },
           "401": {
             "description": "No browser session, or Authorization was also sent."
@@ -448,7 +463,7 @@
           "Artifacts"
         ],
         "summary": "Get artifact metadata",
-        "description": "Owner and, for org_shared artifacts, organization members can read this. Anyone else gets the same 404 as an unknown id. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
         "security": [
           {
             "bearerAuth": []
@@ -491,18 +506,8 @@
               }
             }
           },
-          "401": {
-            "description": "Missing credentials. Code `UNAUTHENTICATED`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
           "404": {
-            "description": "Unknown or unreadable artifact. Code `ARTIFACT_NOT_FOUND`.",
+            "description": "Unknown or unreadable artifact, including missing or invalid credentials. Code `ARTIFACT_NOT_FOUND`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -521,13 +526,16 @@
           "Artifacts"
         ],
         "summary": "Download artifact HTML or converted Markdown",
-        "description": "Default format is HTML, the stored bytes. `format=markdown` converts that HTML on a worker and does not store Markdown. `Accept` does not choose the format. Optional `access` is a short-lived HMAC grant for HTML in the viewer iframe. A present Authorization or x-api-key header disables the grant. Markdown ignores it.",
+        "description": "Default format is HTML, the stored bytes, `Content-Type: text/html`. `format=markdown` converts that HTML on a worker and returns `text/markdown`. Markdown is not stored. `Accept` does not choose the format. Optional `access` is a short-lived HMAC grant for HTML in the viewer iframe and authenticates the request by itself when no Authorization or x-api-key header is present. A present credential header disables the grant. Markdown ignores it. Missing credentials without a valid grant are the same 404 as an unknown id.",
         "security": [
           {
             "bearerAuth": []
           },
           {
             "sessionCookie": []
+          },
+          {
+            "accessGrant": []
           }
         ],
         "parameters": [
@@ -559,7 +567,7 @@
             "name": "access",
             "in": "query",
             "required": false,
-            "description": "Viewer content grant. HTML only, at most five minutes, ignored when a credential header is present.",
+            "description": "Viewer content grant. HTML only, at most five minutes, ignored when a credential header is present. A valid grant returns 200 with no cookie or bearer key.",
             "schema": {
               "type": "string",
               "minLength": 1
@@ -568,9 +576,14 @@
         ],
         "responses": {
           "200": {
-            "description": "HTML or Markdown bytes with the matching Content-Type.",
+            "description": "HTML (`text/html`) or Markdown (`text/markdown`) bytes with charset=utf-8.",
             "content": {
               "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
                 "schema": {
                   "type": "string"
                 }
@@ -588,7 +601,7 @@
             }
           },
           "404": {
-            "description": "Unknown or unreadable artifact. Code `ARTIFACT_NOT_FOUND`.",
+            "description": "Unknown or unreadable artifact, including missing credentials without a valid `access` grant. Code `ARTIFACT_NOT_FOUND`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -618,7 +631,7 @@
             }
           },
           "503": {
-            "description": "Conversion pool is full. Code `CONVERSION_UNAVAILABLE`. No Retry-After.",
+            "description": "Object storage failed (`STORAGE_UNAVAILABLE`) or the Markdown conversion pool is full (`CONVERSION_UNAVAILABLE`). Neither sets Retry-After.",
             "content": {
               "application/json": {
                 "schema": {
@@ -682,16 +695,6 @@
           },
           "401": {
             "description": "Missing session or API key. Code `UNAUTHENTICATED`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -922,8 +925,8 @@
         "tags": [
           "Shares"
         ],
-        "summary": "Remove the password and keep the link",
-        "description": "The share URL stays the same. `passwordProtected` becomes false. Existing unlock grants become invalid.",
+        "summary": "Remove the password from a shared link",
+        "description": "When the artifact is shared, the share URL stays the same, `passwordProtected` becomes false, and existing unlock grants become invalid. When the artifact is not shared, the response is `{ shared: false, shareUrl: null, passwordProtected: false }`.",
         "security": [
           {
             "bearerAuth": []
@@ -947,7 +950,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The link is still shared and no longer password protected.",
+            "description": "The current share state. A shared artifact stays shared without a password. An unshared artifact stays unshared.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1016,7 +1019,7 @@
           "Public"
         ],
         "summary": "Read a public share",
-        "description": "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Public views are limited to 60 requests per 60 seconds per client address, in memory on each API process. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+        "description": "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
         "security": [],
         "parameters": [
           {
@@ -1082,7 +1085,7 @@
             }
           },
           "429": {
-            "description": "Too many public views from this client address. Code `RATE_LIMITED`. No Retry-After.",
+            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1285,7 +1288,17 @@
             }
           },
           "429": {
-            "description": "Too many public views from this client address. Code `RATE_LIMITED`. No Retry-After.",
+            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage failed while reading HTML. Code `STORAGE_UNAVAILABLE`. No Retry-After.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1310,6 +1323,12 @@
         "in": "cookie",
         "name": "better-auth.session_token",
         "description": "Better Auth session cookie from email/password sign-in. The cookie may use a `__Secure-` or `__Host-` prefix depending on the origin. Host-only unless AUTH_COOKIE_DOMAIN is set."
+      },
+      "accessGrant": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "access",
+        "description": "Short-lived HMAC grant for HTML content in the viewer iframe. HTML only, at most five minutes. A present Authorization or x-api-key header disables the grant. Markdown ignores it. A valid grant returns 200 without a session cookie or bearer key."
       }
     },
     "headers": {
@@ -1353,7 +1372,7 @@
                   "CONVERSION_UNAVAILABLE",
                   "UNLOCK_UNAVAILABLE"
                 ],
-                "description": "400 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
               },
               "message": {
                 "type": "string"
@@ -1849,7 +1868,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 32
           }
         },
         "required": [
@@ -1965,7 +1985,9 @@
             "type": "string"
           },
           "password": {
-            "type": "string"
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         },
         "required": [
@@ -1982,7 +2004,9 @@
             "type": "string"
           },
           "password": {
-            "type": "string"
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128
           }
         },
         "required": [

@@ -1,8 +1,9 @@
 export const apiErrorCatalog = [
   {
-    status: 400,
+    status: [400, 404],
     code: "INVALID_REQUEST",
-    description: "The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8."
+    description:
+      "The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found."
   },
   {
     status: 400,

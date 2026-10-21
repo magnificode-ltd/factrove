@@ -4,7 +4,7 @@
 
 Finish the live checks that task 07 left unrun. Task 07 verified the local Postgres runtime, `pnpm dev`, and the default test suites. This task owns the upload loop, the S3-gated integration tests, and a macOS run.
 
-Read [the MVP end state](../../../docs/MVP_END_STATE.md), [the project README](../../../README.md), [the shared MVP contract](../../mvp_contract.md), [the task index](../../README.md), and [the task 07 handoff](mvp_integrate_local.md). **Status: done — local stack verified, October 18, 2026. The macOS run was not done.** Depends on 07.
+Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../README.md), [the shared MVP contract](../../mvp_contract.md), [the task index](../../README.md), and [the task 07 handoff](mvp_integrate_local.md). **Status: done — local stack verified, October 18, 2026. The macOS run was not done.** Depends on 07.
 
 ## Product decision
 

@@ -258,7 +258,8 @@ Applied migrations remain immutable; subsequent changes receive new migrations. 
 
 ## Documentation
 
-- [MVP end state](docs/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
+- [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
 - [Implementation task index](prd/README.md): task status, dependencies, and ownership.
 - [Shared MVP contract](prd/mvp_contract.md): API, package interfaces, and local configuration.
+- [Docs site](DOCUMENTATION.md): regenerate Mintlify references and preview locally.
 - [Agent orientation](AGENTS.md): a concise guide to the codebase and its documentation.

@@ -226,6 +226,65 @@ describe("factrove share arguments", () => {
   });
 });
 
+describe("CLI multi-error precedence", () => {
+  const cases: { name: string; argv: string[]; env?: NodeJS.ProcessEnv; message: string }[] = [
+    {
+      name: "configure extra args beat a flag that configure does not accept",
+      argv: ["configure", "extra", "--json"],
+      message: "Unexpected extra arguments.",
+    },
+    {
+      name: "upload checks --format before --revoke",
+      argv: ["upload", file, "--format", "html", "--revoke"],
+      message: "--format is only valid for the get command.",
+    },
+    {
+      name: "password options beat an unknown command",
+      argv: ["wat", "--password"],
+      message: "Password options are only valid for the share command.",
+    },
+    {
+      name: "get checks --access before --revoke",
+      argv: ["get", artifactId, "--access", "private", "--revoke"],
+      message: "--access is only valid for the upload command.",
+    },
+    {
+      name: "share checks --access before --format",
+      argv: ["share", artifactId, "--access", "private", "--format", "html"],
+      message: "--access is only valid for the upload command.",
+    },
+    {
+      name: "upload flags beat extra positionals",
+      argv: ["upload", file, "extra.html", "--revoke"],
+      message: "--revoke is only valid for the share command.",
+    },
+    {
+      name: "api-key on an unknown command beats unknown-command text",
+      argv: ["wat", "--api-key", "ftrv_secret"],
+      message: "--api-key is only valid for the configure command.",
+    },
+    {
+      name: "an invalid profile beats an unknown command",
+      argv: ["wat", "--profile", "!!!"],
+      message: "Profile names use letters, numbers, dots, underscores, and hyphens.",
+    },
+    {
+      name: "missing command beats a password option",
+      argv: ["--password"],
+      message: "Missing command. Run: pnpm factrove --help",
+    },
+    {
+      name: "unknown command after profile resolution",
+      argv: ["wat"],
+      message: "Unknown command 'wat'. Run: pnpm factrove --help",
+    },
+  ];
+
+  it.each(cases)("$name", ({ argv, env, message }) => {
+    expect(failure(argv, env ?? isolated).message).toBe(message);
+  });
+});
+
 function upload(argv: string[], env: NodeJS.ProcessEnv = {}) {
   const parsed = parseCliArgs(argv, { ...isolated, ...env });
   if (parsed.kind !== "upload") {

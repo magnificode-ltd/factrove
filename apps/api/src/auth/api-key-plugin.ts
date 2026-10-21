@@ -1,3 +1,4 @@
+import { API_KEY_NAME_MAX_LENGTH, API_KEY_NAME_MIN_LENGTH } from "@factrove/contracts";
 import { apiKey } from "@better-auth/api-key";
 import type { BetterAuthPlugin } from "better-auth";
 
@@ -10,6 +11,8 @@ export function factroveApiKey(): BetterAuthPlugin {
   return apiKey({
     defaultPrefix: "ftrv_",
     requireName: true,
+    minimumNameLength: API_KEY_NAME_MIN_LENGTH,
+    maximumNameLength: API_KEY_NAME_MAX_LENGTH,
     enableSessionForAPIKeys: false,
     rateLimit: { enabled: false },
     keyExpiration: {

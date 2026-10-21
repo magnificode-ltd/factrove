@@ -91,23 +91,22 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   }
 
   const matched = matchCommand(positionals);
-  if (matched === undefined) {
-    throw new CliError("INVALID_INPUT", `Unknown command '${positionals[0]}'. Run: pnpm factrove --help`);
+  const passwordUsed = stores.password !== undefined || stores.removePassword === true;
+  if ((matched === undefined || matched.command.name !== "share") && passwordUsed) {
+    throw new CliError("INVALID_INPUT", "Password options are only valid for the share command.");
   }
-
-  const command = matched.command;
-  const rest = positionals.slice(matched.consumed);
-  rejectFlagsForCommand(command, stores);
 
   const profile = selectedProfile(stores.profile, env);
   const stored = readStoredProfileSync(profile, env);
   const apiUrl = resolveApiUrl(stores.apiUrl, env, stored.apiUrl);
   const profileExplicit = stores.profile !== undefined;
 
-  if (command.name === "configure") {
+  if (matched?.command.extraArgsBeforeFlags) {
+    const rest = positionals.slice(matched.consumed);
     if (rest.length > 0) {
-      throw new CliError("INVALID_INPUT", command.extraArgsError);
+      throw new CliError("INVALID_INPUT", matched.command.extraArgsError);
     }
+    rejectConfigureFlags(matched.command, stores);
     return {
       kind: "configure",
       profile,
@@ -117,6 +116,17 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     };
   }
 
+  if (stores.apiKey !== undefined) {
+    throw new CliError("INVALID_INPUT", "--api-key is only valid for the configure command.");
+  }
+
+  if (matched === undefined) {
+    throw new CliError("INVALID_INPUT", `Unknown command '${positionals[0]}'. Run: pnpm factrove --help`);
+  }
+
+  const command = matched.command;
+  const rest = positionals.slice(matched.consumed);
+  rejectWrongCommandFlags(command, stores);
   const values = readPositionals(command, rest, stores);
   if (command.name === "upload") {
     return {
@@ -307,25 +317,29 @@ function readOptionValue(flag: CliFlagSpec, raw: string | undefined, inline: boo
   return value;
 }
 
-function rejectFlagsForCommand(command: CliCommandSpec, stores: ParsedStores): void {
-  const passwordUsed = stores.password !== undefined || stores.removePassword === true;
-  if (command.name !== "share" && passwordUsed) {
-    throw new CliError("INVALID_INPUT", "Password options are only valid for the share command.");
+function rejectConfigureFlags(command: CliCommandSpec, stores: ParsedStores): void {
+  if (stores.access !== undefined || stores.format !== undefined || stores.json === true || stores.revoke !== undefined) {
+    throw new CliError(
+      "INVALID_INPUT",
+      command.configureAcceptsError ?? "configure accepts --profile, --api-key, and --api-url.",
+    );
   }
-  if (command.name === "configure") {
-    if (stores.access !== undefined || stores.format !== undefined || stores.json === true || stores.revoke !== undefined) {
-      throw new CliError(
-        "INVALID_INPUT",
-        command.configureAcceptsError ?? "configure accepts --profile, --api-key, and --api-url.",
-      );
+}
+
+function rejectWrongCommandFlags(command: CliCommandSpec, stores: ParsedStores): void {
+  const seen = new Set<string>();
+  for (const id of command.rejectFlagIds ?? []) {
+    const flag = cliFlags.find((entry) => entry.id === id);
+    if (flag === undefined || !storeIsSet(stores, flag) || commandAllowsFlag(command, flag)) {
+      continue;
     }
-    return;
-  }
-  if (stores.apiKey !== undefined) {
-    throw new CliError("INVALID_INPUT", "--api-key is only valid for the configure command.");
+    seen.add(flag.id);
+    if (flag.wrongCommandError !== undefined) {
+      throw new CliError("INVALID_INPUT", flag.wrongCommandError);
+    }
   }
   for (const flag of cliFlags) {
-    if (!storeIsSet(stores, flag) || commandAllowsFlag(command, flag) || flag.wrongCommandError === undefined) {
+    if (seen.has(flag.id) || !storeIsSet(stores, flag) || commandAllowsFlag(command, flag) || flag.wrongCommandError === undefined) {
       continue;
     }
     throw new CliError("INVALID_INPUT", flag.wrongCommandError);

@@ -83,6 +83,13 @@ export function buildOpenApiDocument(options?: { version?: string }): OpenApiDoc
           name: "better-auth.session_token",
           description:
             "Better Auth session cookie from email/password sign-in. The cookie may use a `__Secure-` or `__Host-` prefix depending on the origin. Host-only unless AUTH_COOKIE_DOMAIN is set."
+        },
+        accessGrant: {
+          type: "apiKey",
+          in: "query",
+          name: "access",
+          description:
+            "Short-lived HMAC grant for HTML content in the viewer iframe. HTML only, at most five minutes. A present Authorization or x-api-key header disables the grant. Markdown ignores it. A valid grant returns 200 without a session cookie or bearer key."
         }
       },
       headers: {
@@ -114,7 +121,7 @@ function apiErrorComponent(): Record<string, unknown> {
             type: "string",
             enum: codeEnum,
             description: apiErrorCatalog
-              .map((entry) => `${entry.status} ${entry.code}: ${entry.description}`)
+              .map((entry) => `${catalogStatuses(entry).join("/")} ${entry.code}: ${entry.description}`)
               .join(" ")
           },
           message: { type: "string" }
@@ -164,21 +171,24 @@ function operationToPathItem(operation: HttpOperation): Record<string, unknown> 
         headers[header.name] = { description: header.description, schema: { type: "string" } };
       }
     }
-    const contentType = response.contentType ?? (response.schemaName || response.schema ? "application/json" : undefined);
+    const contentTypes = responseContentTypes(response);
     const media =
-      contentType === undefined
+      contentTypes.length === 0
         ? undefined
-        : {
-            [contentType]: {
-              schema: response.schemaName
-                ? { $ref: `#/components/schemas/${response.schemaName}` }
-                : response.schema
-                  ? zodToJsonSchema(response.schema)
-                  : contentType === "text/html" || contentType === "text/markdown"
-                    ? { type: "string" }
-                    : { type: "object" }
-            }
-          };
+        : Object.fromEntries(
+            contentTypes.map((contentType) => [
+              contentType,
+              {
+                schema: response.schemaName
+                  ? { $ref: `#/components/schemas/${response.schemaName}` }
+                  : response.schema
+                    ? zodToJsonSchema(response.schema)
+                    : contentType === "text/html" || contentType === "text/markdown"
+                      ? { type: "string" }
+                      : { type: "object" }
+              }
+            ])
+          );
     responses[status] = {
       description: response.description,
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
@@ -219,7 +229,27 @@ function securityRequirement(security: HttpSecurity): Record<string, string[]>[]
   if (security === "session") {
     return [{ sessionCookie: [] }];
   }
+  if (security === "sessionOrApiKeyOrContentGrant") {
+    return [{ bearerAuth: [] }, { sessionCookie: [] }, { accessGrant: [] }];
+  }
   return [{ bearerAuth: [] }, { sessionCookie: [] }];
+}
+
+function responseContentTypes(response: { contentType?: string; contentTypes?: readonly string[]; schemaName?: string; schema?: z.ZodType }): string[] {
+  if (response.contentTypes && response.contentTypes.length > 0) {
+    return [...response.contentTypes];
+  }
+  if (response.contentType) {
+    return [response.contentType];
+  }
+  if (response.schemaName || response.schema) {
+    return ["application/json"];
+  }
+  return [];
+}
+
+function catalogStatuses(entry: { status: number | readonly number[] }): number[] {
+  return typeof entry.status === "number" ? [entry.status] : [...entry.status];
 }
 
 function collectJsonSchemas(name: string, schema: z.ZodType): Record<string, unknown> {

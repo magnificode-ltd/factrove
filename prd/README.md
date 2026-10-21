@@ -4,7 +4,7 @@
 
 Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
 
-The agreed product target and models are in [../docs/MVP_END_STATE.md](../docs/MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS localhost check, which remains open in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
+The agreed product target and models are in [./MVP_END_STATE.md](./MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS localhost check, which remains open in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
 
 ## Tasks and ownership
 

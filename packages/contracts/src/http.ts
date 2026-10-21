@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  API_KEY_NAME_MAX_LENGTH,
+  API_KEY_NAME_MIN_LENGTH,
+  AUTH_PASSWORD_MAX_LENGTH,
+  AUTH_PASSWORD_MIN_LENGTH,
   SHARE_GRANT_HEADER,
   accessTypeSchema,
   artifactEnvelopeSchema,
@@ -16,7 +20,7 @@ import {
 } from "./index.js";
 
 export const createApiKeyRequestSchema = z.object({
-  name: z.string().min(1)
+  name: z.string().min(API_KEY_NAME_MIN_LENGTH).max(API_KEY_NAME_MAX_LENGTH)
 });
 
 export const deleteApiKeyRequestSchema = z.object({
@@ -52,16 +56,17 @@ export const deleteApiKeyResponseSchema = z.object({ success: z.literal(true) })
 export const signUpEmailRequestSchema = z.object({
   name: z.string(),
   email: z.string(),
-  password: z.string()
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH)
 });
 
 export const signInEmailRequestSchema = z.object({
   email: z.string(),
-  password: z.string()
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH)
 });
 
 export type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
-export type HttpSecurity = "none" | "sessionOrApiKey" | "owner" | "session";
+export type HttpSecurity = "none" | "sessionOrApiKey" | "sessionOrApiKeyOrContentGrant" | "owner" | "session";
+export type ResponseContentType = "application/json" | "text/html" | "text/markdown";
 
 export type HeaderParameter = {
   name: string;
@@ -108,7 +113,8 @@ export type ResponseSpec = {
   description: string;
   schema?: z.ZodType;
   schemaName?: string;
-  contentType?: "application/json" | "text/html" | "text/markdown";
+  contentType?: ResponseContentType;
+  contentTypes?: readonly ResponseContentType[];
   headers?: readonly ResponseHeaderSpec[];
 };
 
@@ -154,14 +160,10 @@ const apiErrorResponse: ResponseSpec = {
   schemaName: "ApiError"
 };
 
-const ownerShareErrors = {
+const ownerShareReadErrors = {
   "400": apiErrorResponse,
   "401": {
     description: "Missing session or API key. Code `UNAUTHENTICATED`.",
-    schemaName: "ApiError"
-  },
-  "403": {
-    description: "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
     schemaName: "ApiError"
   },
   "404": {
@@ -169,6 +171,14 @@ const ownerShareErrors = {
     schemaName: "ApiError"
   },
   "500": apiErrorResponse
+} as const;
+
+const ownerShareWriteErrors = {
+  ...ownerShareReadErrors,
+  "403": {
+    description: "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+    schemaName: "ApiError"
+  }
 } as const;
 
 export const namedSchemas: Record<string, z.ZodType> = {
@@ -239,17 +249,22 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an account with email and password",
     description:
-      "Better Auth email/password sign-up. Email verification is off. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
+      "Better Auth email/password sign-up. Email verification is off. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
     security: "none",
     requestBody: {
       contentType: "application/json",
       required: true,
-      description: "Display name, email, and password.",
+      description: "Display name, email, and password (8 to 128 characters).",
       schema: signUpEmailRequestSchema,
       schemaName: "SignUpEmailRequest"
     },
     responses: {
       "200": { description: "Account created. Better Auth JSON that includes the user." },
+      "400": {
+        description:
+          "Better Auth validation failure, such as `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, or `INVALID_EMAIL`."
+      },
+      "422": { description: "The email is already registered. Better Auth `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`." },
       "429": { description: "Too many sign-up attempts from this client address." }
     }
   },
@@ -260,17 +275,19 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Sign in with email and password",
     description:
-      "Better Auth email/password sign-in. Rate limited to 10 requests per 60 seconds per client address. Sets the session cookie. The response body is Better Auth JSON.",
+      "Better Auth email/password sign-in. Passwords are 8 to 128 characters. Rate limited to 10 requests per 60 seconds per client address. Sets the session cookie. The response body is Better Auth JSON.",
     security: "none",
     requestBody: {
       contentType: "application/json",
       required: true,
-      description: "Email and password.",
+      description: "Email and password (8 to 128 characters).",
       schema: signInEmailRequestSchema,
       schemaName: "SignInEmailRequest"
     },
     responses: {
       "200": { description: "Signed in. Better Auth JSON and a session cookie." },
+      "400": { description: "Better Auth validation failure, such as `INVALID_EMAIL` or `PASSWORD_TOO_LONG`." },
+      "401": { description: "Unknown user or wrong password. Better Auth `INVALID_EMAIL_OR_PASSWORD`." },
       "429": { description: "Too many sign-in attempts from this client address." }
     }
   },
@@ -286,7 +303,7 @@ export const httpOperations: HttpOperation[] = [
     requestBody: {
       contentType: "application/json",
       required: true,
-      description: "A name is required.",
+      description: `A name is required, ${API_KEY_NAME_MIN_LENGTH} to ${API_KEY_NAME_MAX_LENGTH} characters.`,
       schema: createApiKeyRequestSchema,
       schemaName: "CreateApiKeyRequest"
     },
@@ -296,6 +313,7 @@ export const httpOperations: HttpOperation[] = [
         schema: createApiKeyResponseSchema,
         schemaName: "CreateApiKeyResponse"
       },
+      "400": { description: "Name length is outside 1 to 32 characters. Better Auth `INVALID_NAME_LENGTH`." },
       "401": { description: "No browser session, or Authorization was also sent." }
     }
   },
@@ -413,7 +431,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Get artifact metadata",
     description:
-      "Owner and, for org_shared artifacts, organization members can read this. Anyone else gets the same 404 as an unknown id. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+      "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
     security: "sessionOrApiKey",
     pathParameters: [artifactIdParam],
     responses: {
@@ -423,8 +441,10 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ArtifactEnvelope"
       },
       "400": { description: "The id is not a UUID. Code `INVALID_REQUEST`.", schemaName: "ApiError" },
-      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
-      "404": { description: "Unknown or unreadable artifact. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" }
+      "404": {
+        description: "Unknown or unreadable artifact, including missing or invalid credentials. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      }
     }
   },
   {
@@ -434,8 +454,8 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Download artifact HTML or converted Markdown",
     description:
-      "Default format is HTML, the stored bytes. `format=markdown` converts that HTML on a worker and does not store Markdown. `Accept` does not choose the format. Optional `access` is a short-lived HMAC grant for HTML in the viewer iframe. A present Authorization or x-api-key header disables the grant. Markdown ignores it.",
-    security: "sessionOrApiKey",
+      "Default format is HTML, the stored bytes, `Content-Type: text/html`. `format=markdown` converts that HTML on a worker and returns `text/markdown`. Markdown is not stored. `Accept` does not choose the format. Optional `access` is a short-lived HMAC grant for HTML in the viewer iframe and authenticates the request by itself when no Authorization or x-api-key header is present. A present credential header disables the grant. Markdown ignores it. Missing credentials without a valid grant are the same 404 as an unknown id.",
+    security: "sessionOrApiKeyOrContentGrant",
     pathParameters: [artifactIdParam],
     queryParameters: [
       {
@@ -447,24 +467,28 @@ export const httpOperations: HttpOperation[] = [
       {
         name: "access",
         required: false,
-        description: "Viewer content grant. HTML only, at most five minutes, ignored when a credential header is present.",
+        description: "Viewer content grant. HTML only, at most five minutes, ignored when a credential header is present. A valid grant returns 200 with no cookie or bearer key.",
         schema: z.string().min(1)
       }
     ],
     responses: {
       "200": {
-        description: "HTML or Markdown bytes with the matching Content-Type.",
-        contentType: "text/html"
+        description: "HTML (`text/html`) or Markdown (`text/markdown`) bytes with charset=utf-8.",
+        contentTypes: ["text/html", "text/markdown"]
       },
       "400": { description: "Invalid format or UTF-8. Code `INVALID_REQUEST`.", schemaName: "ApiError" },
-      "404": { description: "Unknown or unreadable artifact. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
+      "404": {
+        description: "Unknown or unreadable artifact, including missing credentials without a valid `access` grant. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
       "413": {
         description: "Stored HTML exceeds the Markdown input limit. Code `CONTENT_TOO_LARGE`.",
         schemaName: "ApiError"
       },
       "422": { description: "Conversion limits exceeded. Code `CONTENT_TOO_COMPLEX`.", schemaName: "ApiError" },
       "503": {
-        description: "Conversion pool is full. Code `CONVERSION_UNAVAILABLE`. No Retry-After.",
+        description:
+          "Object storage failed (`STORAGE_UNAVAILABLE`) or the Markdown conversion pool is full (`CONVERSION_UNAVAILABLE`). Neither sets Retry-After.",
         schemaName: "ApiError"
       }
     }
@@ -485,7 +509,7 @@ export const httpOperations: HttpOperation[] = [
         schema: shareEnvelopeSchema,
         schemaName: "ShareEnvelope"
       },
-      ...ownerShareErrors
+      ...ownerShareReadErrors
     }
   },
   {
@@ -511,7 +535,7 @@ export const httpOperations: HttpOperation[] = [
         schema: shareEnvelopeSchema,
         schemaName: "ShareEnvelope"
       },
-      ...ownerShareErrors
+      ...ownerShareWriteErrors
     }
   },
   {
@@ -529,7 +553,7 @@ export const httpOperations: HttpOperation[] = [
         schema: shareEnvelopeSchema,
         schemaName: "ShareEnvelope"
       },
-      ...ownerShareErrors
+      ...ownerShareWriteErrors
     }
   },
   {
@@ -537,17 +561,19 @@ export const httpOperations: HttpOperation[] = [
     method: "delete",
     path: "/api/v1/artifacts/{id}/share/password",
     tags: ["Shares"],
-    summary: "Remove the password and keep the link",
-    description: "The share URL stays the same. `passwordProtected` becomes false. Existing unlock grants become invalid.",
+    summary: "Remove the password from a shared link",
+    description:
+      "When the artifact is shared, the share URL stays the same, `passwordProtected` becomes false, and existing unlock grants become invalid. When the artifact is not shared, the response is `{ shared: false, shareUrl: null, passwordProtected: false }`.",
     security: "owner",
     pathParameters: [artifactIdParam],
     responses: {
       "200": {
-        description: "The link is still shared and no longer password protected.",
+        description:
+          "The current share state. A shared artifact stays shared without a password. An unshared artifact stays unshared.",
         schema: shareEnvelopeSchema,
         schemaName: "ShareEnvelope"
       },
-      ...ownerShareErrors
+      ...ownerShareWriteErrors
     }
   },
   {
@@ -557,7 +583,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Public"],
     summary: "Read a public share",
     description:
-      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Public views are limited to 60 requests per 60 seconds per client address, in memory on each API process. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
     security: "none",
     pathParameters: [artifactIdParam, shareTokenParam],
     headerParameters: [
@@ -580,7 +606,8 @@ export const httpOperations: HttpOperation[] = [
       },
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
-        description: "Too many public views from this client address. Code `RATE_LIMITED`. No Retry-After.",
+        description:
+          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
         schemaName: "ApiError"
       }
     }
@@ -656,7 +683,12 @@ export const httpOperations: HttpOperation[] = [
       },
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
-        description: "Too many public views from this client address. Code `RATE_LIMITED`. No Retry-After.",
+        description:
+          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+        schemaName: "ApiError"
+      },
+      "503": {
+        description: "Object storage failed while reading HTML. Code `STORAGE_UNAVAILABLE`. No Retry-After.",
         schemaName: "ApiError"
       }
     }

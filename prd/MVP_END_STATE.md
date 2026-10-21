@@ -1,6 +1,6 @@
 # Factrove — MVP end state
 
-This document is the north star for the agreed MVP. It describes the desired completed product, independent of which tasks have been implemented. Implementation status and ownership live in [the PRDs](../prd/README.md); endpoint and package details live in [the shared contract](../prd/mvp_contract.md).
+This document is the north star for the agreed MVP. It describes the desired completed product, independent of which tasks have been implemented. Implementation status and ownership live in [the PRDs](./README.md); endpoint and package details live in [the shared contract](./mvp_contract.md).
 
 ## The outcome
 
@@ -193,7 +193,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](../prd/post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](../prd/post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, versioning, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](./post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](./post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](./post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, versioning, further CLI commands, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

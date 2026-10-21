@@ -9,6 +9,14 @@ export const contentMediaTypes = {
   markdown: "text/markdown"
 } as const;
 
+// Better Auth email/password defaults. createAuth passes these through so the
+// API and the OpenAPI request schemas share one source.
+export const AUTH_PASSWORD_MIN_LENGTH = 8;
+export const AUTH_PASSWORD_MAX_LENGTH = 128;
+// @better-auth/api-key defaults. factroveApiKey passes these through.
+export const API_KEY_NAME_MIN_LENGTH = 1;
+export const API_KEY_NAME_MAX_LENGTH = 32;
+
 export const SHARE_PASSWORD_MIN_LENGTH = 10;
 export const SHARE_PASSWORD_MAX_LENGTH = 128;
 export const SHARE_PASSWORD_MIN_UNIQUE = 4;

@@ -4,7 +4,7 @@
 
 Read one artifact's content by id as HTML or Markdown. Factrove stores only the HTML. Markdown is converted from that HTML when the caller asks for it, and the conversion is not saved.
 
-Read [the MVP end state](../../docs/MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done, October 18, 2026.** Live content reads were verified against local Garage. Real AWS was not tested.
+Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done, October 18, 2026.** Live content reads were verified against local Garage. Real AWS was not tested.
 
 ## Owns
 

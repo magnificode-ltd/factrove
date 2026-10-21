@@ -15,7 +15,11 @@
         "groups": [
           {
             "group": "Get started",
-            "pages": ["introduction", "quickstart", "concepts"]
+            "pages": [
+              "introduction",
+              "quickstart",
+              "concepts"
+            ]
           }
         ]
       },
@@ -24,7 +28,10 @@
         "groups": [
           {
             "group": "Guides",
-            "pages": ["guides/sharing-links", "guides/self-hosting"]
+            "pages": [
+              "guides/sharing-links",
+              "guides/self-hosting"
+            ]
           }
         ]
       },
@@ -32,7 +39,14 @@
         "tab": "CLI reference",
         "groups": [
           {
-            "$ref": "./cli-reference/pages.json"
+            "group": "Commands",
+            "pages": [
+              "cli-reference/overview",
+              "cli-reference/configure",
+              "cli-reference/upload",
+              "cli-reference/get",
+              "cli-reference/share"
+            ]
           }
         ]
       },
@@ -41,7 +55,9 @@
         "groups": [
           {
             "group": "Overview",
-            "pages": ["api-reference/overview"]
+            "pages": [
+              "api-reference/overview"
+            ]
           }
         ],
         "openapi": "api-reference/openapi.json"

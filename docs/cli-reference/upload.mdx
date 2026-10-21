@@ -21,10 +21,6 @@ Local .html or .htm file. (required.)
 
 ## Flags
 
-<ParamField path="--json" query type="boolean">
-Print one JSON line instead of the plain-text success output.
-</ParamField>
-
 <ParamField path="--access <private|org_shared>" query type="string">
 Upload access type. Defaults to private.
 Values: `private`, `org_shared`.
@@ -36,6 +32,10 @@ API origin for this command. Overrides FACTROVE_API_URL and the profile.
 
 <ParamField path="--profile <name>" query type="string">
 Credentials profile. Overrides FACTROVE_PROFILE. Defaults to default.
+</ParamField>
+
+<ParamField path="--json" query type="boolean">
+Print one JSON line instead of the plain-text success output.
 </ParamField>
 
 ## Examples

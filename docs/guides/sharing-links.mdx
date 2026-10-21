@@ -75,11 +75,11 @@ The grant lasts 15 minutes. The browser keeps it in `sessionStorage` on the web 
 
 The sandboxed iframe cannot send headers, so a granted detail returns `contentUrl` with a `ticket` query. That ticket lasts 60 seconds and is honored at most 3 times per API process. Reverse proxies should not log `?ticket=`. Protected content without a valid ticket is `401 PASSWORD_REQUIRED`.
 
-Changing or removing the password, revoking or re-sharing the link, and rotating the share-token key all invalidate existing grants.
+Changing or removing the password, revoking the link, and rotating the share-token key all invalidate existing grants. A plain re-share (`POST /share` without a password) keeps the same token and those grants still work. Only revoke, then share again, mints a new URL.
 
 ## Rate limits and Retry-After
 
-Public **views** (detail and content) allow 60 requests per 60 seconds per client address, in memory on each API process. That 429 is `RATE_LIMITED` with message `Too many requests. Try again later.` It does **not** set `Retry-After`.
+Each accepted public **detail** counts as one view unit and grants two companion **content** loads for 30 seconds. Those companion loads do not consume another view unit. View units allow 60 per 60 seconds per client address, in memory on each API process. A content request with no remaining companion charges another view unit. Unlock does not use this limiter. The 429 is `RATE_LIMITED` with message `Too many requests. Try again later.` It does **not** set `Retry-After`.
 
 Unlock **guesses** are separate:
 

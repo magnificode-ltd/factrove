@@ -21,10 +21,6 @@ Artifact UUID. (required.)
 
 ## Flags
 
-<ParamField path="--json" query type="boolean">
-Print one JSON line instead of the plain-text success output.
-</ParamField>
-
 <ParamField path="--format <html|markdown>" query type="string">
 Content format for get. Defaults to html.
 Values: `html`, `markdown`.
@@ -36,6 +32,10 @@ API origin for this command. Overrides FACTROVE_API_URL and the profile.
 
 <ParamField path="--profile <name>" query type="string">
 Credentials profile. Overrides FACTROVE_PROFILE. Defaults to default.
+</ParamField>
+
+<ParamField path="--json" query type="boolean">
+Print one JSON line instead of the plain-text success output.
 </ParamField>
 
 ## Examples

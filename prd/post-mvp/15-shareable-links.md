@@ -4,7 +4,7 @@
 
 Let the owner share an artifact with someone who does not have an account, using a link built from a configured base URL. Factrove does not start a server or publish the app as part of this feature. If the base URL is localhost, the link uses localhost. If it is `https://factrove.app`, the link uses that domain plus the artifact id.
 
-Read [the MVP end state](../../docs/MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done.** Password protection is [task 14](14-password-protected-links.md). Versioning is a separate later task.
+Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: done.** Password protection is [task 14](14-password-protected-links.md). Versioning is a separate later task.
 
 ## Owns
 

@@ -51,6 +51,8 @@ export type CliCommandSpec = {
   flags: readonly string[];
   exclusiveStores?: readonly string[];
   exclusiveFlagError?: string;
+  extraArgsBeforeFlags?: boolean;
+  rejectFlagIds?: readonly string[];
   extraArgsError: string;
   extraArgsErrorWhenStore?: Record<string, string>;
   configureAcceptsError?: string;
@@ -67,15 +69,28 @@ const defaultExitCodes: CliExitCode[] = [
 
 export const cliFlags: readonly CliFlagSpec[] = [
   {
-    id: "json",
-    names: ["--json"],
-    kind: "boolean",
-    store: "json",
-    booleanValue: true,
-    repeatable: true,
-    description: "Print one JSON line instead of the plain-text success output.",
-    help: "Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content. share prints the share envelope.",
-    appliesTo: ["upload", "get", "share"]
+    id: "access",
+    names: ["--access"],
+    kind: "enum",
+    values: ["private", "org_shared"],
+    store: "access",
+    parseError: "access must be private or org_shared.",
+    description: "Upload access type. Defaults to private.",
+    help: "upload only. Defaults to private.",
+    appliesTo: ["upload"],
+    wrongCommandError: "--access is only valid for the upload command."
+  },
+  {
+    id: "format",
+    names: ["--format"],
+    kind: "enum",
+    values: ["html", "markdown"],
+    store: "format",
+    parseError: "format must be html or markdown.",
+    description: "Content format for get. Defaults to html.",
+    help: "get only. Defaults to html.",
+    appliesTo: ["get"],
+    wrongCommandError: "--format is only valid for the get command."
   },
   {
     id: "revoke",
@@ -130,30 +145,6 @@ export const cliFlags: readonly CliFlagSpec[] = [
     wrongCommandError: "Password options are only valid for the share command."
   },
   {
-    id: "access",
-    names: ["--access"],
-    kind: "enum",
-    values: ["private", "org_shared"],
-    store: "access",
-    parseError: "access must be private or org_shared.",
-    description: "Upload access type. Defaults to private.",
-    help: "upload only. Defaults to private.",
-    appliesTo: ["upload"],
-    wrongCommandError: "--access is only valid for the upload command."
-  },
-  {
-    id: "format",
-    names: ["--format"],
-    kind: "enum",
-    values: ["html", "markdown"],
-    store: "format",
-    parseError: "format must be html or markdown.",
-    description: "Content format for get. Defaults to html.",
-    help: "get only. Defaults to html.",
-    appliesTo: ["get"],
-    wrongCommandError: "--format is only valid for the get command."
-  },
-  {
     id: "apiUrl",
     names: ["--api-url"],
     kind: "string",
@@ -182,6 +173,17 @@ export const cliFlags: readonly CliFlagSpec[] = [
     appliesTo: "*"
   },
   {
+    id: "json",
+    names: ["--json"],
+    kind: "boolean",
+    store: "json",
+    booleanValue: true,
+    repeatable: true,
+    description: "Print one JSON line instead of the plain-text success output.",
+    help: "Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content. share prints the share envelope.",
+    appliesTo: ["upload", "get", "share"]
+  },
+  {
     id: "help",
     names: ["-h", "--help"],
     kind: "boolean",
@@ -205,6 +207,7 @@ export const cliCommands: readonly CliCommandSpec[] = [
     usage: ["pnpm factrove configure [--profile <name>] [--api-key <key>] [--api-url <origin>]"],
     positionals: [],
     flags: ["profile", "apiKey", "apiUrl"],
+    extraArgsBeforeFlags: true,
     extraArgsError: "Unexpected extra arguments.",
     configureAcceptsError: "configure accepts --profile, --api-key, and --api-url.",
     examples: [
@@ -235,6 +238,7 @@ export const cliCommands: readonly CliCommandSpec[] = [
       }
     ],
     flags: ["access", "apiUrl", "profile", "json"],
+    rejectFlagIds: ["format", "revoke"],
     extraArgsError: "Unexpected extra arguments.",
     examples: [
       { command: "pnpm factrove upload ./fixtures/hello.html" },
@@ -266,6 +270,7 @@ export const cliCommands: readonly CliCommandSpec[] = [
       }
     ],
     flags: ["format", "json", "apiUrl", "profile"],
+    rejectFlagIds: ["access", "revoke"],
     extraArgsError: "Unexpected extra arguments.",
     examples: [
       { command: "pnpm factrove get 123e4567-e89b-42d3-a456-426614174000" },
@@ -300,6 +305,7 @@ export const cliCommands: readonly CliCommandSpec[] = [
     flags: ["password", "passwordStdin", "removePassword", "revoke", "json", "apiUrl", "profile"],
     exclusiveStores: ["password", "removePassword", "revoke"],
     exclusiveFlagError: "Use only one of --password, --password-stdin, --remove-password, and --revoke.",
+    rejectFlagIds: ["access", "format"],
     extraArgsError: "Unexpected extra arguments.",
     extraArgsErrorWhenStore: {
       password:
@@ -388,13 +394,14 @@ export function commandAllowsFlag(command: CliCommandSpec, flag: CliFlagSpec): b
 }
 
 export function flagLabel(flag: CliFlagSpec): string {
+  const names = flag.names.join(", ");
   if (flag.kind === "enum" && flag.values) {
-    return `${flag.names[0]} <${flag.values.join("|")}>`;
+    return `${names} <${flag.values.join("|")}>`;
   }
   if (flag.kind === "string") {
-    return `${flag.names[0]} <${flag.store === "apiUrl" ? "origin" : flag.store === "apiKey" ? "key" : "name"}>`;
+    return `${names} <${flag.store === "apiUrl" ? "origin" : flag.store === "apiKey" ? "key" : "name"}>`;
   }
-  return flag.names[0] ?? flag.id;
+  return names || flag.id;
 }
 
 export function renderHelpText(): string {
@@ -402,7 +409,7 @@ export function renderHelpText(): string {
   const commandLines = cliCommands.map((command) => `  ${command.name.padEnd(11)}${command.summary}`);
   const optionLines = cliFlags.map((flag) => {
     const label = flagLabel(flag);
-    return `  ${label.padEnd(28)} ${flag.help}`;
+    return `  ${label.padEnd(30)} ${flag.help}`;
   });
   const examples = cliCommands.flatMap((command) => command.examples.map((example) => `  ${example.command}`));
   const commandNotes = cliCommands.flatMap((command) => command.notes);
