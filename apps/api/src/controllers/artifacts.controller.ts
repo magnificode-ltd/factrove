@@ -1,6 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { BadRequestException, Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, PayloadTooLargeException, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
-import multer from "multer";
+import { Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
 import {
   artifactDtoSchema,
   artifactViewSchema,
@@ -12,9 +11,10 @@ import {
   type ShareEnvelope,
 } from "@factrove/contracts";
 import { ActorService } from "../auth/actor.service.js";
-import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
+import { htmlContentHeaders, markdownContentHeaders } from "../rendering/html-policy.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
+import { parseHtmlUpload } from "./html-upload.js";
 import { jsonBody } from "./json-body.js";
 import { streamHtml } from "./stream-html.js";
 
@@ -41,58 +41,12 @@ class RequireActorGuard implements CanActivate {
   }
 }
 
-// Multer 2.4 passes fileSize + 1 and parts + 1 to busboy, so these values are the
-// largest file and part count that are still accepted. Plain filenames are decoded
-// as UTF-8. filename* is decoded by busboy from its RFC 5987 charset.
-const uploadHtml = multer({
-  defParamCharset: "utf8",
-  limits: {
-    fileSize: MAX_HTML_BYTES,
-    files: 2,
-    fields: 8,
-    fieldSize: 1024,
-    parts: 12,
-  },
-}).single("file");
-
 const htmlUpload: NestInterceptor = {
   async intercept(context, next) {
-    const http = context.switchToHttp();
-    await new Promise<void>((resolve, reject) => {
-      uploadHtml(http.getRequest(), http.getResponse(), (error?: unknown) => {
-        if (error) {
-          reject(mapMultipartError(error));
-          return;
-        }
-        resolve();
-      });
-    });
+    await parseHtmlUpload(context.switchToHttp().getRequest());
     return next.handle();
   },
 };
-
-function mapMultipartError(error: unknown): Error {
-  if (!(error instanceof Error)) {
-    return new BadRequestException("The request is invalid.");
-  }
-  const code = "code" in error && typeof error.code === "string" ? error.code : "";
-  if (code === "LIMIT_FILE_SIZE") {
-    return new PayloadTooLargeException("File too large");
-  }
-  if (code === "LIMIT_FILE_COUNT" || code === "LIMIT_UNEXPECTED_FILE" || code === "LIMIT_PART_COUNT") {
-    return new BadRequestException("Unexpected field");
-  }
-  if (code === "LIMIT_FIELD_COUNT" || code === "LIMIT_FIELD_VALUE" || code === "LIMIT_FIELD_KEY" || code === "MISSING_FIELD_NAME") {
-    return new BadRequestException(error.message);
-  }
-  if (error.message.startsWith("Multipart:")) {
-    return new BadRequestException(error.message);
-  }
-  if (error.message === "Malformed part header" || error.message === "Unexpected end of form" || error.message === "Unexpected end of file") {
-    return new BadRequestException(`Multipart: ${error.message}`);
-  }
-  return error;
-}
 
 // private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
 // Missing access returns 404 so an id does not reveal that an artifact exists.

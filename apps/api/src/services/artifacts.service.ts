@@ -848,6 +848,7 @@ function readUpload(file: unknown): { filename: string; bytes: Uint8Array } | un
     return undefined;
   }
   return {
+    // The multipart parser already decoded this filename. Do not percent-decode it again.
     filename: record.originalname,
     bytes: Uint8Array.from(record.buffer),
   };

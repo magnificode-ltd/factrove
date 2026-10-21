@@ -338,6 +338,19 @@ describe("factrove upload", () => {
     expect(plain.stderr).toBe(`INVALID_INPUT: Could not read the CLI environment file at ${unreadable}.\n`);
   });
 
+  it("sends a filename containing %22, %0A, or %0D without rewriting it", async () => {
+    const directory = await makeTemp();
+    const names = ["report%22draft.html", "report%0Adraft.html", "report%0Ddraft.html"];
+    for (const name of names) {
+      await writeFile(join(directory, name), "<p>percent</p>");
+      const stub = await startStub(() => accepted(10));
+      const result = await runCli(["upload", name, "--api-url", stub.url], { cwd: directory });
+      expect(result.code).toBe(0);
+      const parts = multipartParts(stub.requests[0]?.contentType ?? "", stub.requests[0]?.body ?? Buffer.alloc(0));
+      expect(parts.find((part) => part.name === "file")?.filename).toBe(name);
+    }
+  });
+
   it("resolves a relative path from the process directory and ignores INIT_CWD", async () => {
     const directory = await makeTemp();
     await writeFile(join(directory, "note.html"), "<p>here</p>");

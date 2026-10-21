@@ -1016,6 +1016,21 @@ describe("HTTP API", () => {
     expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("caf\u00C3\u00A9");
   });
 
+  it("keeps literal percent sequences in filename* and a plain upload", async () => {
+    const bytes = new TextEncoder().encode("<p>percent</p>");
+    const cases = [
+      ["----factrove-pct22", "report%2522draft.html", "report%22draft.html", "report%22draft"],
+      ["----factrove-pct0a", "report%250Adraft.html", "report%0Adraft.html", "report%0Adraft"],
+      ["----factrove-pct0d", "report%250Ddraft.html", "report%0Ddraft.html", "report%0Ddraft"],
+    ] as const;
+    for (const [boundary, encoded, plain, name] of cases) {
+      const starred = await postMultipart(baseUrl, boundary, filenameStarBody(boundary, "", encoded));
+      expect(starred.status).toBe(201);
+      expect(artifactEnvelopeSchema.parse(await starred.json()).artifact.name).toBe(name);
+      expect((await upload(baseUrl, plain, bytes)).name).toBe(name);
+    }
+  });
+
   it("bounds memory for data before the file and enforces the field limit", async () => {
     const boundary = "----factrove-preamble";
     const target = new URL(baseUrl);
@@ -3096,11 +3111,11 @@ function retainedBufferBytes(): number {
   return process.memoryUsage().arrayBuffers;
 }
 
-function filenameStarBody(boundary: string, preamble: string): Buffer {
+function filenameStarBody(boundary: string, preamble: string, encodedName = "caf%C3%83%C2%A9.html"): Buffer {
   return Buffer.concat([
     Buffer.from(
       `${preamble}\r\n--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="file"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n` +
+        `Content-Disposition: form-data; name="file"; filename*=UTF-8''${encodedName}\r\n` +
         `Content-Type: text/html\r\n\r\n`,
       "utf8",
     ),

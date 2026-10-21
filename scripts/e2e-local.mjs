@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
@@ -735,6 +735,24 @@ async function checkNamedArtifact(configDir) {
   );
   if (rejected.code === 0 || !rejected.stderr.includes("name must be one line of 1 to 120 characters.")) {
     throw new Error(`Over-long name was not rejected.\n${rejected.stderr}`);
+  }
+  const percentDir = await mkdtemp(join(tmpdir(), "factrove-e2e-name-"));
+  for (const [filename, name] of [
+    ["report%22draft.html", "report%22draft"],
+    ["report%0Adraft.html", "report%0Adraft"],
+    ["report%0Ddraft.html", "report%0Ddraft"],
+  ]) {
+    const path = join(percentDir, filename);
+    await writeFile(path, "<p>percent</p>");
+    const uploaded = await must(
+      "pnpm",
+      ["factrove", "upload", path, "--json", "--profile", "e2e"],
+      cliChildEnv(configDir),
+    );
+    const stored = JSON.parse(uploaded.stdout).artifact.name;
+    if (stored !== name) {
+      throw new Error(`CLI upload of ${filename} stored ${stored}.`);
+    }
   }
 
   const page = await ownerContext.newPage();
