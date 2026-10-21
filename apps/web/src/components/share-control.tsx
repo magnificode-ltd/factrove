@@ -33,10 +33,24 @@ export function ShareControl({
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<string | null>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
   const panelId = `public-link-${artifactId}`;
   const link = share.shareUrl ?? viewerUrl ?? "";
-  const buttonClass = compact ? "h-8" : "h-10 bg-white";
+  const buttonClass = compact ? "h-8" : "h-10";
+
+  useEffect(() => {
+    if (compact || !expanded) {
+      return;
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
+        setExpanded(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [compact, expanded]);
 
   useEffect(() => {
     if (!returnFocus.current) {
@@ -87,11 +101,19 @@ export function ShareControl({
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "pointer-events-auto relative z-10 flex flex-wrap items-center gap-2",
-        expanded ? "w-full" : "w-auto",
-        compact ? "flex-col items-stretch" : ""
+        compact ? "flex-col items-stretch" : "",
+        compact && expanded ? "w-full" : "w-auto"
       )}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && expanded && !compact && !event.defaultPrevented) {
+          event.preventDefault();
+          returnFocus.current = true;
+          setExpanded(false);
+        }
+      }}
     >
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -114,42 +136,50 @@ export function ShareControl({
       </div>
       {expanded && share.shareUrl ? (
         <div
-          id={panelId}
-          role="region"
-          aria-label="Public link"
-          className="ft-pop ft-key basis-full rounded-[14px] border border-line bg-lilac p-4"
+          className={
+            compact
+              ? "basis-full"
+              : "absolute top-full right-0 z-40 mt-2 max-h-[calc(100dvh-6rem)] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-[14px] shadow-[0_24px_48px_-24px_color-mix(in_srgb,var(--peri-d)_60%,transparent)]"
+          }
         >
-          <p className="text-sm font-medium">
-            {share.passwordProtected
-              ? "Anyone with this link and its password can open the artifact without an account."
-              : "Anyone with this link can open the artifact without an account."}
-          </p>
-          <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="share-url">
-            {share.shareUrl}
-          </code>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={share.shareUrl} />
-            <Button
-              type="button"
-              variant="destructive"
-              className="h-10"
-              disabled={pending !== null}
-              onClick={() => void onRevoke()}
-            >
-              {pending === "revoke" ? "Stopping…" : "Stop sharing"}
-            </Button>
+          <div
+            id={panelId}
+            role="region"
+            aria-label="Public link"
+            className="ft-pop ft-key rounded-[14px] border border-line bg-lilac p-4"
+          >
+            <p className="text-sm font-medium">
+              {share.passwordProtected
+                ? "Anyone with this link and its password can open the artifact without an account."
+                : "Anyone with this link can open the artifact without an account."}
+            </p>
+            <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="share-url">
+              {share.shareUrl}
+            </code>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={share.shareUrl} />
+              <Button
+                type="button"
+                variant="destructive"
+                className="h-10"
+                disabled={pending !== null}
+                onClick={() => void onRevoke()}
+              >
+                {pending === "revoke" ? "Stopping…" : "Stop sharing"}
+              </Button>
+            </div>
+            <SharePassword
+              artifactId={artifactId}
+              share={share}
+              pending={pending}
+              setPending={setPending}
+              onChange={(next) => {
+                setShare(next);
+                setError(null);
+              }}
+              onError={(caught) => setError(shareError(caught, artifactId))}
+            />
           </div>
-          <SharePassword
-            artifactId={artifactId}
-            share={share}
-            pending={pending}
-            setPending={setPending}
-            onChange={(next) => {
-              setShare(next);
-              setError(null);
-            }}
-            onError={(caught) => setError(shareError(caught, artifactId))}
-          />
         </div>
       ) : null}
       {error ? (
