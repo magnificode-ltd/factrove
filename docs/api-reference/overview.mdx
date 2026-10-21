@@ -66,7 +66,7 @@ Better Auth `/api/auth` routes use Better Auth's own JSON.
 
 `Retry-After` is set only when the thrown API error includes `retryAfterSeconds`:
 
-- `429 RATE_LIMITED` on unlock lockout
+- every password-throttle `429 RATE_LIMITED`
 - `503 UNLOCK_UNAVAILABLE` when password verification is busy
 
 Public-view `429 RATE_LIMITED` and Markdown `503 CONVERSION_UNAVAILABLE` do not set `Retry-After`.

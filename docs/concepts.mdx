@@ -58,7 +58,7 @@ Limits, from the converter and its worker pool:
 | Other complexity | parser or render failure inside those bounds | `422 CONTENT_TOO_COMPLEX` |
 | Pool busy | see below | `503 CONVERSION_UNAVAILABLE` |
 
-`503 CONVERSION_UNAVAILABLE` does not set `Retry-After`. `MARKDOWN_CONVERSION_CONCURRENCY` is how many conversions run at once (1 to 4, default 2). `MARKDOWN_CONVERSION_QUEUE` is how many may wait (0 to 8, default 2). A non-integer uses the default. An integer outside the range is clamped. A full queue returns `503 CONVERSION_UNAVAILABLE`.
+`503 CONVERSION_UNAVAILABLE` does not set `Retry-After`. `MARKDOWN_CONVERSION_CONCURRENCY` is how many conversions run at once (1 to 4, default 2). `MARKDOWN_CONVERSION_QUEUE` is how many may wait (0 to 8, default 2). A blank value, or a value that does not start with digits, uses the default. `parseInt` keeps a leading integer, so `1.5` is 1 and `0.5` is 0. An integer outside the range is clamped, which turns concurrency `0.5` into 1 and leaves queue `0.5` at 0. A full queue returns `503 CONVERSION_UNAVAILABLE`.
 
 ## Access
 

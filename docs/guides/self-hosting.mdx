@@ -76,15 +76,25 @@ Set `NEXT_PUBLIC_API_URL` before `pnpm build` or `next build`. Next.js fixes tha
 
 For the local Garage service, keep the example values: `S3_ENDPOINT=http://127.0.0.1:3900`, `S3_FORCE_PATH_STYLE=true`, and the Garage access key pair. The API does not create an AWS bucket. `pnpm infra:up` creates the local `factrove` bucket.
 
-For an existing AWS bucket, or any non-Garage endpoint:
+The storage client calls `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object keys it generates. `S3_ENDPOINT` is the only custom endpoint it reads. With that variable unset, `AWS_ENDPOINT_URL` is ignored.
+
+### AWS
+
+For an existing AWS bucket:
 
 - Set `S3_BUCKET` and `S3_REGION`.
-- Remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`.
+- Remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`. The client then calls AWS in `S3_REGION`.
 - Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or remove both. The storage client uses that pair whenever both are set, so the Garage values `factrove-local` and `factrove-local-secret` keep an instance role or `AWS_PROFILE` from being selected.
 - When the key is temporary, set `AWS_SESSION_TOKEN` as well. The API sends the token only together with the access key and secret. With both keys removed, the AWS SDK default chain reads the environment, including a profile or a task role.
-- The API calls `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object keys it generates.
-- With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`.
-- A non-loopback `S3_ENDPOINT` must be `https`. `http` is accepted only for `localhost`, `127.0.0.1`, and `::1`.
+
+### Other S3-compatible storage
+
+A provider other than AWS keeps its own `S3_ENDPOINT`. Removing that variable sends the client to AWS.
+
+- Set `S3_BUCKET`, `S3_REGION`, and `S3_ENDPOINT`.
+- Use `https` for any host other than `localhost`, `127.0.0.1`, or `::1`. `http` is accepted only for those loopback names.
+- Set `S3_FORCE_PATH_STYLE` to match the provider. Path-style addressing is `true`. Virtual-hosted buckets use `false`. When the variable is unset and `S3_ENDPOINT` is set, the client uses path style.
+- Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with that provider's credentials. A session token is sent only together with both keys.
 
 ## Origins that build links
 

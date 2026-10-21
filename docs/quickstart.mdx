@@ -14,7 +14,13 @@ git clone https://github.com/magnificode-ltd/factrove.git
 cd factrove
 ```
 
-You need Node.js 24.x, at least 24.7 and below 25 (`>=24.7.0 <25` in `package.json` engines; 24.16 is pinned), pnpm 11.25, and Docker Compose v2. [Self-hosting](/guides/self-hosting) covers those prerequisites, production startup, and backups. [Troubleshooting](/guides/troubleshooting) covers the failures this loop hits most often.
+You need Node.js 24.x, at least 24.7 and below 25 (`>=24.7.0 <25` in `package.json` engines; 24.16 is pinned), pnpm 11.25, and Docker Compose v2.
+
+- [Node.js downloads](https://nodejs.org/en/download)
+- [pnpm installation](https://pnpm.io/installation)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
+[Self-hosting](/guides/self-hosting) covers production startup and backups. [Troubleshooting](/guides/troubleshooting) covers the failures this loop hits most often.
 
 Install dependencies, then build the CLI and the workspace packages it imports. `pnpm factrove` refuses to start until `apps/cli/dist/main.js` exists:
 

@@ -20,7 +20,17 @@ test("generated upload samples and error examples match the running API", () => 
   }
 
   assert.equal(upload.responses["201"].content["application/json"].example.artifact.sizeBytes, helloBytes);
-  assert.equal(upload.responses["401"].content["application/json"].example.error.code, "UNAUTHENTICATED");
+  const upload400 = upload.responses["400"].content["application/json"];
+  assert.equal(upload400.example, undefined);
+  assert.ok(upload400.examples.INVALID_REQUEST);
+  assert.ok(upload400.examples.ORGANIZATION_REQUIRED);
+  const content503 = doc.paths["/api/v1/artifacts/{id}/content"].get.responses["503"].content["application/json"];
+  assert.equal(content503.example, undefined);
+  assert.ok(content503.examples.STORAGE_UNAVAILABLE);
+  assert.ok(content503.examples.CONVERSION_UNAVAILABLE);
+  const upload401 = upload.responses["401"].content["application/json"];
+  assert.equal(upload401.examples, undefined);
+  assert.equal(upload401.example.error.code, "UNAUTHENTICATED");
   assert.equal(upload.responses["401"].content["application/json"].example.error.message, "Sign in to continue.");
   assert.equal(replace.responses["409"].content["application/json"].example.error.code, "CONTENT_CONFLICT");
 

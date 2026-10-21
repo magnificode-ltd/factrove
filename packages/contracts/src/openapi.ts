@@ -96,7 +96,7 @@ export function buildOpenApiDocument(options?: { version?: string }): OpenApiDoc
       headers: {
         RetryAfter: {
           description:
-            "Seconds to wait before retrying. The API sets this when an `ApiErrorException` includes `retryAfterSeconds`: share-lock 429 RATE_LIMITED and 503 UNLOCK_UNAVAILABLE. Public-view 429 and Markdown 503 CONVERSION_UNAVAILABLE do not set it.",
+            "Seconds to wait before retrying. The API sets this when an `ApiErrorException` includes `retryAfterSeconds`: every password-throttle 429 RATE_LIMITED, and 503 UNLOCK_UNAVAILABLE. Public-view 429 and Markdown 503 CONVERSION_UNAVAILABLE do not set it.",
           schema: { type: "integer", minimum: 1 }
         }
       },
@@ -234,10 +234,10 @@ function exampleFields(
   if (contentType !== "application/json" || example === undefined) {
     return {};
   }
-  return {
-    example: example.example,
-    ...(example.examples ? { examples: example.examples } : {})
-  };
+  if (example.examples) {
+    return { examples: example.examples };
+  }
+  return { example: example.example };
 }
 
 function securityRequirement(security: HttpSecurity): Record<string, string[]>[] | undefined {

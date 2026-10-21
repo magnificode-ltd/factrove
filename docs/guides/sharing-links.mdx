@@ -81,15 +81,21 @@ Changing or removing the password, revoking the link, and rotating the share-tok
 
 ## Rate limits and Retry-After
 
-Each accepted public **detail** counts as one view unit and grants two companion **content** loads for 30 seconds. Those companion loads do not consume another view unit. View units allow 60 per 60 seconds per client address, in memory on each API process. A content request with no remaining companion charges another view unit. Unlock does not use this limiter. The 429 is `RATE_LIMITED` with message `Too many requests. Try again later.` It does **not** set `Retry-After`.
+<Note>
+**Current behaviour.** This is the only place that calls out the pre-check view charge. A later change may charge a public view only after the link and password check. Until that change, the API does what this section says.
+</Note>
 
-Unlock **guesses** are separate:
+Public detail and public content charge the visitor's view allowance before the link lookup and before the password or ticket check. A `401` or `404` still uses that allowance. The limit is 60 view units per 60 seconds per client address, in memory on each API process. IPv6 addresses share one bucket by their /64. IPv4 addresses stay separate.
 
-- 10 failures per 10 minutes per client address (refunded after a match or an infrastructure failure)
+A detail that is allowed also grants two companion content loads for 30 seconds. A content request spends one companion when one remains, and otherwise charges another view unit. That choice is also made before lookup. Unlock does not use this limiter. The view `429` is `RATE_LIMITED` with message `Too many requests. Try again later.` It does not set `Retry-After`.
+
+Password limits are separate. They are also in memory on each API process, and processes do not share those counters.
+
+- 10 failures per 10 minutes per client address, using the same IPv6 /64 key (refunded after a match or an infrastructure failure)
 - 30 wrong passwords per 10 minutes per current share token hash
 - 20 verifies per minute and 100 per 10 minutes per IP, with one in-flight verify per address
 
-An exhausted share is `429 RATE_LIMITED` (`Too many password attempts. Try again later.`) with a `Retry-After` header derived from confirmed failures, and no hash verification. Someone who has the link and keeps failing can lock that link for up to ten minutes at a time. A saturated Argon2 gate, or a share whose remaining check slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`.
+Every password-throttle `429 RATE_LIMITED` (`Too many password attempts. Try again later.`) sends `Retry-After`. An exhausted share sends that 429 with no hash verification. Someone who has the link and keeps failing can lock that link for up to ten minutes at a time. A saturated Argon2 gate, or a share whose remaining check slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`.
 
 The owner share payload may include `guessesLockedOut` when the share budget is exhausted.
 

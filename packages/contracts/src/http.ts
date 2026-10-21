@@ -651,7 +651,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Public"],
     summary: "Read a public share",
     description:
-      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. The view allowance is charged per visitor address before the link lookup and password check, so a 401 or 404 still consumes it. IPv6 addresses share a /64. A charge grants two companion content loads for 30 seconds. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit before its own lookup. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
     security: "none",
     pathParameters: [artifactIdParam, shareTokenParam],
     headerParameters: [
@@ -675,7 +675,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
+          "The visitor view allowance is already spent, including when the response would have been 401 or 404. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup. IPv6 addresses share a /64.",
         schemaName: "ApiError"
       }
     }
@@ -711,7 +711,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Includes Retry-After for share lockout.",
+          "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Every password-throttle 429 sends Retry-After. Counters are in memory on each API process.",
         schemaName: "ApiError",
         headers: [retryAfterHeader]
       },
@@ -752,7 +752,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+          "The visitor view allowance is already spent, including when the link is missing or the ticket check would fail. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup, unless a companion grant from a recent detail remains. IPv6 addresses share a /64.",
         schemaName: "ApiError"
       },
       "503": {
