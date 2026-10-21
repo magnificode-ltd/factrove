@@ -1084,6 +1084,77 @@ describe("HTTP API", () => {
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
   });
 
+  it("keeps the new object when a content commit drops its connection", async () => {
+    const original = new TextEncoder().encode("<p>before-drop</p>");
+    const next = new TextEncoder().encode("<p>after-drop</p>");
+    const artifact = await upload(baseUrl, "drop.html", original);
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const repository = app.get(ArtifactsRepository);
+    const originalCommit = repository.commitContent.bind(repository);
+    let releaseCommit = (): void => undefined;
+    const hold = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let commitDone = Promise.resolve();
+
+    repository.commitContent = async (input) => {
+      let markUpdateStarted = (): void => undefined;
+      const updateStarted = new Promise<void>((resolve) => {
+        markUpdateStarted = resolve;
+      });
+      commitDone = prisma.$transaction(async (tx) => {
+        await tx.artifact.updateMany({
+          where: { id: input.id, contentRevision: input.expectedRevision },
+          data: {
+            objectKey: input.objectKey,
+            sizeBytes: input.sizeBytes,
+            uploadedAt: input.uploadedAt,
+            contentRevision: { increment: 1 },
+          },
+        });
+        markUpdateStarted();
+        await hold;
+      }, { maxWait: 5_000, timeout: 20_000 });
+      commitDone.catch(() => undefined);
+      await updateStarted;
+      throw new Error("Connection dropped before commit acknowledgement");
+    };
+
+    try {
+      const failed = await putContent(baseUrl, artifact.id, "dropped.html", next);
+      expect(failed.status).toBe(500);
+      expect(await errorOf(failed)).toEqual({
+        code: "INTERNAL_ERROR",
+        message: "An unexpected error occurred.",
+      });
+      const during = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(during.objectKey).toBe(before.objectKey);
+      expect(during.sizeBytes).toBe(original.byteLength);
+      expect(during.contentRevision).toBe(before.contentRevision);
+      const newKeys = [...store.objects.keys()].filter((key) => key !== before.objectKey);
+      expect(newKeys).toHaveLength(1);
+      const newKey = newKeys[0] ?? "";
+      expect(Buffer.from(store.objects.get(newKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
+
+      releaseCommit();
+      await commitDone;
+
+      const after = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(after.objectKey).toBe(newKey);
+      expect(after.sizeBytes).toBe(next.byteLength);
+      expect(after.contentRevision).toBe(before.contentRevision + 1);
+      expect(Buffer.from(store.objects.get(after.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
+      const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+      expect(content.status).toBe(200);
+      expect(content.headers.get("content-length")).toBe(String(next.byteLength));
+      expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
+    } finally {
+      releaseCommit();
+      await commitDone.catch(() => undefined);
+      repository.commitContent = originalCommit;
+    }
+  });
+
   it("leaves the live object unchanged when storage loses the put acknowledgement", async () => {
     const original = new TextEncoder().encode("<p>acked</p>");
     const artifact = await upload(baseUrl, "acked.html", original);

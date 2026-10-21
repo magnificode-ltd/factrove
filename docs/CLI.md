@@ -60,7 +60,7 @@ The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profi
 
 Factrove stores an artifact id, access, a share link, and the current HTML object key with its size. HTTP responses and the CLI omit the object key. There is no etag and no caller-supplied object metadata. New objects use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`. The public filename is `{artifactId}.html`.
 
-`aws s3` commands such as `cp`, `ls`, `rm`, `mv`, `sync`, `mb`, and `rb` are not Factrove commands. `aws s3api` commands such as `put-object` and `get-object` describe keys and metadata this library does not store, so the CLI has no `s3api` surface. The CLI uploads a local HTML file and prints or downloads one artifact. It does not copy between two remote locations, and it does not read an upload from stdin.
+`aws s3` commands such as `cp`, `ls`, `rm`, `mv`, `sync`, `mb`, and `rb` are not Factrove commands. `aws s3api` commands such as `put-object` and `get-object` take a caller-supplied object key. The CLI addresses an artifact by id and has no `s3api` surface. It uploads a local HTML file and prints or downloads one artifact. It does not copy between two remote locations, and it does not read an upload from stdin.
 
 `share` is the public-link command. An `aws s3 presign` URL is a temporary signed GET and has no password. A Factrove share lasts until `--revoke` and can take a password. The password flags stay on `share`.
 

@@ -578,6 +578,8 @@ export class ArtifactsService {
   // Writes a new object, then points the row at it only if the revision is unchanged.
   // A lost storage acknowledgement deletes that object when it can and leaves the row alone.
   // One replace wins a revision. The others get 409 and their objects are removed.
+  // A commit that throws has an unknown outcome. The new object stays, because the
+  // transaction can still land after a read of the previous key.
   private async publishReplacement(record: ArtifactRecord, bytes: Uint8Array): Promise<ArtifactRecord> {
     const previousKey = storedObjectKey(record.id, record.objectKey);
     const newKey = immutableContentKey(record.id, randomUUID());
@@ -603,15 +605,12 @@ export class ArtifactsService {
       });
     } catch (error) {
       const visible = await this.visibleObjectKey(record.id);
-      if (visible === newKey) {
+      if (visible === newKey && previousKey !== newKey) {
         await this.deleteStoredQuietly(previousKey);
         const landed = await this.artifacts.findById(record.id);
         if (landed?.objectKey === newKey) {
           return landed;
         }
-      }
-      if (visible !== undefined && visible !== newKey) {
-        await this.deleteStoredQuietly(newKey);
       }
       throw error;
     }
@@ -654,6 +653,7 @@ export class ArtifactsService {
     }
   }
 
+  // A failed delete leaves the object in the bucket. Those objects are not swept.
   private async deleteStoredQuietly(objectKey: string): Promise<void> {
     try {
       await this.blobs.delete(objectKey);

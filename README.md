@@ -257,6 +257,10 @@ The persistence convention is a committed Prisma SQL migration history under `ap
 
 Applied migrations remain immutable; subsequent changes receive new migrations. Changes that require data conversion can use expansion, a DML backfill, an application cutover, and contraction across compatible releases. Local demo fixtures are populated by an explicit idempotent seed.
 
+### Upgrade cutover for object keys
+
+Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration. Rolling the application back after the migration also requires copying each current object back to `{artifactId}.html` and pointing the row at that key. New objects live at `{artifactId}/{contentId}.html`.
+
 ## Documentation
 
 - [MVP end state](docs/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
