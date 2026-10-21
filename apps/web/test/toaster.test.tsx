@@ -28,7 +28,7 @@ describe("Toaster", () => {
     const screens = [
       "src/library/library-screen.tsx",
       "src/viewer/viewer-screen.tsx",
-      "src/app/account/api-keys/page.tsx"
+      "src/app/(browse)/account/api-keys/page.tsx"
     ];
     for (const screen of screens) {
       const source = readFileSync(join(process.cwd(), screen), "utf8");
