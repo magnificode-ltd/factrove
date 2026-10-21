@@ -6,11 +6,17 @@ import { RateWindow } from "./rate-window.js";
 // separate from the public view limit, so viewing a page never spends password attempts
 // and a run of wrong passwords does not block views.
 //
-// Every attempt is charged, right or wrong, so Argon2 work per caller stays bounded.
-// The client bucket is charged before the link is looked up, so guessing tokens here is
-// throttled too. The share bucket is charged only after the token matches, so only someone
-// who already holds the link can spend that share's budget. Clients use the same address
-// key as the view limit, including the IPv6 /64.
+// Only failures are charged. A correct password never spends a budget, so a meeting of
+// visitors does not lock the next person out. The client bucket is checked before Argon2
+// and charged only after a failed verification or a dead-token lookup, so one address
+// cannot spend unbounded KDF work. Invalid or non-JSON bodies are rejected before either
+// bucket is touched, so a cross-site text/plain POST costs nothing.
+//
+// The share bucket is keyed by the current share token hash. Revoking and sharing again
+// mints a new hash and a fresh budget. Exhausting that bucket still rate-limits further
+// wrong guesses on that token, but a correct password succeeds unless this client address
+// has already used its own budget. Clients use the same address key as the view limit,
+// including the IPv6 /64.
 export const PASSWORD_ATTEMPTS_PER_CLIENT = 10;
 export const PASSWORD_ATTEMPTS_PER_SHARE = 30;
 export const PASSWORD_ATTEMPT_WINDOW_MS = 10 * 60_000;
@@ -33,11 +39,15 @@ export class PasswordAttemptLimiter {
     this.shares = new RateWindow(perShare, windowMs, maxKeys, at);
   }
 
-  allowClient(clientIp: string | null): boolean {
+  hasClientRoom(clientIp: string | null): boolean {
+    return this.clients.hasRoom(rateLimitKey(clientIp), this.now());
+  }
+
+  chargeClient(clientIp: string | null): boolean {
     return this.clients.take(rateLimitKey(clientIp), this.now());
   }
 
-  allowShare(artifactId: string): boolean {
-    return this.shares.take(artifactId.toLowerCase(), this.now());
+  chargeShare(shareTokenHash: string): boolean {
+    return this.shares.take(shareTokenHash, this.now());
   }
 }

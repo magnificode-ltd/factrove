@@ -567,7 +567,7 @@ describe("factrove share", () => {
     });
     const created = await runCli(["share", artifactId, "--api-url", stub.url]);
     expect(created.code).toBe(0);
-    expect(created.stdout).toBe(`${shareUrl}\n`);
+    expect(created.stdout).toBe(`${shareUrl}\nThis link is not password protected.\n`);
     expect(created.stderr).toBe("");
     expect(stub.requests[0]?.method).toBe("POST");
     expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share`);
@@ -598,7 +598,7 @@ describe("factrove share", () => {
     }));
     const result = await runCliInput(["share", artifactId, "--password-stdin", "--api-url", stub.url], `${password}\n`);
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(`${shareUrl}\n`);
+    expect(result.stdout).toBe(`${shareUrl}\nThis link is password protected.\n`);
     expect(result.stdout).not.toContain(password);
     expect(result.stderr).toBe("");
     expect(stub.requests).toHaveLength(1);
@@ -641,15 +641,41 @@ describe("factrove share", () => {
   });
 
   it("removes the password and keeps the link", async () => {
-    const stub = await startStub(() => ({
-      status: 200,
-      body: { share: { shared: true, shareUrl, passwordProtected: false } },
-    }));
+    const stub = await startStub((request) => {
+      if (request.method === "DELETE") {
+        return { status: 200, body: { share: { shared: true, shareUrl, passwordProtected: false } } };
+      }
+      return { status: 200, body: { share: { shared: true, shareUrl, passwordProtected: true } } };
+    });
     const result = await runCli(["share", artifactId, "--remove-password", "--api-url", stub.url]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(`Removed the password for ${artifactId}.\n`);
-    expect(stub.requests[0]?.method).toBe("DELETE");
-    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share/password`);
+    expect(stub.requests[0]?.method).toBe("GET");
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share`);
+    expect(stub.requests[1]?.method).toBe("DELETE");
+    expect(stub.requests[1]?.url).toBe(`/api/v1/artifacts/${artifactId}/share/password`);
+  });
+
+  it("does not claim to remove a password that was not set", async () => {
+    const missing = await startStub(() => ({
+      status: 200,
+      body: { share: { shared: false, shareUrl: null, passwordProtected: false } },
+    }));
+    const missingResult = await runCli(["share", artifactId, "--remove-password", "--api-url", missing.url]);
+    expect(missingResult.code).toBe(0);
+    expect(missingResult.stdout).toBe("This artifact is not shared.\n");
+    expect(missing.requests).toHaveLength(1);
+    expect(missing.requests[0]?.method).toBe("GET");
+
+    const open = await startStub(() => ({
+      status: 200,
+      body: { share: { shared: true, shareUrl, passwordProtected: false } },
+    }));
+    const openResult = await runCli(["share", artifactId, "--remove-password", "--api-url", open.url]);
+    expect(openResult.code).toBe(0);
+    expect(openResult.stdout).toBe("This link has no password.\n");
+    expect(open.requests).toHaveLength(1);
+    expect(open.requests[0]?.method).toBe("GET");
   });
 });
 

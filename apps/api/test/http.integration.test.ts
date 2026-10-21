@@ -1796,7 +1796,7 @@ describe("HTTP API", () => {
       }
     });
 
-    it("throttles password attempts per client and per share, apart from the view limit", async () => {
+    it("throttles failed password attempts per client and per share, apart from the view limit", async () => {
       const artifact = await upload(baseUrl, "throttled.html", new TextEncoder().encode("<p>throttled</p>"));
       const password = "throttle password";
       const { token } = await shareWithPassword(artifact.id, password);
@@ -1829,11 +1829,62 @@ describe("HTTP API", () => {
         expect((await unlock(visitorIp(), target.id, targetShare.token, `distributed guess ${attempt}`)).status).toBe(401);
       }
       const fresh = visitorIp();
-      const shareBlocked = await unlock(fresh, target.id, targetShare.token, password);
-      expect(shareBlocked.status).toBe(429);
-      expect((await errorOf(shareBlocked)).code).toBe("RATE_LIMITED");
+      const shareStillOpen = await unlock(fresh, target.id, targetShare.token, password);
+      expect(shareStillOpen.status).toBe(200);
+      const shareWrong = await unlock(visitorIp(), target.id, targetShare.token, "still the wrong guess");
+      expect(shareWrong.status).toBe(429);
+      expect((await errorOf(shareWrong)).code).toBe("RATE_LIMITED");
       expect((await unlock(fresh, bystander.id, bystanderShare.token, password)).status).toBe(200);
-      expect((await openWithGrant(fresh, target.id, targetShare.token)).status).toBe(401);
+      expect((await openWithGrant(fresh, target.id, targetShare.token, publicUnlockEnvelopeSchema.parse(await shareStillOpen.json()).grant?.token)).status).toBe(200);
+    });
+
+    it("does not charge a bucket for a non-JSON unlock body", async () => {
+      const artifact = await upload(baseUrl, "cors-lock.html", new TextEncoder().encode("<p>cors lock</p>"));
+      const password = "cors lock password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      const ip = visitorIp();
+      const unlockUrl = `${publicPath(baseUrl, artifact.id, token)}/unlock`;
+      for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_CLIENT; attempt += 1) {
+        const plain = await asVisitor(ip, unlockUrl, {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: password,
+        });
+        expect(plain.status).toBe(400);
+        expect((await errorOf(plain)).code).toBe("INVALID_REQUEST");
+      }
+      const form = await asVisitor(ip, unlockUrl, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: `password=${encodeURIComponent(password)}`,
+      });
+      expect(form.status).toBe(400);
+      const empty = await asVisitor(ip, unlockUrl, { method: "POST" });
+      expect(empty.status).toBe(400);
+      expect((await unlock(ip, artifact.id, token, password)).status).toBe(200);
+    });
+
+    it("lets the 31st correct visitor in and resets the share bucket after a re-share", async () => {
+      const artifact = await upload(baseUrl, "meeting.html", new TextEncoder().encode("<p>meeting</p>"));
+      const password = "meeting password";
+      const first = await shareWithPassword(artifact.id, password);
+      for (let visitor = 0; visitor < PASSWORD_ATTEMPTS_PER_SHARE + 1; visitor += 1) {
+        expect((await unlock(visitorIp(), artifact.id, first.token, password)).status).toBe(200);
+      }
+
+      const exhausted = await upload(baseUrl, "reshare.html", new TextEncoder().encode("<p>reshare</p>"));
+      const oldShare = await shareWithPassword(exhausted.id, password);
+      for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
+        expect((await unlock(visitorIp(), exhausted.id, oldShare.token, `old wrong ${attempt}`)).status).toBe(401);
+      }
+      expect((await unlock(visitorIp(), exhausted.id, oldShare.token, "another wrong guess")).status).toBe(429);
+
+      const revoked = await ownerFetch(`${baseUrl}/api/v1/artifacts/${exhausted.id}/share`, { method: "DELETE" });
+      expect(revoked.status).toBe(200);
+      const next = await shareWithPassword(exhausted.id, "brand new password");
+      expect(next.token).not.toBe(oldShare.token);
+      expect((await unlock(visitorIp(), exhausted.id, next.token, "first wrong on the new link")).status).toBe(401);
+      expect((await unlock(visitorIp(), exhausted.id, next.token, "brand new password")).status).toBe(200);
     });
 
     it("validates owner password changes and keeps the unlock route credential-free", async () => {

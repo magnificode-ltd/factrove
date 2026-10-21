@@ -353,6 +353,7 @@ describe("PostgreSQL artifact persistence", () => {
     const saved = await repository.saveShare(created.id, token, hash);
     expect(saved?.shareToken).toBe(token);
     expect(saved?.shareTokenHash).toBe(hash);
+    expect(saved?.sharePasswordHash).toBeNull();
     const raced = await repository.saveShare(created.id, "other-token", "b".repeat(64));
     expect(raced).toBeNull();
     expect((await repository.findById(created.id))?.shareToken).toBe(token);
@@ -386,6 +387,13 @@ describe("PostgreSQL artifact persistence", () => {
         created.id,
       ),
     ).rejects.toThrow(/artifact_share_password_requires_share_check|23514/);
+
+    const atomic = await repository.create(artifactInput());
+    const atomicHash = "c".repeat(64);
+    const withPassword = await repository.saveShare(atomic.id, "atomic-token", atomicHash, "$argon2id$atomic");
+    expect(withPassword?.shareToken).toBe("atomic-token");
+    expect(withPassword?.shareTokenHash).toBe(atomicHash);
+    expect(withPassword?.sharePasswordHash).toBe("$argon2id$atomic");
 
     const paired = await repository.create(artifactInput());
     await expect(

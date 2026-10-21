@@ -69,10 +69,17 @@ export class ArtifactsRepository {
   }
 
   // Stores a new token only while the artifact is unshared. A concurrent share keeps the first token.
-  async saveShare(id: string, shareToken: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+  // When a password hash is supplied it is written in the same update, so a failure cannot leave
+  // a live unprotected link.
+  async saveShare(
+    id: string,
+    shareToken: string,
+    shareTokenHash: string,
+    sharePasswordHash: string | null = null,
+  ): Promise<ArtifactRecord | null> {
     const updated = await this.prisma.artifact.updateMany({
       where: { id, shareTokenHash: null },
-      data: { shareToken, shareTokenHash },
+      data: { shareToken, shareTokenHash, sharePasswordHash },
     });
     if (updated.count !== 1) {
       return null;

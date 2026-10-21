@@ -95,11 +95,12 @@ describe("share controls", () => {
       <ViewerScreen state={{ status: "ready", artifact: { ...artifact, shared: true }, share: { shared: true, shareUrl, passwordProtected: false } }} />
     );
     expect(shared).toContain("Sharing");
-    expect(shared).toContain("Anyone with this link can open the artifact without an account.");
-    expect(shared).toContain(shareUrl);
-    expect(shared).toContain("Stop sharing");
-    expect(shared).toContain("ft-pop");
+    expect(shared).toContain('aria-expanded="false"');
     expect(shared).toContain("aria-controls");
+    expect(shared).not.toContain("Anyone with this link can open the artifact without an account.");
+    expect(shared).not.toContain(shareUrl);
+    expect(shared).not.toContain("Stop sharing");
+    expect(shared).not.toContain("ft-pop");
     expect(shareToggleLabel("revoke", true)).toBe("Stopping…");
     expect(shareToggleLabel("share", false)).toBe("Sharing…");
     expect(shareToggleLabel(null, true)).toBe("Sharing");

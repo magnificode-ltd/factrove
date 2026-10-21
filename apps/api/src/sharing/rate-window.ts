@@ -24,12 +24,14 @@ export class RateWindow {
     return this.current.size;
   }
 
+  hasRoom(key: string, at: number): boolean {
+    this.rotate(at);
+    return this.estimate(key, at) < this.max;
+  }
+
   take(key: string, at: number): boolean {
     this.rotate(at);
-    const elapsed = at - this.windowStart;
-    const previousWeight = Math.min(1, Math.max(0, this.windowMs - elapsed) / this.windowMs);
-    const estimate = (this.previous.get(key) ?? 0) * previousWeight + (this.current.get(key) ?? 0);
-    if (estimate >= this.max) {
+    if (this.estimate(key, at) >= this.max) {
       return false;
     }
     if (!this.current.has(key) && this.current.size >= this.maxKeys) {
@@ -40,6 +42,12 @@ export class RateWindow {
     }
     this.current.set(key, (this.current.get(key) ?? 0) + 1);
     return true;
+  }
+
+  private estimate(key: string, at: number): number {
+    const elapsed = at - this.windowStart;
+    const previousWeight = Math.min(1, Math.max(0, this.windowMs - elapsed) / this.windowMs);
+    return (this.previous.get(key) ?? 0) * previousWeight + (this.current.get(key) ?? 0);
   }
 
   private rotate(at: number): void {

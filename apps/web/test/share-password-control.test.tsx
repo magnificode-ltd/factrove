@@ -62,6 +62,17 @@ async function renderControl(passwordProtected: boolean) {
   return container;
 }
 
+async function openPanel(container: HTMLElement) {
+  const toggle = container.querySelector<HTMLButtonElement>("button[aria-controls]");
+  if (!toggle) throw new Error("share toggle missing");
+  if (toggle.getAttribute("aria-expanded") === "true") {
+    return;
+  }
+  await act(async () => {
+    toggle.click();
+  });
+}
+
 function button(container: HTMLElement, name: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === name);
   if (!found) throw new Error(`button ${name} missing`);
@@ -85,9 +96,20 @@ async function submit(input: HTMLInputElement) {
 }
 
 describe("share password controls", () => {
+  it("starts the viewer panel closed so it does not cover the artifact", async () => {
+    const container = await renderControl(true);
+    expect(container.querySelector('[data-testid="share-password"]')).toBeNull();
+    expect(container.querySelector('[aria-expanded="true"]')).toBeNull();
+    expect(container.textContent).not.toContain(shareUrl);
+    await openPanel(container);
+    expect(container.querySelector('[data-testid="share-password"]')).not.toBeNull();
+    expect(container.textContent).toContain(shareUrl);
+  });
+
   it("validates, then sets a password with the owner session", async () => {
     const calls = ownerApi();
     const container = await renderControl(false);
+    await openPanel(container);
     const section = container.querySelector('[data-testid="share-password"]');
     expect(section?.getAttribute("data-protected")).toBe("false");
     expect(section?.textContent).toContain("No password");
@@ -132,6 +154,7 @@ describe("share password controls", () => {
   it("changes and removes an existing password", async () => {
     const calls = ownerApi();
     const container = await renderControl(true);
+    await openPanel(container);
     await act(async () => {
       button(container, "Change password").click();
     });

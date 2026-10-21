@@ -29,7 +29,7 @@ export function ShareControl({
   compact?: boolean;
 }) {
   const [share, setShare] = useState(initial);
-  const [expanded, setExpanded] = useState(Boolean(initial.shareUrl));
+  const [expanded, setExpanded] = useState(compact && Boolean(initial.shareUrl));
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<string | null>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);

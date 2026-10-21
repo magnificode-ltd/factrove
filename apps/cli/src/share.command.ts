@@ -23,9 +23,31 @@ export class ShareCommand {
     }
 
     const password = invocation.password === null ? undefined : await readPassword(invocation.password);
-    let envelope;
     try {
-      envelope = await this.send(invocation, password);
+      if (invocation.removePassword) {
+        await this.removePassword(invocation);
+        return;
+      }
+      const envelope = invocation.revoke
+        ? await this.client.revokeArtifactShare(invocation.id)
+        : await this.client.createArtifactShare(invocation.id, password === undefined ? undefined : { password });
+      if (invocation.json) {
+        process.stdout.write(`${JSON.stringify(envelope)}\n`);
+        return;
+      }
+      if (invocation.revoke) {
+        process.stdout.write(`Revoked the public link for ${invocation.id}.\n`);
+        return;
+      }
+      if (!envelope.share.shareUrl) {
+        throw new CliError("INVALID_INPUT", "The API did not return a share link.");
+      }
+      process.stdout.write(`${envelope.share.shareUrl}\n`);
+      process.stdout.write(
+        envelope.share.passwordProtected
+          ? "This link is password protected.\n"
+          : "This link is not password protected.\n",
+      );
     } catch (error) {
       if (error instanceof FactroveApiError && error.code === "NETWORK_ERROR") {
         throw new CliError(
@@ -35,33 +57,24 @@ export class ShareCommand {
       }
       throw error;
     }
+  }
 
+  private async removePassword(invocation: ShareInvocation): Promise<void> {
+    const current = await this.client.getArtifactShare(invocation.id);
+    if (!current.share.shared || !current.share.passwordProtected) {
+      if (invocation.json) {
+        process.stdout.write(`${JSON.stringify(current)}\n`);
+        return;
+      }
+      process.stdout.write(current.share.shared ? "This link has no password.\n" : "This artifact is not shared.\n");
+      return;
+    }
+    const envelope = await this.client.removeArtifactSharePassword(invocation.id);
     if (invocation.json) {
       process.stdout.write(`${JSON.stringify(envelope)}\n`);
       return;
     }
-    if (invocation.revoke) {
-      process.stdout.write(`Revoked the public link for ${invocation.id}.\n`);
-      return;
-    }
-    if (invocation.removePassword) {
-      process.stdout.write(`Removed the password for ${invocation.id}.\n`);
-      return;
-    }
-    if (!envelope.share.shareUrl) {
-      throw new CliError("INVALID_INPUT", "The API did not return a share link.");
-    }
-    process.stdout.write(`${envelope.share.shareUrl}\n`);
-  }
-
-  private send(invocation: ShareInvocation, password: string | undefined) {
-    if (invocation.revoke) {
-      return this.client.revokeArtifactShare(invocation.id);
-    }
-    if (invocation.removePassword) {
-      return this.client.removeArtifactSharePassword(invocation.id);
-    }
-    return this.client.createArtifactShare(invocation.id, password === undefined ? undefined : { password });
+    process.stdout.write(`Removed the password for ${invocation.id}.\n`);
   }
 }
 

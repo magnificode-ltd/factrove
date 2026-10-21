@@ -811,8 +811,8 @@ async function checkPublicShare(plainId, fixture, configDir) {
   }
 
   const shared = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
-  const shareUrl = shared.stdout.trim();
-  if (!shareLinkPattern(plainId).test(shareUrl)) {
+  const shareUrl = printedShareUrl(shared.stdout);
+  if (!shareLinkPattern(plainId).test(shareUrl) || !shared.stdout.includes("This link is not password protected.")) {
     throw new Error(`Share did not print a public link on the configured base URL.\n${shared.stdout}`);
   }
   if (shareUrl.startsWith("http://localhost:3000/") || shared.stdout.includes(ownerKey)) {
@@ -872,8 +872,7 @@ async function checkPublicShare(plainId, fixture, configDir) {
   ownerPage.setDefaultNavigationTimeout(60000);
   try {
     await ownerPage.goto(`${webOrigin}/artifacts/${plainId}`);
-    const region = ownerPage.getByRole("region", { name: "Public link" });
-    await region.waitFor();
+    const region = await openOwnerSharePanel(ownerPage);
     const shown = (await ownerPage.getByTestId("share-url").innerText()).trim();
     if (shown !== shareUrl) {
       throw new Error(`Viewer share link was ${shown}`);
@@ -899,7 +898,7 @@ async function checkPublicShare(plainId, fixture, configDir) {
   await expectPublicMissing(shareUrl, token);
 
   const rotated = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
-  const nextUrl = rotated.stdout.trim();
+  const nextUrl = printedShareUrl(rotated.stdout);
   if (!shareLinkPattern(plainId).test(nextUrl) || nextUrl === shareUrl) {
     throw new Error(`A new share did not replace the revoked link.\n${rotated.stdout}`);
   }
@@ -918,6 +917,7 @@ async function checkPublicShare(plainId, fixture, configDir) {
   stopPage.setDefaultNavigationTimeout(60000);
   try {
     await stopPage.goto(`${webOrigin}/artifacts/${plainId}`);
+    await openOwnerSharePanel(stopPage);
     await stopPage.getByRole("button", { name: "Stop sharing" }).click();
     await stopPage.getByRole("button", { name: "Share" }).waitFor();
   } finally {
@@ -944,8 +944,12 @@ async function checkPasswordShare(id, fixture, configDir) {
     `${firstPassword}\n`,
     cliChildEnv(configDir),
   );
-  const shareUrl = protectedShare.stdout.trim();
-  if (protectedShare.code !== 0 || !shareLinkPattern(id).test(shareUrl)) {
+  const shareUrl = printedShareUrl(protectedShare.stdout);
+  if (
+    protectedShare.code !== 0
+    || !shareLinkPattern(id).test(shareUrl)
+    || !protectedShare.stdout.includes("This link is password protected.")
+  ) {
     throw new Error(`share --password-stdin failed.\n${protectedShare.stdout}\n${protectedShare.stderr}`);
   }
   if (`${protectedShare.stdout}${protectedShare.stderr}`.includes(firstPassword)) {
@@ -988,6 +992,7 @@ async function checkPasswordShare(id, fixture, configDir) {
     if ((await page.getByText("This artifact does not exist.").count()) !== 0) {
       throw new Error("The locked page showed the missing notice.");
     }
+    await waitForRestingPaint(page);
     await screenshot(page, "visitor-password-page");
 
     const field = page.getByLabel("Password", { exact: true });
@@ -1002,7 +1007,7 @@ async function checkPasswordShare(id, fixture, configDir) {
     if ((await field.getAttribute("aria-invalid")) !== "true" || (await page.locator("iframe").count()) !== 0) {
       throw new Error("A wrong password did not flag the field or revealed the artifact.");
     }
-    await page.waitForTimeout(500);
+    await waitForRestingPaint(page);
     await screenshot(page, "visitor-wrong-password");
 
     await field.fill(firstPassword);
@@ -1057,7 +1062,7 @@ async function checkPasswordShare(id, fixture, configDir) {
       throw new Error(`A content ticket was honored past its use limit (${exhausted.status}).`);
     }
     await page.getByText("Unlocked with password").waitFor();
-    await page.waitForTimeout(700);
+    await waitForRestingPaint(page);
     await screenshot(page, "visitor-unlocked-view");
 
     await page.reload();
@@ -1153,14 +1158,13 @@ async function ownerPasswordChange(id, password) {
   page.setDefaultNavigationTimeout(60000);
   try {
     await page.goto(`${webOrigin}/artifacts/${id}`);
-    const region = page.getByRole("region", { name: "Public link" });
-    await region.waitFor();
+    const region = await openOwnerSharePanel(page);
     const controls = region.getByRole("region", { name: "Link password" });
     await controls.getByText("Password protected").waitFor();
     await controls.getByRole("button", { name: "Change password" }).click();
     const field = controls.getByLabel("New link password");
     await field.fill(password);
-    await page.waitForTimeout(600);
+    await waitForRestingPaint(page);
     await screenshot(page, "owner-password-controls");
     await controls.getByRole("button", { name: "Save new password" }).click();
     await page.getByText("Password changed").first().waitFor();
@@ -1181,6 +1185,7 @@ async function ownerRemovePassword(id) {
   page.setDefaultNavigationTimeout(60000);
   try {
     await page.goto(`${webOrigin}/artifacts/${id}`);
+    await openOwnerSharePanel(page);
     const controls = page.getByRole("region", { name: "Link password" });
     await controls.getByRole("button", { name: "Remove password" }).click();
     await controls.getByText("No password").waitFor();
@@ -1195,6 +1200,33 @@ async function screenshot(page, name) {
   }
   await mkdir(screenshotDir, { recursive: true });
   await page.screenshot({ path: join(screenshotDir, `${name}.png`) });
+}
+
+function printedShareUrl(stdout) {
+  return stdout.trim().split(/\r?\n/)[0] ?? "";
+}
+
+async function openOwnerSharePanel(page) {
+  const region = page.getByRole("region", { name: "Public link" });
+  if ((await region.count()) === 0) {
+    await page.getByRole("button", { name: /Sharing/ }).click();
+  }
+  await region.waitFor();
+  return region;
+}
+
+async function waitForRestingPaint(page) {
+  await page.evaluate(() =>
+    Promise.all(
+      document.getAnimations().flatMap((animation) => {
+        const iterations = animation.effect?.getComputedTiming().iterations;
+        if (iterations === Infinity) {
+          return [];
+        }
+        return [animation.finished.catch(() => undefined)];
+      }),
+    ),
+  );
 }
 
 async function expectPublicMissing(shareUrl, token) {

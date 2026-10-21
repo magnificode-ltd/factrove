@@ -1,4 +1,16 @@
-import { argon2, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import * as nodeCrypto from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
+export const ARGON2_UNAVAILABLE_MESSAGE =
+  "Share-link passwords need Node.js 24.7.0 or later because they use crypto.argon2. This process is running an older Node.";
+
+type CryptoWithArgon2 = { argon2?: unknown };
+
+export function assertSharePasswordSupport(cryptoImpl: CryptoWithArgon2 = nodeCrypto): void {
+  if (typeof cryptoImpl.argon2 !== "function") {
+    throw new Error(ARGON2_UNAVAILABLE_MESSAGE);
+  }
+}
 
 // Argon2id with the OWASP baseline: 19 MiB, two passes, one lane.
 // The parameters are stored in the PHC string, so a later change still verifies old hashes.
@@ -26,7 +38,7 @@ type Argon2Parameters = {
 
 export async function hashSharePassword(password: string): Promise<string> {
   const salt = randomBytes(SHARE_PASSWORD_ARGON2.saltBytes);
-  const tag = await deriveTag(password, {
+  const tag = await deriveTag(normalizeSharePassword(password), {
     memoryKiB: SHARE_PASSWORD_ARGON2.memoryKiB,
     passes: SHARE_PASSWORD_ARGON2.passes,
     parallelism: SHARE_PASSWORD_ARGON2.parallelism,
@@ -49,7 +61,7 @@ export async function verifySharePassword(password: string, stored: string): Pro
   if (!parsed) {
     return false;
   }
-  const derived = await deriveTag(password, {
+  const derived = await deriveTag(normalizeSharePassword(password), {
     memoryKiB: parsed.memoryKiB,
     passes: parsed.passes,
     parallelism: parsed.parallelism,
@@ -68,12 +80,17 @@ export function isArgon2idHash(stored: string): boolean {
   return parseStoredHash(stored) !== null;
 }
 
+function normalizeSharePassword(password: string): string {
+  return password.normalize("NFC");
+}
+
 function deriveTag(
   password: string,
   options: { memoryKiB: number; passes: number; parallelism: number; salt: Buffer; tagBytes: number },
 ): Promise<Buffer> {
+  assertSharePasswordSupport();
   return new Promise((resolve, reject) => {
-    argon2(
+    nodeCrypto.argon2(
       "argon2id",
       {
         message: Buffer.from(password, "utf8"),

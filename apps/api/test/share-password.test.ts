@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PasswordAttemptLimiter, PASSWORD_ATTEMPT_WINDOW_MS } from "../src/sharing/password-attempt-limit.js";
 import { PublicViewLimiter } from "../src/sharing/public-view-limit.js";
+import { ARGON2_UNAVAILABLE_MESSAGE, assertSharePasswordSupport } from "../src/sharing/share-password.js";
 import {
   deriveShareGrantKey,
   mintShareGrant,
@@ -55,6 +56,20 @@ describe("share password KDF", () => {
     await expect(verifySharePassword("passwörd-🔐-ключ", stored)).resolves.toBe(false);
   });
 
+  it("normalises passwords to NFC before hashing so macOS and Windows agree", async () => {
+    const nfc = "café-gate".normalize("NFC");
+    const nfd = "café-gate".normalize("NFD");
+    expect(nfc).not.toBe(nfd);
+    const stored = await hashSharePassword(nfd);
+    await expect(verifySharePassword(nfc, stored)).resolves.toBe(true);
+    await expect(verifySharePassword(nfd, stored)).resolves.toBe(true);
+  });
+
+  it("fails at boot with a readable message when Argon2 is missing", () => {
+    expect(() => assertSharePasswordSupport({ argon2: undefined })).toThrow(ARGON2_UNAVAILABLE_MESSAGE);
+    expect(() => assertSharePasswordSupport()).not.toThrow();
+  });
+
   it("refuses unreadable or out-of-range stored values instead of running them", async () => {
     const stored = await hashSharePassword("correct horse battery");
     const parts = stored.split("$");
@@ -93,38 +108,43 @@ describe("share password KDF", () => {
 });
 
 describe("password attempt throttling", () => {
+  const firstHash = "a".repeat(64);
+  const secondHash = "b".repeat(64);
+
   it("limits each client address and keeps clients apart, including by IPv6 /64", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(3, 100, 60_000, () => now);
+    expect(limiter.hasClientRoom("198.51.100.1")).toBe(true);
+    expect(limiter.hasClientRoom("198.51.100.1")).toBe(true);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.allowClient("198.51.100.1")).toBe(true);
+      expect(limiter.chargeClient("198.51.100.1")).toBe(true);
     }
-    expect(limiter.allowClient("198.51.100.1")).toBe(false);
-    expect(limiter.allowClient("198.51.100.2")).toBe(true);
+    expect(limiter.hasClientRoom("198.51.100.1")).toBe(false);
+    expect(limiter.chargeClient("198.51.100.1")).toBe(false);
+    expect(limiter.chargeClient("198.51.100.2")).toBe(true);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.allowClient(`2001:db8:1:2::${attempt + 1}`)).toBe(true);
+      expect(limiter.chargeClient(`2001:db8:1:2::${attempt + 1}`)).toBe(true);
     }
-    expect(limiter.allowClient("2001:db8:1:2:ffff::9")).toBe(false);
-    expect(limiter.allowClient("2001:db8:1:3::1")).toBe(true);
+    expect(limiter.chargeClient("2001:db8:1:2:ffff::9")).toBe(false);
+    expect(limiter.chargeClient("2001:db8:1:3::1")).toBe(true);
     now = 120_001;
-    expect(limiter.allowClient("198.51.100.1")).toBe(true);
+    expect(limiter.chargeClient("198.51.100.1")).toBe(true);
   });
 
-  it("limits each share across many addresses, independently of the client budget", () => {
+  it("limits each share token hash independently of the client budget", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, 4, 60_000, () => now);
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      expect(limiter.allowClient(`203.0.113.${attempt}`)).toBe(true);
-      expect(limiter.allowShare(artifactId)).toBe(true);
+      expect(limiter.chargeClient(`203.0.113.${attempt}`)).toBe(true);
+      expect(limiter.chargeShare(firstHash)).toBe(true);
     }
-    expect(limiter.allowClient("203.0.113.200")).toBe(true);
-    expect(limiter.allowShare(artifactId)).toBe(false);
-    expect(limiter.allowShare(artifactId.toUpperCase())).toBe(false);
-    expect(limiter.allowShare(otherArtifactId)).toBe(true);
+    expect(limiter.chargeClient("203.0.113.200")).toBe(true);
+    expect(limiter.chargeShare(firstHash)).toBe(false);
+    expect(limiter.chargeShare(secondHash)).toBe(true);
     now = 30_000;
-    expect(limiter.allowShare(artifactId)).toBe(false);
+    expect(limiter.chargeShare(firstHash)).toBe(false);
     now = 120_001;
-    expect(limiter.allowShare(artifactId)).toBe(true);
+    expect(limiter.chargeShare(firstHash)).toBe(true);
   });
 
   it("uses a ten minute window by default", () => {
@@ -132,24 +152,24 @@ describe("password attempt throttling", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(undefined, undefined, undefined, () => now);
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      expect(limiter.allowClient("192.0.2.10")).toBe(true);
+      expect(limiter.chargeClient("192.0.2.10")).toBe(true);
     }
-    expect(limiter.allowClient("192.0.2.10")).toBe(false);
+    expect(limiter.chargeClient("192.0.2.10")).toBe(false);
     now = 600_000 * 2 + 1;
-    expect(limiter.allowClient("192.0.2.10")).toBe(true);
+    expect(limiter.chargeClient("192.0.2.10")).toBe(true);
   });
 
   it("does not share buckets with the public view limit", () => {
     const now = () => 0;
     const views = new PublicViewLimiter(2, 60_000, now);
     const attempts = new PasswordAttemptLimiter(2, 2, 60_000, now);
-    expect(attempts.allowClient("192.0.2.1")).toBe(true);
-    expect(attempts.allowClient("192.0.2.1")).toBe(true);
-    expect(attempts.allowClient("192.0.2.1")).toBe(false);
+    expect(attempts.chargeClient("192.0.2.1")).toBe(true);
+    expect(attempts.chargeClient("192.0.2.1")).toBe(true);
+    expect(attempts.chargeClient("192.0.2.1")).toBe(false);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(false);
-    expect(attempts.allowShare(artifactId)).toBe(true);
+    expect(attempts.chargeShare(firstHash)).toBe(true);
   });
 });
 

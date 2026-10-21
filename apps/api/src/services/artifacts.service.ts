@@ -138,16 +138,8 @@ export class ArtifactsService {
   async createShare(request: HeaderSource, id: string, readBody: () => unknown): Promise<ShareState> {
     const owned = await this.requireOwner(request, id);
     const input = readCreateShareInput(readBody());
-    let record = await this.ensureShare(request, owned);
-    if (input.password !== undefined && record.shareTokenHash) {
-      const passwordHash = await hashSharePassword(input.password);
-      const updated = await this.artifacts.setSharePassword(record.id, record.shareTokenHash, passwordHash);
-      if (!updated) {
-        throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
-      }
-      record = updated;
-    }
-    return this.toShareState(record);
+    const passwordHash = input.password === undefined ? undefined : await hashSharePassword(input.password);
+    return this.toShareState(await this.ensureShare(request, owned, passwordHash));
   }
 
   async removeSharePassword(request: HeaderSource, id: string): Promise<ShareState> {
@@ -159,9 +151,20 @@ export class ArtifactsService {
     return this.toShareState(updated ?? (await this.requireOwner(request, id)));
   }
 
-  private async ensureShare(request: HeaderSource, record: ArtifactRecord): Promise<ArtifactRecord> {
-    if (this.readShareToken(record)) {
-      return record;
+  private async ensureShare(
+    request: HeaderSource,
+    record: ArtifactRecord,
+    passwordHash?: string,
+  ): Promise<ArtifactRecord> {
+    if (this.readShareToken(record) && record.shareTokenHash) {
+      if (passwordHash === undefined) {
+        return record;
+      }
+      const updated = await this.artifacts.setSharePassword(record.id, record.shareTokenHash, passwordHash);
+      if (!updated) {
+        throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+      }
+      return updated;
     }
     if (record.shareTokenHash) {
       await this.artifacts.clearShare(record.id);
@@ -173,6 +176,7 @@ export class ArtifactsService {
         record.id,
         encryptShareToken(token, this.shareKey(), record.id),
         hashShareToken(token),
+        passwordHash ?? null,
       );
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
@@ -181,8 +185,15 @@ export class ArtifactsService {
     }
     if (!saved?.shareToken) {
       const current = await this.requireOwner(request, record.id);
-      if (current.shareToken) {
-        return current;
+      if (current.shareToken && current.shareTokenHash) {
+        if (passwordHash === undefined) {
+          return current;
+        }
+        const updated = await this.artifacts.setSharePassword(current.id, current.shareTokenHash, passwordHash);
+        if (!updated) {
+          throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+        }
+        return updated;
       }
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
@@ -244,27 +255,37 @@ export class ArtifactsService {
     return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
   }
 
-  // The client bucket is spent before the lookup. The share bucket is spent only once the
-  // token matches. Argon2 runs only after both allow the attempt.
+  // Invalid bodies are rejected before any bucket is touched. Failures spend the client
+  // budget, and a matching token's wrong guesses also spend that share's budget. A correct
+  // password never charges either, so it succeeds unless this address is already exhausted.
   async unlockPublic(
     id: string,
     token: string,
     clientIp: string | null,
     readBody: () => unknown,
   ): Promise<PublicUnlockEnvelope> {
-    if (!this.passwordAttempts.allowClient(clientIp)) {
+    const password = readUnlockPassword(readBody());
+    if (!this.passwordAttempts.hasClientRoom(clientIp)) {
       throw tooManyPasswordAttempts();
     }
-    const record = await this.findPublic(id, token);
-    const password = readUnlockPassword(readBody());
+    let record: ArtifactRecord & { uploadedAt: Date };
+    try {
+      record = await this.findPublic(id, token);
+    } catch (error) {
+      if (error instanceof ApiErrorException && error.status === 404) {
+        this.passwordAttempts.chargeClient(clientIp);
+      }
+      throw error;
+    }
     const scope = this.grantScope(record);
-    if (!scope || !record.sharePasswordHash) {
+    if (!scope || !record.sharePasswordHash || !record.shareTokenHash) {
       return { grant: null };
     }
-    if (!this.passwordAttempts.allowShare(record.id)) {
-      throw tooManyPasswordAttempts();
-    }
     if (!(await verifySharePassword(password, record.sharePasswordHash))) {
+      this.passwordAttempts.chargeClient(clientIp);
+      if (!this.passwordAttempts.chargeShare(record.shareTokenHash)) {
+        throw tooManyPasswordAttempts();
+      }
       throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
     }
     const grant = mintShareGrant(scope, this.grantKey());

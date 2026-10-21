@@ -21,7 +21,7 @@ export async function promptSecret(prompt: string, cancelMessage: string): Promi
     const input = process.stdin;
     const onData = (buffer: Buffer): void => {
       for (const byte of buffer) {
-        if (byte === 0x03) {
+        if (byte === 0x03 || byte === 0x04) {
           cleanup();
           process.stderr.write("\n");
           reject(new CliError("INVALID_INPUT", cancelMessage));
