@@ -3,15 +3,15 @@ title: Sharing links
 description: Create public artifact links, optionally protect them with a password, and understand unlock, lockout, and Retry-After.
 ---
 
-Artifacts stay private until the owner shares them. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
+Artifacts use private or organization-shared access. The owner can separately enable a public link, optionally protected by a password. Organization members can read an `org_shared` artifact without that link. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
 
 ## Create and revoke a link
 
 In the library or viewer, use Share. From the CLI:
 
 ```bash
-pnpm factrove share <artifact-id>
-pnpm factrove share <artifact-id> --revoke
+pnpm factrove share "$artifact_id"
+pnpm factrove share "$artifact_id" --revoke
 ```
 
 Owner HTTP routes:
@@ -51,10 +51,12 @@ Password rules from the shared contracts:
 
 The API hashes the password with Argon2id and stores only the PHC string. The CLI never prints a password. Use `--password` to be prompted twice, or pipe it:
 
+`--password` prompts twice and needs a terminal. `--password-stdin` reads a pipe and removes one trailing newline. Set `LINK_PASSWORD` before the pipe.
+
 ```bash
-pnpm factrove share <artifact-id> --password
-printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
-pnpm factrove share <artifact-id> --remove-password
+pnpm factrove share "$artifact_id" --password
+printf '%s' "$LINK_PASSWORD" | pnpm factrove share "$artifact_id" --password-stdin
+pnpm factrove share "$artifact_id" --remove-password
 ```
 
 ## Opening a protected link
@@ -75,24 +77,39 @@ The grant lasts 15 minutes. The browser keeps it in `sessionStorage` on the web 
 
 The sandboxed iframe cannot send headers, so a granted detail returns `contentUrl` with a `ticket` query. That ticket lasts 60 seconds and is honored at most 3 times per API process. Reverse proxies should not log `?ticket=`. Protected content without a valid ticket is `401 PASSWORD_REQUIRED`.
 
-Changing or removing the password, revoking the link, and rotating the share-token key all invalidate existing grants. A plain re-share (`POST /share` without a password) keeps the same token and those grants still work. Only revoke, then share again, mints a new URL.
+Changing or removing the password, revoking the link, and rotating the share-token key all invalidate existing grants. A plain re-share (`POST /share` without a password), while the current key can still read the token, keeps the same token and those grants still work. Revoking, or sharing again after that key no longer reads the stored token, mints a new URL.
 
 ## Rate limits and Retry-After
 
-Each accepted public **detail** counts as one view unit and grants two companion **content** loads for 30 seconds. Those companion loads do not consume another view unit. View units allow 60 per 60 seconds per client address, in memory on each API process. A content request with no remaining companion charges another view unit. Unlock does not use this limiter. The 429 is `RATE_LIMITED` with message `Too many requests. Try again later.` It does **not** set `Retry-After`.
+<Note>
+**Current behaviour.** This is the only place that calls out the pre-check view charge. A later change may charge a public view only after the link and password check. Until that change, the API does what this section says.
+</Note>
 
-Unlock **guesses** are separate:
+Public detail and public content charge the visitor's view allowance before the link lookup and before the password or ticket check. A `401` or `404` still uses that allowance. The limit is 60 view units per 60 seconds per client address, in memory on each API process. IPv6 addresses share one bucket by their /64. IPv4 addresses stay separate.
 
-- 10 failures per 10 minutes per client address (refunded after a match or an infrastructure failure)
+A detail that is allowed also grants two companion content loads for 30 seconds. A content request spends one companion when one remains, and otherwise charges another view unit. That choice is also made before lookup. Unlock does not use this limiter. The view `429` is `RATE_LIMITED` with message `Too many requests. Try again later.` It does not set `Retry-After`.
+
+Password limits are separate. They are also in memory on each API process, and processes do not share those counters.
+
+- 10 failures per 10 minutes per client address, using the same IPv6 /64 key (refunded after a match or an infrastructure failure)
 - 30 wrong passwords per 10 minutes per current share token hash
 - 20 verifies per minute and 100 per 10 minutes per IP, with one in-flight verify per address
 
-An exhausted share is `429 RATE_LIMITED` (`Too many password attempts. Try again later.`) with a `Retry-After` header derived from confirmed failures, and no hash verification. Someone who has the link and keeps failing can lock that link for up to ten minutes at a time. The owner recovers by revoking and sharing again, which mints a new token hash.
-
-A saturated Argon2 gate, or a share whose remaining check slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`.
+Every password-throttle `429 RATE_LIMITED` (`Too many password attempts. Try again later.`) sends `Retry-After`. An exhausted share sends that 429 with no hash verification. Someone who has the link and keeps failing can lock that link for up to ten minutes at a time. A saturated Argon2 gate, or a share whose remaining check slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`.
 
 The owner share payload may include `guessesLockedOut` when the share budget is exhausted.
 
+## Lockout recovery
+
+Revoke clears the stored password. A later plain share creates an unprotected link, including after this recovery and after share-token key rotation. Supply the password again:
+
+```bash
+pnpm factrove share "$artifact_id" --revoke
+pnpm factrove share "$artifact_id" --password
+```
+
+`--password` needs a terminal. The stdin form is `printf '%s' "$LINK_PASSWORD" | pnpm factrove share "$artifact_id" --password-stdin`. Revoke, then share, mints a new token hash. The previous URL returns 404.
+
 ## What visitors see
 
-The public JSON is the filename, size, upload time, content URL, and `passwordProtected`. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Markdown is not offered on the public route.
+The public JSON is the filename, size, upload time, content URL, and `passwordProtected`. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Inline scripts and styles run. Network requests, external scripts and styles, forms, and nested frames do not. See [Prepare an artifact](/concepts#prepare-an-artifact). Markdown is not offered on the public route.

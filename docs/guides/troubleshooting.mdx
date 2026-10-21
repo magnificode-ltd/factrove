@@ -1,0 +1,46 @@
+---
+title: Troubleshooting
+description: Ports, secrets, storage, API origins, cookies, profiles, public links, and content tickets.
+---
+
+These are the failures the local loop and a self-hosted install hit most often.
+
+## Ports and the container runtime
+
+- **Container runtime unavailable.** `pnpm infra:up` exits when `docker` is missing or the daemon is stopped. Start the runtime and run `pnpm infra:up` again.
+- **Port 5432 is taken.** Another PostgreSQL is listening on `127.0.0.1:5432`. Stop it, or change the host port in `compose.yaml` and `DATABASE_URL` together.
+- **Port 3900 is taken.** Another process is listening on `127.0.0.1:3900`. Stop it, or change the Garage host port in `compose.yaml` and `S3_ENDPOINT` together.
+- **Port 3000 or 3001 is taken.** Stop the other process and start again. Local development uses `http://localhost:3000` for the web app and `http://localhost:3001` for the API.
+- **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API.
+
+## Startup and storage
+
+- **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set it in `apps/api/.env`, then start the API again.
+- **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to `compose.yaml`. For AWS, set `S3_BUCKET` and `S3_REGION`, remove `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, and the Garage key pair, and use real credentials or the AWS credential chain. `S3_BUCKET=your-bucket` is an old placeholder. See [Object storage](/guides/self-hosting#object-storage).
+- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or the API is not running. Precedence is `--endpoint-url` or `--api-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`. An explicit `--profile` uses that profile's key and ignores `FACTROVE_API_KEY`.
+- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`. A production bundle keeps the origin from the build, so run `pnpm build` again after changing it.
+
+## Cookies and origins
+
+A cookie-authenticated write (`POST`, `PUT`, `DELETE`, and other methods besides GET, HEAD, and OPTIONS) needs `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` Bearer requests skip that check. Do not send `Authorization` on API-key create, list, or delete.
+
+`localhost` and `127.0.0.1` are different hosts. A cookie domain cannot cover either. When the web app and API use different public hosts, set `AUTH_COOKIE_DOMAIN` to a parent of both. On an `https` API origin the session cookie is named `__Secure-better-auth.session_token`. On `http` it is `better-auth.session_token`. Use a cookie jar rather than typing the name. The recipe is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+
+## Profiles
+
+`--profile`, then `FACTROVE_PROFILE`, then `default` selects the profile. `pnpm factrove` can fill an unset `FACTROVE_PROFILE` from `apps/cli/.env`. `node apps/cli/dist/main.js` does not read that file. Profile files live in `~/.factrove` unless `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, or `FACTROVE_CONFIG_FILE` points elsewhere.
+
+## Public links
+
+Revoke clears the password. The next share is unprotected unless you pass the password again:
+
+```bash
+pnpm factrove share "$artifact_id" --revoke
+printf '%s' "$LINK_PASSWORD" | pnpm factrove share "$artifact_id" --password-stdin
+```
+
+`--password` needs a terminal. Rotating `SHARE_TOKEN_KEY`, or `BETTER_AUTH_SECRET` when that key is unset, makes existing public URLs return 404. Share again and supply the password if the link should stay protected. See [Lockout recovery](/guides/sharing-links#lockout-recovery).
+
+## Content tickets
+
+A signed-in viewer loads HTML through a short `access` query on the content URL. That grant lasts five minutes. Refresh the viewer to mint another one. A password-protected public link uses a separate `ticket` query that lasts 60 seconds and is honored at most three times per API process. Refresh the share page to mint another ticket. Reverse proxies should not log either query.

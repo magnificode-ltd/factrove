@@ -1,4 +1,4 @@
-import { cliCommands, TOP_LEVEL_HELP, type CliCommandSpec } from "./command-spec.js";
+import { cliCommands, cliFlags, cliReferenceNotes, flagLabel, TOP_LEVEL_HELP, type CliCommandSpec, type CliFlagSpec } from "./command-spec.js";
 
 export type GeneratedCliPage = {
   slug: string;
@@ -18,7 +18,12 @@ export function renderCliReferencePages(): GeneratedCliPage[] {
     {
       slug: "help",
       path: "cli-reference/help.mdx",
-      mdx: renderHelpPage("factrove --help", "The exact top-level help text from the CLI.", TOP_LEVEL_HELP),
+      mdx: renderHelpPage(
+        "factrove --help",
+        "The exact top-level help text from the CLI.",
+        TOP_LEVEL_HELP,
+        cliReferenceNotes.help ?? "",
+      ),
     },
     ...cliCommands.map((command) => ({
       slug: command.docsSlug,
@@ -40,10 +45,28 @@ export function renderCliNavigation(): CliNavigationGroup {
 }
 
 function renderCommandPage(command: CliCommandSpec): string {
-  return renderHelpPage(command.name, command.summary, command.helpText);
+  return renderHelpPage(command.name, command.summary, command.helpText, renderCommandReference(command));
 }
 
-function renderHelpPage(title: string, description: string, helpText: string): string {
+function renderCommandReference(command: CliCommandSpec): string {
+  const flags = cliFlags.filter((flag) => flagApplies(flag, command.name));
+  const lines = flags.map((flag) => `- \`${flagLabel(flag)}\` — ${flag.description}`);
+  return [
+    "## Accepted flags",
+    "",
+    "The help text above is exact. These flags are also accepted, including ones that help text does not list.",
+    "",
+    ...lines,
+    "",
+    cliReferenceNotes[command.name] ?? "",
+  ].join("\n");
+}
+
+function flagApplies(flag: CliFlagSpec, commandName: string): boolean {
+  return flag.appliesTo === "*" || flag.appliesTo.includes(commandName);
+}
+
+function renderHelpPage(title: string, description: string, helpText: string, extra: string): string {
   return [
     "---",
     `title: ${yamlString(title)}`,
@@ -55,6 +78,8 @@ function renderHelpPage(title: string, description: string, helpText: string): s
     "```text",
     helpText.replace(/\n$/, ""),
     "```",
+    "",
+    extra.trimEnd(),
     "",
   ].join("\n");
 }

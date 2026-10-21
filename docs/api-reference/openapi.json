@@ -55,6 +55,9 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthEnvelope"
+                },
+                "example": {
+                  "status": "ok"
                 }
               }
             }
@@ -85,6 +88,13 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ContextEnvelope"
+                },
+                "example": {
+                  "user": {
+                    "id": "user_example",
+                    "name": "Example User"
+                  },
+                  "organization": null
                 }
               }
             }
@@ -95,6 +105,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -118,6 +134,11 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SignUpEmailRequest"
+              },
+              "example": {
+                "name": "Local Owner",
+                "email": "owner@example.com",
+                "password": "replace-this-password"
               }
             }
           }
@@ -154,6 +175,10 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SignInEmailRequest"
+              },
+              "example": {
+                "email": "owner@example.com",
+                "password": "replace-this-password"
               }
             }
           }
@@ -181,7 +206,7 @@
           "Auth"
         ],
         "summary": "Create an API key",
-        "description": "Requires a browser session. A request that also sends `Authorization` is 401 with message `API key management requires a browser session.` The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+        "description": "Requires a browser session. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
         "security": [
           {
             "sessionCookie": []
@@ -194,10 +219,25 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateApiKeyRequest"
+              },
+              "example": {
+                "name": "cli"
               }
             }
           }
         },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "Sign in and create a key",
+            "source": "api=http://localhost:3001\norigin=http://localhost:3000\njar=$(mktemp)\n\ncurl -sS -c \"$jar\" -X POST \"$api/api/auth/sign-up/email\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Origin: $origin\" \\\n  -d '{\"name\":\"Local Owner\",\"email\":\"owner@example.com\",\"password\":\"replace-this-password\"}'\n\ncurl -sS -b \"$jar\" -X POST \"$api/api/auth/api-key/create\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Origin: $origin\" \\\n  -d '{\"name\":\"cli\"}'"
+          },
+          {
+            "lang": "javascript",
+            "label": "Browser on the web origin",
+            "source": "const response = await fetch(\"http://localhost:3001/api/auth/api-key/create\", {\n  method: \"POST\",\n  credentials: \"include\",\n  headers: { \"Content-Type\": \"application/json\" },\n  body: JSON.stringify({ name: \"cli\" }),\n});"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The new key, including `key` once.",
@@ -205,6 +245,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateApiKeyResponse"
+                },
+                "example": {
+                  "id": "key_example",
+                  "name": "cli",
+                  "start": "ftrv_example1",
+                  "key": "ftrv_example_key_shown_once"
                 }
               }
             }
@@ -214,6 +260,22 @@
           },
           "401": {
             "description": "No browser session, or Authorization was also sent."
+          },
+          "403": {
+            "description": "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -238,6 +300,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ListApiKeysResponse"
+                },
+                "example": {
+                  "apiKeys": [
+                    {
+                      "id": "key_example",
+                      "name": "cli",
+                      "start": "ftrv_example1"
+                    }
+                  ],
+                  "total": 1
                 }
               }
             }
@@ -255,7 +327,7 @@
           "Auth"
         ],
         "summary": "Revoke an API key",
-        "description": "Requires a browser session. Another user's key id is 404. After delete, that key fails closed on product routes.",
+        "description": "Requires a browser session. Do not send `Authorization`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. Another user's key id is 404. After delete, that key fails closed on product routes.",
         "security": [
           {
             "sessionCookie": []
@@ -268,6 +340,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DeleteApiKeyRequest"
+              },
+              "example": {
+                "keyId": "key_example"
               }
             }
           }
@@ -279,12 +354,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DeleteApiKeyResponse"
+                },
+                "example": {
+                  "success": true
                 }
               }
             }
           },
           "401": {
             "description": "No browser session, or Authorization was also sent."
+          },
+          "403": {
+            "description": "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
+                }
+              }
+            }
           },
           "404": {
             "description": "The key id is unknown to this session."
@@ -319,6 +413,23 @@
             }
           }
         },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "Upload hello.html",
+            "source": "curl -sS -X POST \"http://localhost:3001/api/v1/artifacts\" \\\n  -H \"Authorization: Bearer $FACTROVE_API_KEY\" \\\n  -F \"file=@./fixtures/hello.html\""
+          },
+          {
+            "lang": "javascript",
+            "label": "Upload hello.html",
+            "source": "import { readFile } from \"node:fs/promises\";\n\nconst bytes = await readFile(\"./fixtures/hello.html\");\nconst htmlBlob = new Blob([bytes], { type: \"text/html\" });\nconst form = new FormData();\nform.append(\"file\", htmlBlob, \"hello.html\");\n\nconst response = await fetch(\"http://localhost:3001/api/v1/artifacts\", {\n  method: \"POST\",\n  headers: { Authorization: `Bearer ${process.env.FACTROVE_API_KEY}` },\n  body: form,\n});"
+          },
+          {
+            "lang": "python",
+            "label": "Upload hello.html",
+            "source": "import os\nimport requests\n\nwith open(\"./fixtures/hello.html\", \"rb\") as handle:\n    response = requests.post(\n        \"http://localhost:3001/api/v1/artifacts\",\n        headers={\"Authorization\": f\"Bearer {os.environ['FACTROVE_API_KEY']}\"},\n        files={\"file\": (\"hello.html\", handle, \"text/html\")},\n    )"
+          }
+        ],
         "responses": {
           "201": {
             "description": "The new artifact.",
@@ -326,6 +437,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ArtifactEnvelope"
+                },
+                "example": {
+                  "artifact": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "creatorUserId": "user_example",
+                    "organizationId": null,
+                    "accessType": "private",
+                    "filename": "11111111-1111-4111-8111-111111111111.html",
+                    "mimeType": "text/html",
+                    "sizeBytes": 527,
+                    "createdAt": "2026-10-21T12:00:00.000Z",
+                    "updatedAt": "2026-10-21T12:00:00.000Z",
+                    "uploadedAt": "2026-10-21T12:00:00.000Z",
+                    "viewerUrl": "http://localhost:3000/artifacts/11111111-1111-4111-8111-111111111111",
+                    "contentUrl": "http://localhost:3001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+                    "shared": false,
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -336,6 +465,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "INVALID_REQUEST",
+                    "value": {
+                      "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "The file is not valid UTF-8."
+                      }
+                    }
+                  },
+                  "ORGANIZATION_REQUIRED": {
+                    "summary": "ORGANIZATION_REQUIRED",
+                    "value": {
+                      "error": {
+                        "code": "ORGANIZATION_REQUIRED",
+                        "message": "Organization sharing requires membership in an organization."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -346,6 +495,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -356,6 +511,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
                 }
               }
             }
@@ -366,6 +527,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": "The file exceeds the 10 MiB limit."
+                  }
                 }
               }
             }
@@ -376,6 +543,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNSUPPORTED_FILE_TYPE",
+                    "message": "Only .html and .htm files are supported."
+                  }
                 }
               }
             }
@@ -386,6 +559,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "STORAGE_UNAVAILABLE",
+                    "message": "Object storage is unavailable."
+                  }
                 }
               }
             }
@@ -429,6 +608,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ArtifactListEnvelope"
+                },
+                "example": {
+                  "items": [
+                    {
+                      "id": "11111111-1111-4111-8111-111111111111",
+                      "creatorUserId": "user_example",
+                      "organizationId": null,
+                      "accessType": "private",
+                      "filename": "11111111-1111-4111-8111-111111111111.html",
+                      "mimeType": "text/html",
+                      "sizeBytes": 527,
+                      "createdAt": "2026-10-21T12:00:00.000Z",
+                      "updatedAt": "2026-10-21T12:00:00.000Z",
+                      "uploadedAt": "2026-10-21T12:00:00.000Z",
+                      "viewerUrl": "http://localhost:3000/artifacts/11111111-1111-4111-8111-111111111111",
+                      "contentUrl": "http://localhost:3001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+                      "shared": false,
+                      "passwordProtected": false
+                    }
+                  ]
                 }
               }
             }
@@ -439,6 +638,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "view must be mine or org."
+                  }
                 }
               }
             }
@@ -449,6 +654,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -496,6 +707,23 @@
             }
           }
         },
+        "x-codeSamples": [
+          {
+            "lang": "bash",
+            "label": "Replace with hello.html",
+            "source": "curl -sS -X PUT \"http://localhost:3001/api/v1/artifacts/$artifact_id/content\" \\\n  -H \"Authorization: Bearer $FACTROVE_API_KEY\" \\\n  -F \"file=@./fixtures/hello.html\""
+          },
+          {
+            "lang": "javascript",
+            "label": "Replace with hello.html",
+            "source": "import { readFile } from \"node:fs/promises\";\n\nconst artifactId = process.env.ARTIFACT_ID;\nconst API_ORIGIN = \"http://localhost:3001\";\n\nconst bytes = await readFile(\"./fixtures/hello.html\");\nconst htmlBlob = new Blob([bytes], { type: \"text/html\" });\nconst form = new FormData();\nform.append(\"file\", htmlBlob, \"hello.html\");\n\nconst response = await fetch(`${API_ORIGIN}/api/v1/artifacts/${artifactId}/content`, {\n  method: \"PUT\",\n  headers: { Authorization: `Bearer ${process.env.FACTROVE_API_KEY}` },\n  body: form,\n});"
+          },
+          {
+            "lang": "python",
+            "label": "Replace with hello.html",
+            "source": "import os\nimport requests\n\nwith open(\"./fixtures/hello.html\", \"rb\") as handle:\n    response = requests.put(\n        f\"http://localhost:3001/api/v1/artifacts/{os.environ['ARTIFACT_ID']}/content\",\n        headers={\"Authorization\": f\"Bearer {os.environ['FACTROVE_API_KEY']}\"},\n        files={\"file\": (\"hello.html\", handle, \"text/html\")},\n    )"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The same artifact id with the new size and upload time.",
@@ -503,6 +731,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ArtifactEnvelope"
+                },
+                "example": {
+                  "artifact": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "creatorUserId": "user_example",
+                    "organizationId": null,
+                    "accessType": "private",
+                    "filename": "11111111-1111-4111-8111-111111111111.html",
+                    "mimeType": "text/html",
+                    "sizeBytes": 527,
+                    "createdAt": "2026-10-21T12:00:00.000Z",
+                    "updatedAt": "2026-10-21T12:00:00.000Z",
+                    "uploadedAt": "2026-10-21T12:00:00.000Z",
+                    "viewerUrl": "http://localhost:3000/artifacts/11111111-1111-4111-8111-111111111111",
+                    "contentUrl": "http://localhost:3001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+                    "shared": false,
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -513,6 +759,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "accessType cannot be changed when replacing content."
+                  }
                 }
               }
             }
@@ -523,6 +775,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -533,6 +791,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
                 }
               }
             }
@@ -543,6 +807,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -553,6 +823,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "CONTENT_CONFLICT",
+                    "message": "Another replace finished first. Upload again to replace the current content."
+                  }
                 }
               }
             }
@@ -563,6 +839,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": "The file exceeds the 10 MiB limit."
+                  }
                 }
               }
             }
@@ -573,6 +855,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNSUPPORTED_FILE_TYPE",
+                    "message": "Only .html and .htm files are supported."
+                  }
                 }
               }
             }
@@ -583,6 +871,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
                 }
               }
             }
@@ -593,6 +887,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "STORAGE_UNAVAILABLE",
+                    "message": "Object storage is unavailable."
+                  }
                 }
               }
             }
@@ -675,6 +975,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "format must be html or markdown."
+                  }
                 }
               }
             }
@@ -685,6 +991,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -695,6 +1007,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "CONTENT_TOO_LARGE",
+                    "message": "HTML exceeds the Markdown conversion limit."
+                  }
                 }
               }
             }
@@ -705,6 +1023,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "CONTENT_TOO_COMPLEX",
+                    "message": "HTML took too long to convert to Markdown."
+                  }
                 }
               }
             }
@@ -715,6 +1039,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "examples": {
+                  "STORAGE_UNAVAILABLE": {
+                    "summary": "STORAGE_UNAVAILABLE",
+                    "value": {
+                      "error": {
+                        "code": "STORAGE_UNAVAILABLE",
+                        "message": "Object storage is unavailable."
+                      }
+                    }
+                  },
+                  "CONVERSION_UNAVAILABLE": {
+                    "summary": "CONVERSION_UNAVAILABLE",
+                    "value": {
+                      "error": {
+                        "code": "CONVERSION_UNAVAILABLE",
+                        "message": "Markdown conversion is busy. Try again."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -758,6 +1102,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ArtifactEnvelope"
+                },
+                "example": {
+                  "artifact": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "creatorUserId": "user_example",
+                    "organizationId": null,
+                    "accessType": "private",
+                    "filename": "11111111-1111-4111-8111-111111111111.html",
+                    "mimeType": "text/html",
+                    "sizeBytes": 527,
+                    "createdAt": "2026-10-21T12:00:00.000Z",
+                    "updatedAt": "2026-10-21T12:00:00.000Z",
+                    "uploadedAt": "2026-10-21T12:00:00.000Z",
+                    "viewerUrl": "http://localhost:3000/artifacts/11111111-1111-4111-8111-111111111111",
+                    "contentUrl": "http://localhost:3001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+                    "shared": false,
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -768,6 +1130,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
                 }
               }
             }
@@ -778,6 +1146,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -821,6 +1195,13 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShareEnvelope"
+                },
+                "example": {
+                  "share": {
+                    "shared": true,
+                    "shareUrl": "http://localhost:3000/share/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -831,6 +1212,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
                 }
               }
             }
@@ -841,6 +1228,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -851,6 +1244,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -861,6 +1260,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
                 }
               }
             }
@@ -902,6 +1307,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateShareRequest"
+              },
+              "example": {
+                "password": "example-link-password"
               }
             }
           }
@@ -913,6 +1321,13 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShareEnvelope"
+                },
+                "example": {
+                  "share": {
+                    "shared": true,
+                    "shareUrl": "http://localhost:3000/share/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -923,6 +1338,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Send an optional password string."
+                  }
                 }
               }
             }
@@ -933,6 +1354,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -943,6 +1370,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
                 }
               }
             }
@@ -953,6 +1386,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -963,6 +1402,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
                 }
               }
             }
@@ -1004,6 +1449,13 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShareEnvelope"
+                },
+                "example": {
+                  "share": {
+                    "shared": false,
+                    "shareUrl": null,
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -1014,6 +1466,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
                 }
               }
             }
@@ -1024,6 +1482,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -1034,6 +1498,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
                 }
               }
             }
@@ -1044,6 +1514,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -1054,6 +1530,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
                 }
               }
             }
@@ -1097,6 +1579,13 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShareEnvelope"
+                },
+                "example": {
+                  "share": {
+                    "shared": true,
+                    "shareUrl": "http://localhost:3000/share/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -1107,6 +1596,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
                 }
               }
             }
@@ -1117,6 +1612,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
                 }
               }
             }
@@ -1127,6 +1628,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
                 }
               }
             }
@@ -1137,6 +1644,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
@@ -1147,6 +1660,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
                 }
               }
             }
@@ -1161,7 +1680,7 @@
           "Public"
         ],
         "summary": "Read a public share",
-        "description": "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+        "description": "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. The view allowance is charged per visitor address before the link lookup and password check, so a 401 or 404 still consumes it. IPv6 addresses share a /64. A charge grants two companion content loads for 30 seconds. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit before its own lookup. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
         "security": [],
         "parameters": [
           {
@@ -1202,6 +1721,17 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PublicArtifactEnvelope"
+                },
+                "example": {
+                  "artifact": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "filename": "11111111-1111-4111-8111-111111111111.html",
+                    "mimeType": "text/html",
+                    "sizeBytes": 527,
+                    "uploadedAt": "2026-10-21T12:00:00.000Z",
+                    "contentUrl": "http://localhost:3001/api/v1/public/artifacts/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/content",
+                    "passwordProtected": false
+                  }
                 }
               }
             }
@@ -1212,6 +1742,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "PASSWORD_REQUIRED",
+                    "message": "This link needs a password."
+                  }
                 }
               }
             }
@@ -1222,16 +1758,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
+            "description": "The visitor view allowance is already spent, including when the response would have been 401 or 404. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup. IPv6 addresses share a /64.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many requests. Try again later."
+                  }
                 }
               }
             }
@@ -1278,6 +1826,9 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PublicUnlockRequest"
+              },
+              "example": {
+                "password": "example-link-password"
               }
             }
           }
@@ -1289,6 +1840,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PublicUnlockEnvelope"
+                },
+                "example": {
+                  "grant": {
+                    "token": "g1.example",
+                    "expiresAt": "2026-10-21T12:15:00.000Z"
+                  }
                 }
               }
             }
@@ -1299,6 +1856,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Send the password as a string."
+                  }
                 }
               }
             }
@@ -1309,6 +1872,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "PASSWORD_INCORRECT",
+                    "message": "That password is not right."
+                  }
                 }
               }
             }
@@ -1319,12 +1888,18 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Includes Retry-After for share lockout.",
+            "description": "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Every password-throttle 429 sends Retry-After. Counters are in memory on each API process.",
             "headers": {
               "Retry-After": {
                 "$ref": "#/components/headers/RetryAfter"
@@ -1334,6 +1909,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many password attempts. Try again later."
+                  }
                 }
               }
             }
@@ -1349,6 +1930,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNLOCK_UNAVAILABLE",
+                    "message": "Password verification is busy. Try again."
+                  }
                 }
               }
             }
@@ -1415,6 +2002,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "PASSWORD_REQUIRED",
+                    "message": "This link needs a password."
+                  }
                 }
               }
             }
@@ -1425,16 +2018,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
                 }
               }
             }
           },
           "429": {
-            "description": "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+            "description": "The visitor view allowance is already spent, including when the link is missing or the ticket check would fail. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup, unless a companion grant from a recent detail remains. IPv6 addresses share a /64.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many requests. Try again later."
+                  }
                 }
               }
             }
@@ -1445,6 +2050,12 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "STORAGE_UNAVAILABLE",
+                    "message": "Object storage is unavailable."
+                  }
                 }
               }
             }
@@ -1464,7 +2075,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "better-auth.session_token",
-        "description": "Better Auth session cookie from email/password sign-in. The cookie may use a `__Secure-` or `__Host-` prefix depending on the origin. Host-only unless AUTH_COOKIE_DOMAIN is set."
+        "description": "Better Auth session cookie from email/password sign-in. On an https API origin the name is `__Secure-better-auth.session_token`. On http it is `better-auth.session_token`. Host-only unless AUTH_COOKIE_DOMAIN is set. Use a cookie jar instead of typing the name."
       },
       "accessGrant": {
         "type": "apiKey",
@@ -1475,7 +2086,7 @@
     },
     "headers": {
       "RetryAfter": {
-        "description": "Seconds to wait before retrying. The API sets this when an `ApiErrorException` includes `retryAfterSeconds`: share-lock 429 RATE_LIMITED and 503 UNLOCK_UNAVAILABLE. Public-view 429 and Markdown 503 CONVERSION_UNAVAILABLE do not set it.",
+        "description": "Seconds to wait before retrying. The API sets this when an `ApiErrorException` includes `retryAfterSeconds`: every password-throttle 429 RATE_LIMITED, and 503 UNLOCK_UNAVAILABLE. Public-view 429 and Markdown 503 CONVERSION_UNAVAILABLE do not set it.",
         "schema": {
           "type": "integer",
           "minimum": 1
@@ -1992,7 +2603,7 @@
             "description": "One non-empty .html or .htm file, at most 10 MiB.",
             "type": "string",
             "format": "binary",
-            "contentMediaType": "text/html"
+            "contentMediaType": "application/octet-stream"
           },
           "accessType": {
             "type": "string",
@@ -2014,7 +2625,7 @@
             "description": "One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted.",
             "type": "string",
             "format": "binary",
-            "contentMediaType": "text/html"
+            "contentMediaType": "application/octet-stream"
           }
         },
         "required": [

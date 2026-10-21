@@ -222,7 +222,7 @@ export const cliFlags: readonly CliFlagSpec[] = [
     kind: "boolean",
     store: "quiet",
     documented: false,
-    description: "Accepted on upload, get, and share. Help does not list it.",
+    description: "Accepted on upload, get, and share. It does not hide their output. Help does not list it. configure rejects it.",
     appliesTo: ["upload", "get", "share"],
   },
   {
@@ -275,6 +275,68 @@ export const cliCommands: readonly CliCommandSpec[] = [
     docsSlug: "configure",
   },
 ];
+
+export const cliReferenceNotes: Record<string, string> = {
+  help: [
+    "## Where to go",
+    "",
+    "Each command page repeats that command's help text, then lists every flag the command accepts. Help text omits `--api-url`, `--endpoint-url`, `--output`, and `--profile`.",
+    "",
+    "Install and build steps are in [CLI overview](/cli-reference/overview). Precedence and a copyable workflow are in [CLI](/guides/cli).",
+  ].join("\n"),
+  upload: [
+    "## Behavior",
+    "",
+    "Plain success prints only the new id. `--json` prints one `{ artifact }` line.",
+    "",
+    "`--artifactId` replaces content and prints the same id. The API keeps the current access and any share token. `--access` with `--artifactId` is rejected before a request is sent. Only the owner can replace. Anyone else gets `404 ARTIFACT_NOT_FOUND`.",
+    "",
+    "The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. See [Concepts](/concepts#organization-membership).",
+    "",
+    "Another replace of the same revision returns `409 CONTENT_CONFLICT`. A replace can return `500` after the new object is already committed. GET the artifact before retrying. Replacement does not keep version history and normally deletes the previous object.",
+    "",
+    "## Related",
+    "",
+    "- [CLI](/guides/cli)",
+    "- [Upload an HTML file](/api-reference/artifacts/upload-an-html-file)",
+    "- [Replace an artifact's stored HTML](/api-reference/artifacts/replace-an-artifacts-stored-html)",
+  ].join("\n"),
+  get: [
+    "## Behavior",
+    "",
+    "Plain success prints the content bytes. `--json` prints one line with `format`, `mediaType`, and `content`.",
+    "",
+    "`--format markdown` asks the API to convert the stored HTML. Markdown is not saved. The converter does not run JavaScript. It drops scripts, styles, SVG, MathML, and several other elements, and it cannot preserve layout or content that JavaScript would have generated. Limits are 10,485,760 input bytes, 16 MiB of output, and five seconds. Failures use `413 CONTENT_TOO_LARGE`, `422 CONTENT_TOO_COMPLEX`, and `503 CONVERSION_UNAVAILABLE`. See [Concepts](/concepts#markdown-conversion).",
+    "",
+    "## Related",
+    "",
+    "- [CLI](/guides/cli)",
+    "- [Download artifact HTML or converted Markdown](/api-reference/artifacts/download-artifact-html-or-converted-markdown)",
+  ].join("\n"),
+  share: [
+    "## Behavior",
+    "",
+    "Plain success prints the public URL and then a status line that says whether the link is password protected. `--json` prints one `{ share }` line. Upload is the command that prints only an id.",
+    "",
+    "`--password` prompts twice and needs a terminal. `--password-stdin` reads a pipe and removes one trailing newline. An agent can run `printf '%s' \"$LINK_PASSWORD\" | factrove share \"$artifact_id\" --password-stdin`.",
+    "",
+    "`--revoke` removes the link and its password. Sharing again without a password creates an unprotected link. Pass the password again to keep protection. See [Sharing links](/guides/sharing-links#lockout-recovery).",
+    "",
+    "## Related",
+    "",
+    "- [Sharing links](/guides/sharing-links)",
+    "- [Create or update a public share](/api-reference/shares/create-or-update-a-public-share)",
+  ].join("\n"),
+  configure: [
+    "## Behavior",
+    "",
+    "The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. `--api-key` prompts when it is omitted.",
+    "",
+    "Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`.",
+    "",
+    "Precedence for later commands is in [CLI](/guides/cli). When a command cannot reach the API, see [Troubleshooting](/guides/troubleshooting).",
+  ].join("\n"),
+};
 
 export function helpPage(command: HelpCommand | null = null): string {
   if (command === null) {

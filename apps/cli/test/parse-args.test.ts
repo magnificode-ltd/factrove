@@ -348,6 +348,9 @@ describe("approved help text", () => {
     expect(helpFence(pages.get)).toBe(TOM_APPROVED_HELP.get);
     expect(helpFence(pages.share)).toBe(TOM_APPROVED_HELP.share);
     expect(helpFence(pages.configure)).toBe(TOM_APPROVED_HELP.configure);
+    expect(pages.upload).toContain("--api-url");
+    expect(pages.upload).toContain("CONTENT_CONFLICT");
+    expect(pages.configure).toContain("create-an-api-key-from-a-session");
   });
 });
 

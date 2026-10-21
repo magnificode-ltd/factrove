@@ -1,6 +1,6 @@
 # Factrove documentation
 
-Mintlify reads the `docs/` folder. Point the docs site at that folder. Nothing here signs up, deploys, or publishes a site.
+User-facing guides and references live in `docs/`. This file is the maintainer guide for regenerating and previewing them. Mintlify reads the `docs/` folder. Point the docs site at that folder. Nothing here signs up, deploys, or publishes a site.
 
 `docs/docs.json` is the current Mintlify config (`$schema`: `https://mintlify.com/docs.json`). Hand-written pages live next to generated CLI MDX and `docs/api-reference/openapi.json`.
 

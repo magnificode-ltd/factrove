@@ -15,3 +15,20 @@ Options:
   --api-url <origin>  API origin (alias: --endpoint-url).
   --profile <name>    Credentials profile (default: default).
 ```
+
+## Accepted flags
+
+The help text above is exact. These flags are also accepted, including ones that help text does not list.
+
+- `--api-url, --endpoint-url <origin>` — API origin (alias: --endpoint-url).
+- `--api-key <key>` — API key. A prompt keeps it out of shell history.
+- `--profile <name>` — Credentials profile (default: default). Accepted on every command. Help lists it on configure.
+- `-h, --help` — Show help.
+
+## Behavior
+
+The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. `--api-key` prompts when it is omitted.
+
+Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`.
+
+Precedence for later commands is in [CLI](/guides/cli). When a command cannot reach the API, see [Troubleshooting](/guides/troubleshooting).

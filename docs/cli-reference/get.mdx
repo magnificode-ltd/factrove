@@ -14,3 +14,26 @@ Options:
   --format <html|markdown>  Content to print (default: html).
   --json                    Print one JSON line.
 ```
+
+## Accepted flags
+
+The help text above is exact. These flags are also accepted, including ones that help text does not list.
+
+- `--format <html|markdown>` — Content to print (default: html).
+- `--json` — Print one JSON line (alias: --output json).
+- `--output <json|text>` — Print one JSON line when the value is json. --output text is the plain output.
+- `--api-url, --endpoint-url <origin>` — API origin (alias: --endpoint-url).
+- `--profile <name>` — Credentials profile (default: default). Accepted on every command. Help lists it on configure.
+- `--quiet` — Accepted on upload, get, and share. It does not hide their output. Help does not list it. configure rejects it.
+- `-h, --help` — Show help.
+
+## Behavior
+
+Plain success prints the content bytes. `--json` prints one line with `format`, `mediaType`, and `content`.
+
+`--format markdown` asks the API to convert the stored HTML. Markdown is not saved. The converter does not run JavaScript. It drops scripts, styles, SVG, MathML, and several other elements, and it cannot preserve layout or content that JavaScript would have generated. Limits are 10,485,760 input bytes, 16 MiB of output, and five seconds. Failures use `413 CONTENT_TOO_LARGE`, `422 CONTENT_TOO_COMPLEX`, and `503 CONVERSION_UNAVAILABLE`. See [Concepts](/concepts#markdown-conversion).
+
+## Related
+
+- [CLI](/guides/cli)
+- [Download artifact HTML or converted Markdown](/api-reference/artifacts/download-artifact-html-or-converted-markdown)

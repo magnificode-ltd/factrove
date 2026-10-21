@@ -303,7 +303,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an API key",
     description:
-      "Requires a browser session. A request that also sends `Authorization` is 401 with message `API key management requires a browser session.` The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+      "Requires a browser session. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -322,7 +322,12 @@ export const httpOperations: HttpOperation[] = [
         description:
           "Empty or missing name is Better Auth `NAME_REQUIRED` (`API Key name is required.`). A name longer than 32 characters is `INVALID_NAME_LENGTH`."
       },
-      "401": { description: "No browser session, or Authorization was also sent." }
+      "401": { description: "No browser session, or Authorization was also sent." },
+      "403": {
+        description:
+          "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      }
     }
   },
   {
@@ -350,7 +355,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Revoke an API key",
     description:
-      "Requires a browser session. Another user's key id is 404. After delete, that key fails closed on product routes.",
+      "Requires a browser session. Do not send `Authorization`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. Another user's key id is 404. After delete, that key fails closed on product routes.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -366,6 +371,11 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "DeleteApiKeyResponse"
       },
       "401": { description: "No browser session, or Authorization was also sent." },
+      "403": {
+        description:
+          "Cookie write whose Origin or Referer is not WEB_ORIGIN or PUBLIC_BASE_URL. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      },
       "404": { description: "The key id is unknown to this session." }
     }
   },
@@ -641,7 +651,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Public"],
     summary: "Read a public share",
     description:
-      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. Each accepted detail counts as one view unit and grants two companion content loads for 30 seconds that do not consume another view unit. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
+      "No session. The response omits creator, organization, access type, and the share URL. An inactive, unknown, or revoked token is `404 ARTIFACT_NOT_FOUND` and does not say whether the artifact exists. A password-protected share without a valid `X-Factrove-Share-Grant` is `401 PASSWORD_REQUIRED`. The view allowance is charged per visitor address before the link lookup and password check, so a 401 or 404 still consumes it. IPv6 addresses share a /64. A charge grants two companion content loads for 30 seconds. View units are limited to 60 per 60 seconds per client address, in memory on each API process. A content request without a remaining companion charges another view unit before its own lookup. That 429 does not include Retry-After. Responses send Referrer-Policy: no-referrer and X-Robots-Tag: noindex.",
     security: "none",
     pathParameters: [artifactIdParam, shareTokenParam],
     headerParameters: [
@@ -665,7 +675,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. Companion content loads after a successful detail do not consume a view unit.",
+          "The visitor view allowance is already spent, including when the response would have been 401 or 404. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup. IPv6 addresses share a /64.",
         schemaName: "ApiError"
       }
     }
@@ -701,7 +711,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Includes Retry-After for share lockout.",
+          "Too many password attempts for this client or this share. Code `RATE_LIMITED`. Every password-throttle 429 sends Retry-After. Counters are in memory on each API process.",
         schemaName: "ApiError",
         headers: [retryAfterHeader]
       },
@@ -742,7 +752,7 @@ export const httpOperations: HttpOperation[] = [
       "404": { description: "The link is not active. Code `ARTIFACT_NOT_FOUND`.", schemaName: "ApiError" },
       "429": {
         description:
-          "Too many public view units from this client address. Code `RATE_LIMITED`. No Retry-After. A content request that still has a companion grant from a recent detail does not charge this limiter.",
+          "The visitor view allowance is already spent, including when the link is missing or the ticket check would fail. Code `RATE_LIMITED`. No Retry-After. Charged per address before lookup, unless a companion grant from a recent detail remains. IPv6 addresses share a /64.",
         schemaName: "ApiError"
       },
       "503": {
