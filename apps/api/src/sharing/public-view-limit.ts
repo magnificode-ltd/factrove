@@ -65,7 +65,7 @@ export class PublicViewLimiter {
     if (this.takeCompanion(key, at)) {
       return true;
     }
-    return this.views.take(key, at);
+    return this.views.take(key, at) !== null;
   }
 
   private grantCompanions(key: string, at: number): void {

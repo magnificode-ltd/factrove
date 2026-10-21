@@ -257,10 +257,11 @@ export class ArtifactsService {
   }
 
   // Invalid bodies are rejected before any bucket is touched. The client failure budget is
-  // reserved before lookup and refunded after a match or an infrastructure error. Share
-  // failures are charged only after Argon2 rejects the password. Exhausted shares are 429
-  // with no hash work. Every verify spends a separate per-IP budget; a saturated gate keeps
-  // that charge. Recent share failures add a short delay before verify, not a rejection.
+  // reserved before lookup and refunded after a match or an infrastructure error. The share
+  // failure slot is reserved before Argon2 so concurrent wrongs cannot overshoot; a match
+  // refunds it. Exhausted shares are 429 with no hash work. Every verify spends a separate
+  // per-IP budget; a saturated gate keeps that charge. Recent share failures add a short
+  // delay before verify, not a rejection. The process-wide gate is held only around Argon2.
   async unlockPublic(
     id: string,
     token: string,
@@ -268,7 +269,8 @@ export class ArtifactsService {
     readBody: () => unknown,
   ): Promise<PublicUnlockEnvelope> {
     const password = readUnlockPassword(readBody());
-    if (!this.passwordAttempts.reserveClient(clientIp)) {
+    const clientCharge = this.passwordAttempts.reserveClient(clientIp);
+    if (!clientCharge) {
       throw tooManyPasswordAttempts(this.passwordAttempts.clientRetryAfterSeconds(clientIp));
     }
     let record: ArtifactRecord & { uploadedAt: Date };
@@ -276,52 +278,57 @@ export class ArtifactsService {
       record = await this.findPublic(id, token);
     } catch (error) {
       if (!(error instanceof ApiErrorException && error.status === 404)) {
-        this.passwordAttempts.refundClient(clientIp);
+        this.passwordAttempts.refundClient(clientCharge);
       }
       throw error;
     }
     const scope = this.grantScope(record);
     if (!scope || !record.sharePasswordHash || !record.shareTokenHash) {
-      this.passwordAttempts.refundClient(clientIp);
+      this.passwordAttempts.refundClient(clientCharge);
       return { grant: null };
     }
-    if (!this.passwordAttempts.shareHasRoom(record.shareTokenHash)) {
-      this.passwordAttempts.refundClient(clientIp);
+    const delayMs = this.passwordAttempts.shareDelayMs(record.shareTokenHash);
+    const shareCharge = this.passwordAttempts.reserveShare(record.shareTokenHash);
+    if (!shareCharge) {
+      this.passwordAttempts.refundClient(clientCharge);
       throw tooManyPasswordAttempts(this.passwordAttempts.shareRetryAfterSeconds(record.shareTokenHash));
     }
     if (!this.passwordAttempts.reserveVerify(clientIp)) {
-      this.passwordAttempts.refundClient(clientIp);
+      this.passwordAttempts.refundShare(shareCharge);
+      this.passwordAttempts.refundClient(clientCharge);
       throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
     }
-    if (!this.passwordAttempts.tryBeginVerify(clientIp)) {
-      this.passwordAttempts.refundClient(clientIp);
-      throw tooManyPasswordAttempts(1);
-    }
-    if (!argon2VerifyGate.tryAcquire()) {
-      this.passwordAttempts.endVerify(clientIp);
-      this.passwordAttempts.refundClient(clientIp);
-      throw unlockBusy();
-    }
     try {
-      const delayMs = this.passwordAttempts.shareDelayMs(record.shareTokenHash);
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
-      if (!(await verifySharePassword(password, record.sharePasswordHash))) {
-        this.passwordAttempts.chargeShareFailure(record.shareTokenHash);
-        throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
+      if (!this.passwordAttempts.tryBeginVerify(clientIp)) {
+        throw tooManyPasswordAttempts(1);
       }
-      this.passwordAttempts.refundClient(clientIp);
-      const grant = mintShareGrant(scope, this.grantKey());
-      return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+      try {
+        if (!argon2VerifyGate.tryAcquire()) {
+          throw unlockBusy();
+        }
+        try {
+          if (!(await verifySharePassword(password, record.sharePasswordHash))) {
+            throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
+          }
+          this.passwordAttempts.refundShare(shareCharge);
+          this.passwordAttempts.refundClient(clientCharge);
+          const grant = mintShareGrant(scope, this.grantKey());
+          return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+        } finally {
+          argon2VerifyGate.release();
+        }
+      } finally {
+        this.passwordAttempts.endVerify(clientIp);
+      }
     } catch (error) {
       if (!(error instanceof ApiErrorException && (error.status === 401 || error.status === 404))) {
-        this.passwordAttempts.refundClient(clientIp);
+        this.passwordAttempts.refundShare(shareCharge);
+        this.passwordAttempts.refundClient(clientCharge);
       }
       throw error;
-    } finally {
-      argon2VerifyGate.release();
-      this.passwordAttempts.endVerify(clientIp);
     }
   }
 

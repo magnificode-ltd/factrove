@@ -166,6 +166,10 @@ describe("share password controls", () => {
     });
     expect(input.type).toBe("text");
 
+    const nfdLong = `${"é".normalize("NFD").repeat(64)}abcd`;
+    expect(nfdLong.length).toBeGreaterThan(128);
+    await type(input, nfdLong);
+    expect(input.value).toBe(nfdLong);
     await type(input, "open sesame 42");
     await submit(input);
     expect(writes()).toEqual([

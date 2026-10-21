@@ -6,6 +6,14 @@
 // Oldest means first inserted in this window, not least recently used. A caller who can
 // present more than maxKeys keys can cycle them and exceed the per-key limit. The cap
 // bounds memory.
+//
+// take() returns a charge token so refund() can decrement the window that recorded the
+// take. Refunding by key alone would drop a newer charge after the window rotates.
+export type RateCharge = {
+  readonly key: string;
+  readonly windowStart: number;
+};
+
 export class RateWindow {
   private windowStart: number;
   private current = new Map<string, number>();
@@ -49,10 +57,10 @@ export class RateWindow {
     return Math.max(1, Math.ceil(Math.max(0, neededElapsed - elapsed) / 1000));
   }
 
-  take(key: string, at: number): boolean {
+  take(key: string, at: number): RateCharge | null {
     this.rotate(at);
     if (this.estimate(key, at) >= this.max) {
-      return false;
+      return null;
     }
     if (!this.current.has(key) && this.current.size >= this.maxKeys) {
       const oldest = this.current.keys().next().value;
@@ -61,15 +69,19 @@ export class RateWindow {
       }
     }
     this.current.set(key, (this.current.get(key) ?? 0) + 1);
-    return true;
+    return { key, windowStart: this.windowStart };
   }
 
-  refund(key: string, at: number): void {
+  refund(charge: RateCharge, at: number): void {
     this.rotate(at);
-    if (decrementMap(this.current, key)) {
+    const age = this.windowStart - charge.windowStart;
+    if (age === 0) {
+      decrementMap(this.current, charge.key);
       return;
     }
-    decrementMap(this.previous, key);
+    if (age === this.windowMs) {
+      decrementMap(this.previous, charge.key);
+    }
   }
 
   private estimate(key: string, at: number): number {
@@ -109,4 +121,3 @@ function decrementMap(counts: Map<string, number>, key: string): boolean {
   }
   return true;
 }
-

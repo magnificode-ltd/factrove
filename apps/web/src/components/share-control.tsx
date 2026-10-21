@@ -340,7 +340,6 @@ function SharePassword({
             name="share-password"
             autoComplete="new-password"
             value={password}
-            maxLength={128}
             aria-invalid={invalid ? true : undefined}
             aria-describedby={invalid ? `${hintId} ${errorId}` : hintId}
             onChange={(event) => {

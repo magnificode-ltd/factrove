@@ -64,6 +64,7 @@ export async function unlockPublicArtifact(
       return { status: "incorrect", message: INCORRECT_MESSAGE };
     }
     if (error instanceof FactroveApiError && error.status === 429) {
+      // Retry-After is exposed on public CORS so the browser can read this countdown.
       return { status: "throttled", message: throttledUnlockMessage(error.retryAfterSeconds), retryAfterSeconds: error.retryAfterSeconds };
     }
     if (error instanceof FactroveApiError && error.status === 503) {

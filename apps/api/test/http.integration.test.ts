@@ -31,17 +31,19 @@ import { API_CONFIG, readApiConfig, type ApiConfig } from "../src/services/api-c
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../src/storage/blob-store.js";
 import { withMarkdownConversionSlot } from "../src/rendering/convert-html-to-markdown.js";
 import { markdownContentSecurityPolicy, MAX_HTML_BYTES } from "../src/rendering/html-policy.js";
+import { ARGON2_VERIFY_LIMIT } from "../src/sharing/argon2-gate.js";
 import {
   PasswordAttemptLimiter,
   PASSWORD_ATTEMPT_MAX_KEYS,
   PASSWORD_ATTEMPT_WINDOW_MS,
   PASSWORD_ATTEMPTS_PER_CLIENT,
   PASSWORD_ATTEMPTS_PER_SHARE,
+  SHARE_DELAY_MAX_MS,
   VERIFY_ATTEMPTS_PER_MINUTE,
 } from "../src/sharing/password-attempt-limit.js";
 import { browserOrigins } from "../src/sharing/public-origin.js";
 import { SHARE_TICKET_MAX_USES } from "../src/sharing/share-grant.js";
-import { createShareToken } from "../src/sharing/share-link.js";
+import { createShareToken, hashShareToken } from "../src/sharing/share-link.js";
 import { deriveShareTokenKey, encryptShareToken } from "../src/sharing/share-token-cipher.js";
 import { addMembership, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
@@ -1942,6 +1944,54 @@ describe("HTTP API", () => {
       expect((await unlock(victim, last.id, last.token, password)).status).toBe(200);
     });
 
+    it("does not let concurrent wrong guesses overshoot the share cap", async () => {
+      const artifact = await upload(baseUrl, "overshoot.html", new TextEncoder().encode("<p>overshoot</p>"));
+      const password = "overshoot password";
+      const { token } = await shareWithPassword(artifact.id, password);
+      for (let attempt = 0; attempt < PASSWORD_ATTEMPTS_PER_SHARE - 1; attempt += 1) {
+        expect((await unlock(visitorIp(), artifact.id, token, `old miss ${attempt}`)).status).toBe(401);
+      }
+      const responses = await Promise.all(
+        Array.from({ length: 4 }, (_, attempt) => unlock(visitorIp(), artifact.id, token, `parallel miss ${attempt}`)),
+      );
+      const statuses = responses.map((response) => response.status);
+      expect(statuses.filter((status) => status === 401)).toHaveLength(1);
+      expect(statuses.filter((status) => status === 429)).toHaveLength(3);
+      await Promise.all(responses.map((response) => response.arrayBuffer()));
+      const locked = await unlock(visitorIp(), artifact.id, token, password);
+      expect(locked.status).toBe(429);
+      expectRetryAfter(locked);
+    });
+
+    it("does not hold the Argon2 gate while a share is in backoff", async () => {
+      const limiter = app.get(PasswordAttemptLimiter);
+      const sleeping = await upload(baseUrl, "backoff-sleep.html", new TextEncoder().encode("<p>sleep</p>"));
+      const victim = await upload(baseUrl, "backoff-victim.html", new TextEncoder().encode("<p>victim</p>"));
+      const password = "backoff delay password";
+      const sleepingShare = await shareWithPassword(sleeping.id, password);
+      const victimShare = await shareWithPassword(victim.id, password);
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        expect((await unlock(visitorIp(), sleeping.id, sleepingShare.token, `seed miss ${attempt}`)).status).toBe(401);
+      }
+      expect(limiter.shareDelayMs(hashShareToken(sleepingShare.token))).toBe(0);
+      limiter.setDelayMaxMs(SHARE_DELAY_MAX_MS);
+      expect(limiter.shareDelayMs(hashShareToken(sleepingShare.token))).toBeGreaterThan(0);
+      try {
+        const delayed = Array.from({ length: ARGON2_VERIFY_LIMIT }, (_, attempt) =>
+          unlock(visitorIp(), sleeping.id, sleepingShare.token, `delayed miss ${attempt}`),
+        );
+        const started = Date.now();
+        const other = await unlock(visitorIp(), victim.id, victimShare.token, password);
+        expect(Date.now() - started).toBeLessThan(SHARE_DELAY_MAX_MS);
+        expect(other.status).toBe(200);
+        const delayedStatuses = (await Promise.all(delayed)).map((response) => response.status);
+        expect(delayedStatuses.every((status) => status === 401 || status === 429)).toBe(true);
+        expect(delayedStatuses).not.toContain(503);
+      } finally {
+        limiter.setDelayMaxMs(0);
+      }
+    });
+
     it("caps 65 parallel unlocks from one address before Argon2", async () => {
       const artifact = await upload(baseUrl, "parallel-ip.html", new TextEncoder().encode("<p>parallel ip</p>"));
       const password = "parallel ip password";
@@ -2078,6 +2128,7 @@ describe("HTTP API", () => {
       expect(unlockPreflight.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
       expect(unlockPreflight.headers.get("access-control-allow-methods")).toBe("POST,OPTIONS");
       expect(unlockPreflight.headers.get("access-control-allow-credentials")).toBeNull();
+      expect(unlockPreflight.headers.get("access-control-expose-headers")?.toLowerCase()).toContain("retry-after");
       const detailPreflight = await globalThis.fetch(publicPath(baseUrl, artifact.id, token), {
         method: "OPTIONS",
         headers: {

@@ -87,7 +87,7 @@ async function readPassword(source: "prompt" | "stdin"): Promise<string> {
     throw new CliError("INVALID_INPUT", "--password needs a terminal. Pipe the password with --password-stdin.");
   }
   const first = checkPassword(await promptSecret("Link password: ", "Share cancelled."));
-  const second = await promptSecret("Repeat password: ", "Share cancelled.");
+  const second = (await promptSecret("Repeat password: ", "Share cancelled.")).normalize("NFC");
   if (first !== second) {
     throw new CliError("INVALID_INPUT", "The passwords do not match.");
   }

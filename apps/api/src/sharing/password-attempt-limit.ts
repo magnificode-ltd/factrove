@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { rateLimitKey } from "./public-view-limit.js";
-import { RateWindow } from "./rate-window.js";
+import { RateWindow, type RateCharge } from "./rate-window.js";
+
+export type { RateCharge };
 
 // Password attempts on protected public links, in memory per API process. These buckets are
 // separate from the public view limit, so viewing a page never spends password attempts
@@ -8,15 +10,17 @@ import { RateWindow } from "./rate-window.js";
 //
 // The client failure budget (10 per 10 minutes, IPv6 /64) is reserved before lookup and
 // refunded after a match or an infrastructure failure. Dead tokens keep that charge.
-// The share failure budget (30 per 10 minutes, keyed by the current token hash) is charged
-// only after a wrong password. Successes do not spend it. Exhausted means 429 with no
-// Argon2. Revoking and sharing again mints a new hash and a fresh share budget.
+// The share failure budget (30 per 10 minutes, keyed by the current token hash) is reserved
+// before Argon2 so concurrent wrongs cannot overshoot. A match refunds that slot. Exhausted
+// means 429 with no hash work. Revoking and sharing again mints a new hash and a fresh
+// share budget.
 //
 // Every Argon2 verify, success or failure, spends a separate per-IP verify budget
 // (20 per minute and 100 per 10 minutes). A saturated global gate does not refund that
 // budget, so retries are not free. One IP may run only one verify at a time.
 // Recent share failures add a bounded delay of at most two seconds before verify; they
-// do not reject the request. Clients use the same address key as the view limit.
+// do not reject the request. The process-wide Argon2 gate is not held during that delay.
+// Clients use the same address key as the view limit.
 export const PASSWORD_ATTEMPTS_PER_CLIENT = 10;
 export const PASSWORD_ATTEMPTS_PER_SHARE = 30;
 export const PASSWORD_ATTEMPT_WINDOW_MS = 10 * 60_000;
@@ -41,7 +45,7 @@ export class PasswordAttemptLimiter {
     windowMs = PASSWORD_ATTEMPT_WINDOW_MS,
     private readonly now: () => number = () => performance.now(),
     maxKeys = PASSWORD_ATTEMPT_MAX_KEYS,
-    private readonly delayMaxMs = SHARE_DELAY_MAX_MS,
+    private delayMaxMs = SHARE_DELAY_MAX_MS,
     perVerifyMinute = VERIFY_ATTEMPTS_PER_MINUTE,
     verifyMinuteWindowMs = VERIFY_MINUTE_WINDOW_MS,
     perVerifyWindow = VERIFY_ATTEMPTS_PER_WINDOW,
@@ -54,12 +58,16 @@ export class PasswordAttemptLimiter {
     this.verifyWindow = new RateWindow(perVerifyWindow, verifyWindowMs, maxKeys, at);
   }
 
-  reserveClient(clientIp: string | null): boolean {
+  setDelayMaxMs(delayMaxMs: number): void {
+    this.delayMaxMs = delayMaxMs;
+  }
+
+  reserveClient(clientIp: string | null): RateCharge | null {
     return this.clients.take(rateLimitKey(clientIp), this.now());
   }
 
-  refundClient(clientIp: string | null): void {
-    this.clients.refund(rateLimitKey(clientIp), this.now());
+  refundClient(charge: RateCharge): void {
+    this.clients.refund(charge, this.now());
   }
 
   clientRetryAfterSeconds(clientIp: string | null): number {
@@ -70,8 +78,12 @@ export class PasswordAttemptLimiter {
     return this.shares.hasRoom(shareTokenHash, this.now());
   }
 
-  chargeShareFailure(shareTokenHash: string): boolean {
+  reserveShare(shareTokenHash: string): RateCharge | null {
     return this.shares.take(shareTokenHash, this.now());
+  }
+
+  refundShare(charge: RateCharge): void {
+    this.shares.refund(charge, this.now());
   }
 
   shareRetryAfterSeconds(shareTokenHash: string): number {
@@ -92,11 +104,12 @@ export class PasswordAttemptLimiter {
   reserveVerify(clientIp: string | null): boolean {
     const key = rateLimitKey(clientIp);
     const at = this.now();
-    if (!this.verifyMinute.take(key, at)) {
+    const minute = this.verifyMinute.take(key, at);
+    if (!minute) {
       return false;
     }
     if (!this.verifyWindow.take(key, at)) {
-      this.verifyMinute.refund(key, at);
+      this.verifyMinute.refund(minute, at);
       return false;
     }
     return true;

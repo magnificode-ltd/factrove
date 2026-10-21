@@ -19,6 +19,7 @@ const PUBLIC_METHODS = "GET,HEAD,OPTIONS";
 const PUBLIC_UNLOCK_METHODS = "POST,OPTIONS";
 const CREDENTIALED_HEADERS = "Content-Type,Accept,Authorization";
 const PUBLIC_HEADERS = "Content-Type,Accept,X-Factrove-Share-Grant";
+const PUBLIC_EXPOSED_HEADERS = "Retry-After";
 
 export function configureHttpApp(app: INestApplication): void {
   const config = app.get<ApiConfig>(API_CONFIG);
@@ -79,6 +80,8 @@ function applyCors(request: IncomingMessage, response: ServerResponse, origins: 
     response.setHeader("Vary", "Origin");
     if (!publicApi) {
       response.setHeader("Access-Control-Allow-Credentials", "true");
+    } else {
+      response.setHeader("Access-Control-Expose-Headers", PUBLIC_EXPOSED_HEADERS);
     }
   }
   if ((request.method ?? "GET").toUpperCase() !== "OPTIONS") {

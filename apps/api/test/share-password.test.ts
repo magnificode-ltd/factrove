@@ -124,57 +124,67 @@ describe("password attempt throttling", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(3, 100, 60_000, () => now);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.reserveClient("198.51.100.1")).toBe(true);
+      expect(limiter.reserveClient("198.51.100.1")).toBeTruthy();
     }
-    expect(limiter.reserveClient("198.51.100.1")).toBe(false);
-    expect(limiter.reserveClient("198.51.100.2")).toBe(true);
+    expect(limiter.reserveClient("198.51.100.1")).toBeNull();
+    expect(limiter.reserveClient("198.51.100.2")).toBeTruthy();
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(limiter.reserveClient(`2001:db8:1:2::${attempt + 1}`)).toBe(true);
+      expect(limiter.reserveClient(`2001:db8:1:2::${attempt + 1}`)).toBeTruthy();
     }
-    expect(limiter.reserveClient("2001:db8:1:2:ffff::9")).toBe(false);
-    expect(limiter.reserveClient("2001:db8:1:3::1")).toBe(true);
+    expect(limiter.reserveClient("2001:db8:1:2:ffff::9")).toBeNull();
+    expect(limiter.reserveClient("2001:db8:1:3::1")).toBeTruthy();
     now = 120_001;
-    expect(limiter.reserveClient("198.51.100.1")).toBe(true);
+    expect(limiter.reserveClient("198.51.100.1")).toBeTruthy();
   });
 
   it("refunds a client slot so a later reserve can succeed", () => {
     const now = 0;
     const limiter = new PasswordAttemptLimiter(1, 100, 60_000, () => now);
-    expect(limiter.reserveClient("198.51.100.9")).toBe(true);
-    expect(limiter.reserveClient("198.51.100.9")).toBe(false);
-    limiter.refundClient("198.51.100.9");
-    expect(limiter.reserveClient("198.51.100.9")).toBe(true);
+    const charge = limiter.reserveClient("198.51.100.9");
+    expect(charge).toBeTruthy();
+    expect(limiter.reserveClient("198.51.100.9")).toBeNull();
+    limiter.refundClient(charge!);
+    expect(limiter.reserveClient("198.51.100.9")).toBeTruthy();
   });
 
-  it("charges only share failures and keeps shares apart", () => {
+  it("reserves share failures atomically and keeps shares apart", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, 4, 60_000, () => now);
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      expect(limiter.reserveClient(`203.0.113.${attempt}`)).toBe(true);
+      expect(limiter.reserveClient(`203.0.113.${attempt}`)).toBeTruthy();
       expect(limiter.shareHasRoom(firstHash)).toBe(true);
-      expect(limiter.chargeShareFailure(firstHash)).toBe(true);
+      expect(limiter.reserveShare(firstHash)).toBeTruthy();
     }
-    expect(limiter.reserveClient("203.0.113.200")).toBe(true);
+    expect(limiter.reserveClient("203.0.113.200")).toBeTruthy();
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
-    expect(limiter.chargeShareFailure(firstHash)).toBe(false);
+    expect(limiter.reserveShare(firstHash)).toBeNull();
     expect(limiter.shareHasRoom(secondHash)).toBe(true);
-    expect(limiter.chargeShareFailure(secondHash)).toBe(true);
+    expect(limiter.reserveShare(secondHash)).toBeTruthy();
     now = 30_000;
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
     now = 120_001;
     expect(limiter.shareHasRoom(firstHash)).toBe(true);
   });
 
+  it("refunds a share reservation so a correct unlock does not spend the cap", () => {
+    const limiter = new PasswordAttemptLimiter(100, 1, 60_000, () => 0);
+    const charge = limiter.reserveShare(firstHash);
+    expect(charge).toBeTruthy();
+    expect(limiter.reserveShare(firstHash)).toBeNull();
+    limiter.refundShare(charge!);
+    expect(limiter.reserveShare(firstHash)).toBeTruthy();
+  });
+
   it("delays a share from recent failures without rejecting, and the delay decays", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(100, PASSWORD_ATTEMPTS_PER_SHARE, 60_000, () => now, 10_000, SHARE_DELAY_MAX_MS);
     expect(limiter.shareDelayMs(firstHash)).toBe(0);
-    expect(limiter.chargeShareFailure(firstHash)).toBe(true);
+    expect(limiter.reserveShare(firstHash)).toBeTruthy();
     expect(limiter.shareDelayMs(firstHash)).toBeGreaterThan(0);
     expect(limiter.shareDelayMs(firstHash)).toBeLessThanOrEqual(SHARE_DELAY_MAX_MS);
     expect(limiter.shareHasRoom(firstHash)).toBe(true);
     for (let attempt = 1; attempt < PASSWORD_ATTEMPTS_PER_SHARE; attempt += 1) {
-      expect(limiter.chargeShareFailure(firstHash)).toBe(true);
+      expect(limiter.reserveShare(firstHash)).toBeTruthy();
     }
     expect(limiter.shareDelayMs(firstHash)).toBe(SHARE_DELAY_MAX_MS);
     expect(limiter.shareHasRoom(firstHash)).toBe(false);
@@ -215,24 +225,24 @@ describe("password attempt throttling", () => {
     let now = 0;
     const limiter = new PasswordAttemptLimiter(undefined, undefined, undefined, () => now);
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      expect(limiter.reserveClient("192.0.2.10")).toBe(true);
+      expect(limiter.reserveClient("192.0.2.10")).toBeTruthy();
     }
-    expect(limiter.reserveClient("192.0.2.10")).toBe(false);
+    expect(limiter.reserveClient("192.0.2.10")).toBeNull();
     now = 600_000 * 2 + 1;
-    expect(limiter.reserveClient("192.0.2.10")).toBe(true);
+    expect(limiter.reserveClient("192.0.2.10")).toBeTruthy();
   });
 
   it("does not share buckets with the public view limit", () => {
     const now = () => 0;
     const views = new PublicViewLimiter(2, 60_000, now);
     const attempts = new PasswordAttemptLimiter(2, 2, 60_000, now);
-    expect(attempts.reserveClient("192.0.2.1")).toBe(true);
-    expect(attempts.reserveClient("192.0.2.1")).toBe(true);
-    expect(attempts.reserveClient("192.0.2.1")).toBe(false);
+    expect(attempts.reserveClient("192.0.2.1")).toBeTruthy();
+    expect(attempts.reserveClient("192.0.2.1")).toBeTruthy();
+    expect(attempts.reserveClient("192.0.2.1")).toBeNull();
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(true);
     expect(views.allow("192.0.2.1")).toBe(false);
-    expect(attempts.chargeShareFailure(firstHash)).toBe(true);
+    expect(attempts.reserveShare(firstHash)).toBeTruthy();
   });
 });
 
@@ -264,16 +274,28 @@ describe("share password contract", () => {
 describe("rate window refunds", () => {
   it("returns a taken slot in the current window", () => {
     const window = new RateWindow(1, 60_000, 10, 0);
-    expect(window.take("one", 0)).toBe(true);
-    expect(window.take("one", 0)).toBe(false);
-    window.refund("one", 0);
-    expect(window.take("one", 0)).toBe(true);
+    const charge = window.take("one", 0);
+    expect(charge).toEqual({ key: "one", windowStart: 0 });
+    expect(window.take("one", 0)).toBeNull();
+    window.refund(charge!, 0);
+    expect(window.take("one", 0)).toBeTruthy();
+  });
+
+  it("refunds the window that recorded the charge, not a newer one", () => {
+    const window = new RateWindow(1, 60_000, 10, 0);
+    const previous = window.take("one", 0);
+    expect(previous).toBeTruthy();
+    const current = window.take("one", 90_000);
+    expect(current).toBeTruthy();
+    expect(window.take("one", 90_000)).toBeNull();
+    window.refund(previous!, 90_000);
+    expect(window.take("one", 90_000)).toBeNull();
   });
 
   it("reports retry-after while the sliding window is full", () => {
     const window = new RateWindow(1, 60_000, 10, 0);
     expect(window.retryAfterSeconds("one", 0)).toBe(0);
-    expect(window.take("one", 0)).toBe(true);
+    expect(window.take("one", 0)).toBeTruthy();
     expect(window.retryAfterSeconds("one", 0)).toBeGreaterThanOrEqual(1);
     expect(window.used("one", 0)).toBe(1);
   });
