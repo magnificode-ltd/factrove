@@ -167,6 +167,8 @@ describe("factrove share arguments", () => {
       kind: "share",
       id: artifactId,
       revoke: false,
+      password: null,
+      removePassword: false,
       json: false,
       apiUrl: DEFAULT_API_URL,
       profile: "default",
@@ -187,6 +189,40 @@ describe("factrove share arguments", () => {
     expect(failure(["get", artifactId, "--revoke"], {}).message).toMatch(/only valid for the share command/);
     expect(failure(["share", artifactId, "--access", "private"], {}).message).toMatch(/only valid for the upload command/);
     expect(failure(["configure", "--revoke"], {}).message).toMatch(/configure accepts/);
+  });
+
+  it("reads link passwords from a prompt or stdin, never from an argument", () => {
+    expect(parseCliArgs(["share", artifactId, "--password"], isolated)).toMatchObject({
+      password: "prompt",
+      removePassword: false,
+      revoke: false,
+    });
+    expect(parseCliArgs(["share", artifactId, "--password-stdin", "--json"], isolated)).toMatchObject({
+      password: "stdin",
+      json: true,
+    });
+    expect(parseCliArgs(["share", artifactId, "--remove-password"], isolated)).toMatchObject({
+      password: null,
+      removePassword: true,
+    });
+
+    const inline = failure(["share", artifactId, "--password=hunter2hunter2"], {});
+    expect(inline.message).toMatch(/not accepted as arguments/);
+    expect(inline.message).not.toContain("hunter2");
+    const spaced = failure(["share", artifactId, "--password", "hunter2hunter2"], {});
+    expect(spaced.message).toMatch(/--password takes no value/);
+    expect(spaced.message).not.toContain("hunter2");
+  });
+
+  it("rejects conflicting or misplaced password options", () => {
+    expect(failure(["share", artifactId, "--password", "--password-stdin"], {}).message).toMatch(/more than once/);
+    expect(failure(["share", artifactId, "--remove-password", "--remove-password"], {}).message).toMatch(/more than once/);
+    expect(failure(["share", artifactId, "--password", "--revoke"], {}).message).toMatch(/only one of/);
+    expect(failure(["share", artifactId, "--password-stdin", "--remove-password"], {}).message).toMatch(/only one of/);
+    expect(failure(["share", artifactId, "--remove-password", "--revoke"], {}).message).toMatch(/only one of/);
+    expect(failure(["upload", file, "--password"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["get", artifactId, "--remove-password"], {}).message).toMatch(/only valid for the share command/);
+    expect(failure(["configure", "--password-stdin"], {}).message).toMatch(/only valid for the share command/);
   });
 });
 

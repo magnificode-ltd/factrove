@@ -34,10 +34,14 @@ export type ConfigureInvocation = {
   suggestedApiUrl: string;
 };
 
+export type SharePasswordSource = "prompt" | "stdin";
+
 export type ShareInvocation = {
   kind: "share";
   id: string;
   revoke: boolean;
+  password: SharePasswordSource | null;
+  removePassword: boolean;
   json: boolean;
   apiUrl: string;
   profile: string;
@@ -51,19 +55,22 @@ const HELP = `Upload HTML and print artifact content.
 Usage:
   pnpm factrove upload <path> [--access private|org_shared] [--api-url <origin>] [--profile <name>] [--json]
   pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>] [--profile <name>]
-  pnpm factrove share <id> [--revoke] [--json] [--api-url <origin>] [--profile <name>]
+  pnpm factrove share <id> [--password | --password-stdin | --remove-password | --revoke] [--json] [--api-url <origin>] [--profile <name>]
   pnpm factrove configure [--profile <name>] [--api-key <key>] [--api-url <origin>]
 
 Commands:
   upload      Upload a local HTML file and print its viewer URL.
   get         Print an artifact's stored HTML, or Markdown converted from that HTML.
-  share       Create a public link, or revoke it with --revoke.
+  share       Create a public link, set or remove its password, or revoke it with --revoke.
   configure   Save an API key and API URL for a profile.
 
 Options:
   --access <private|org_shared>  upload only. Defaults to private.
   --format <html|markdown>       get only. Defaults to html.
-  --revoke                       share only. Remove the public link.
+  --revoke                       share only. Remove the public link and its password.
+  --password                     share only. Prompt twice for a link password without echoing it. Needs a terminal.
+  --password-stdin               share only. Read the link password from stdin. One trailing newline is removed.
+  --remove-password              share only. Keep the link and remove its password.
   --api-url <origin>             API origin. Overrides FACTROVE_API_URL and the profile.
   --api-key <key>                configure only. Prefer a prompt or stdin so the key stays out of shell history.
   --profile <name>               Credentials profile. Overrides FACTROVE_PROFILE. Defaults to default.
@@ -84,12 +91,16 @@ Examples:
   pnpm factrove get 123e4567-e89b-42d3-a456-426614174000
   pnpm factrove get 123e4567-e89b-42d3-a456-426614174000 --format markdown --json
   pnpm factrove share 123e4567-e89b-42d3-a456-426614174000
+  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --password
+  printf '%s' "$LINK_PASSWORD" | pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --password-stdin
+  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --remove-password
   pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --revoke
 
 Relative upload paths resolve from the directory where you ran pnpm.
 Plain upload success prints only the viewer URL and a newline.
 Plain share success prints only the public link and a newline.
 Plain share --revoke prints a confirmation and does not print the old link.
+Plain share --remove-password prints a confirmation. Passwords are 8 to 128 characters and are never printed.
 Plain get success prints the content with no extra bytes.
 JSON success prints one line.
 Errors go to stderr and the process exits nonzero.
@@ -116,6 +127,8 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   const positionals: string[] = [];
   let json = false;
   let revoke: boolean | undefined;
+  let password: SharePasswordSource | undefined;
+  let removePassword: boolean | undefined;
   let access: AccessType | undefined;
   let format: ContentFormat | undefined;
   let apiUrlFlag: string | undefined;
@@ -140,6 +153,20 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
         throw new CliError("INVALID_INPUT", "--revoke was provided more than once.");
       }
       revoke = true;
+      continue;
+    }
+    if (arg === "--password" || arg === "--password-stdin") {
+      password = assignOnce(password, arg === "--password" ? "prompt" : "stdin", "A password option");
+      continue;
+    }
+    if (arg.startsWith("--password=") || arg.startsWith("--password-stdin=")) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "Passwords are not accepted as arguments. Use --password to be prompted, or --password-stdin.",
+      );
+    }
+    if (arg === "--remove-password") {
+      removePassword = assignOnce(removePassword, true, "--remove-password");
       continue;
     }
     if (arg === "--access" || arg.startsWith("--access=")) {
@@ -196,6 +223,9 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   const command = positionals[0];
   if (command === undefined) {
     throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+  }
+  if (command !== "share" && (password !== undefined || removePassword !== undefined)) {
+    throw new CliError("INVALID_INPUT", "Password options are only valid for the share command.");
   }
   const profile = selectedProfile(profileFlag, env);
   const stored = readStoredProfileSync(profile, env);
@@ -281,15 +311,29 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove share <id>");
     }
     if (positionals.length > 2) {
-      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+      throw new CliError(
+        "INVALID_INPUT",
+        password === "prompt"
+          ? "--password takes no value. It prompts for the password, so the password stays out of shell history."
+          : "Unexpected extra arguments.",
+      );
     }
     if (!ARTIFACT_ID.test(id)) {
       throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    const actions = [revoke, password, removePassword].filter((value) => value !== undefined).length;
+    if (actions > 1) {
+      throw new CliError(
+        "INVALID_INPUT",
+        "Use only one of --password, --password-stdin, --remove-password, and --revoke.",
+      );
     }
     return {
       kind: "share",
       id,
       revoke: revoke ?? false,
+      password: password ?? null,
+      removePassword: removePassword ?? false,
       json,
       apiUrl,
       profile,

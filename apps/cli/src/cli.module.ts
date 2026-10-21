@@ -48,8 +48,10 @@ function lazyClient(config: CliConfigService): FactroveClient {
     getArtifact: (id) => resolve().getArtifact(id),
     getArtifactContent: (id, input) => resolve().getArtifactContent(id, input),
     getArtifactShare: (id) => resolve().getArtifactShare(id),
-    createArtifactShare: (id) => resolve().createArtifactShare(id),
+    createArtifactShare: (id, input) => resolve().createArtifactShare(id, input),
     revokeArtifactShare: (id) => resolve().revokeArtifactShare(id),
-    getPublicArtifact: (id, token) => resolve().getPublicArtifact(id, token),
+    removeArtifactSharePassword: (id) => resolve().removeArtifactSharePassword(id),
+    getPublicArtifact: (id, token, input) => resolve().getPublicArtifact(id, token, input),
+    unlockPublicArtifact: (id, token, password) => resolve().unlockPublicArtifact(id, token, password),
   };
 }

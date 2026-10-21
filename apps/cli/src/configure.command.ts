@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { saveProfile } from "./credentials.js";
+import { promptSecret, readAllStdin } from "./secret-input.js";
 import { Inject, Injectable } from "@nestjs/common";
 
 @Injectable()
@@ -58,22 +59,9 @@ async function readAnswers(
       apiUrl: apiUrlFlag ?? (lines[1] ?? "").trim(),
     };
   }
-  const apiKey = apiKeyFlag ?? (await promptSecret("Factrove API key: "));
+  const apiKey = apiKeyFlag ?? (await promptSecret("Factrove API key: ", "Configure cancelled.")).trim();
   const typedUrl = apiUrlFlag ?? (await promptLine(`Factrove API URL [${suggestedApiUrl}]: `));
   return { apiKey, apiUrl: typedUrl };
-}
-
-function readAllStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    process.stdin.on("data", (chunk: Buffer | string) => {
-      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-    });
-    process.stdin.on("error", reject);
-    process.stdin.on("end", () => {
-      resolve(Buffer.concat(chunks).toString("utf8"));
-    });
-  });
 }
 
 async function promptLine(prompt: string): Promise<string> {
@@ -85,43 +73,3 @@ async function promptLine(prompt: string): Promise<string> {
     reader.close();
   }
 }
-
-async function promptSecret(prompt: string): Promise<string> {
-  process.stderr.write(prompt);
-  return new Promise((resolve, reject) => {
-    const chunks: number[] = [];
-    const input = process.stdin;
-    const onData = (buffer: Buffer): void => {
-      for (const byte of buffer) {
-        if (byte === 0x03) {
-          cleanup();
-          process.stderr.write("\n");
-          reject(new CliError("INVALID_INPUT", "Configure cancelled."));
-          return;
-        }
-        if (byte === 0x0d || byte === 0x0a) {
-          cleanup();
-          process.stderr.write("\n");
-          resolve(Buffer.from(chunks).toString("utf8").trim());
-          return;
-        }
-        if (byte === 0x7f || byte === 0x08) {
-          chunks.pop();
-          continue;
-        }
-        chunks.push(byte);
-      }
-    };
-    const cleanup = (): void => {
-      input.off("data", onData);
-      if (input.isTTY) {
-        input.setRawMode(false);
-      }
-      input.pause();
-    };
-    input.setRawMode(true);
-    input.resume();
-    input.on("data", onData);
-  });
-}
-

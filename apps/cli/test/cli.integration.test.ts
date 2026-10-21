@@ -561,9 +561,9 @@ describe("factrove share", () => {
   it("prints only the public link and does not print it again on revoke", async () => {
     const stub = await startStub((request) => {
       if (request.method === "DELETE") {
-        return { status: 200, body: { share: { shared: false, shareUrl: null } } };
+        return { status: 200, body: { share: { shared: false, shareUrl: null, passwordProtected: false } } };
       }
-      return { status: 200, body: { share: { shared: true, shareUrl } } };
+      return { status: 200, body: { share: { shared: true, shareUrl, passwordProtected: false } } };
     });
     const created = await runCli(["share", artifactId, "--api-url", stub.url]);
     expect(created.code).toBe(0);
@@ -582,12 +582,74 @@ describe("factrove share", () => {
   });
 
   it("prints the share envelope on one line", async () => {
-    const body = { share: { shared: true, shareUrl } };
+    const body = { share: { shared: true, shareUrl, passwordProtected: false } };
     const stub = await startStub(() => ({ status: 200, body }));
     const result = await runCli(["share", artifactId, "--json", "--api-url", stub.url]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(`${JSON.stringify(body)}\n`);
     expect(result.stderr).toBe("");
+  });
+
+  it("sends a password from stdin without printing it", async () => {
+    const password = "correct horse battery";
+    const stub = await startStub(() => ({
+      status: 200,
+      body: { share: { shared: true, shareUrl, passwordProtected: true } },
+    }));
+    const result = await runCliInput(["share", artifactId, "--password-stdin", "--api-url", stub.url], `${password}\n`);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`${shareUrl}\n`);
+    expect(result.stdout).not.toContain(password);
+    expect(result.stderr).toBe("");
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0]?.method).toBe("POST");
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share`);
+    expect(stub.requests[0]?.contentType).toContain("application/json");
+    expect(JSON.parse(stub.requests[0]?.body.toString("utf8") ?? "")).toEqual({ password });
+  });
+
+  it("keeps inner whitespace and strips only one trailing newline from stdin", async () => {
+    const stub = await startStub(() => ({
+      status: 200,
+      body: { share: { shared: true, shareUrl, passwordProtected: true } },
+    }));
+    const result = await runCliInput(
+      ["share", artifactId, "--password-stdin", "--api-url", stub.url],
+      "  spaced out  \r\n",
+    );
+    expect(result.code).toBe(0);
+    expect(JSON.parse(stub.requests[0]?.body.toString("utf8") ?? "")).toEqual({ password: "  spaced out  " });
+  });
+
+  it("rejects a short stdin password before calling the API", async () => {
+    const stub = await startStub(() => ({ status: 500, body: {} }));
+    const result = await runCliInput(["share", artifactId, "--password-stdin", "--api-url", stub.url, "--json"], "short\n");
+    expect(result.code).not.toBe(0);
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: { code: "INVALID_INPUT", message: "The password must be at least 8 characters." },
+    });
+    expect(result.stderr).not.toContain("short\n");
+    expect(stub.requests).toHaveLength(0);
+  });
+
+  it("refuses to prompt for --password without a terminal", async () => {
+    const stub = await startStub(() => ({ status: 500, body: {} }));
+    const result = await runCliInput(["share", artifactId, "--password", "--api-url", stub.url], "piped password\n");
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("--password needs a terminal");
+    expect(stub.requests).toHaveLength(0);
+  });
+
+  it("removes the password and keeps the link", async () => {
+    const stub = await startStub(() => ({
+      status: 200,
+      body: { share: { shared: true, shareUrl, passwordProtected: false } },
+    }));
+    const result = await runCli(["share", artifactId, "--remove-password", "--api-url", stub.url]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`Removed the password for ${artifactId}.\n`);
+    expect(stub.requests[0]?.method).toBe("DELETE");
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/share/password`);
   });
 });
 
@@ -611,6 +673,7 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
       viewerUrl: `http://localhost:3000/artifacts/${artifactId}`,
       contentUrl: `http://localhost:3001/api/v1/artifacts/${artifactId}/content`,
       shared: false,
+      passwordProtected: false,
     },
   };
 }
