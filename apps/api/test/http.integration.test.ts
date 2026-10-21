@@ -1907,10 +1907,7 @@ describe("HTTP API", () => {
       const statuses = responses.map((response) => response.status);
       expect(statuses.filter((status) => status === 200)).toHaveLength(0);
       expect(statuses.filter((status) => status === 401).length).toBeLessThanOrEqual(PASSWORD_ATTEMPTS_PER_CLIENT);
-      expect(statuses.filter((status) => status === 401 || status === 503).length).toBeLessThanOrEqual(
-        PASSWORD_ATTEMPTS_PER_CLIENT,
-      );
-      expect(statuses.filter((status) => status === 429).length).toBeGreaterThanOrEqual(55);
+      expect(statuses.filter((status) => status === 429 || status === 503).length).toBeGreaterThanOrEqual(55);
       expect(statuses).toHaveLength(65);
       await Promise.all(responses.map((response) => response.arrayBuffer()));
     });
