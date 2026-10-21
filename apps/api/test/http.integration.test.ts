@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
+import { Agent, request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { PrismaClient } from "@prisma/client";
@@ -1090,7 +1090,9 @@ describe("HTTP API", () => {
     const target = new URL(baseUrl);
     const result = await settledWithin(new Promise<{ status: number; written: number; payload: string }>((resolve, reject) => {
       let settled = false;
+      let alreadyWritten = 0;
       const req = httpRequest({
+        agent: new Agent({ keepAlive: false }),
         hostname: target.hostname,
         port: target.port,
         path: "/api/v1/artifacts",
@@ -1106,11 +1108,17 @@ describe("HTTP API", () => {
           settled = true;
           resolve({
             status: res.statusCode ?? 0,
-            written: req.socket?.bytesWritten ?? Number.POSITIVE_INFINITY,
+            written: (req.socket?.bytesWritten ?? Number.POSITIVE_INFINITY) - alreadyWritten,
             payload: Buffer.concat(chunks).toString("utf8"),
           });
           req.destroy();
         });
+      });
+      if (req.socket) {
+        alreadyWritten = req.socket.bytesWritten;
+      }
+      req.on("socket", (socket) => {
+        alreadyWritten = socket.bytesWritten;
       });
       req.on("error", (error) => {
         if (!settled) {
