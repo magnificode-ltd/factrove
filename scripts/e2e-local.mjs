@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
@@ -12,7 +12,6 @@ import {
   apiEnvFile,
   assertLoopbackHttpEndpoint,
   e2eApiPort,
-  e2eSessionDirectory,
   e2eComposeArgs,
   e2eComposeBase,
   e2eGaragePort,
@@ -116,17 +115,14 @@ async function main() {
   await expectItems("org", []);
 
   const plain = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--profile", "e2e"], cliChildEnv(configDir));
-  const plainViewer = plain.stdout.trim();
-  if (!viewerUrl(plainViewer)) {
-    throw new Error(`Plain upload did not print a viewer URL.\n${plain.stdout}`);
-  }
+  const plainId = artifactIdFromStdout(plain.stdout);
   if (plain.stdout.includes("Nest") || plain.stdout.includes("successfully started")) {
     throw new Error("Plain upload stdout included framework logs.");
   }
   if (plain.stdout.includes(owner.secret)) {
     throw new Error("Plain upload printed the API key.");
   }
-  const plainId = plainViewer.slice(plainViewer.lastIndexOf("/") + 1);
+  const plainViewer = `${webOrigin}/artifacts/${plainId}`;
 
   const jsonUpload = await must("pnpm", ["factrove", "upload", "./fixtures/hello.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   const jsonArtifact = JSON.parse(jsonUpload.stdout).artifact;
@@ -148,11 +144,8 @@ async function main() {
     ["factrove", "upload", "./fixtures/hello.html", "--access", "org_shared", "--profile", "e2e"],
     cliChildEnv(configDir),
   );
-  const sharedViewer = shared.stdout.trim();
-  const sharedId = sharedViewer.slice(sharedViewer.lastIndexOf("/") + 1);
-  if (!viewerUrl(sharedViewer)) {
-    throw new Error(`org_shared upload did not print a viewer URL.\n${shared.stdout}`);
-  }
+  const sharedId = artifactIdFromStdout(shared.stdout);
+  const sharedViewer = `${webOrigin}/artifacts/${sharedId}`;
 
   const mine = await expectItems("mine", [plainId, jsonArtifact.id, sharedId]);
   const org = await expectItems("org", [sharedId]);
@@ -176,7 +169,6 @@ async function main() {
   await expectKeyHash(owner.secret);
   await checkPublicShare(plainId, fixture, configDir);
   await checkPasswordShare(jsonArtifact.id, fixture, configDir);
-  const copiedId = await checkS3Commands(fixture, configDir, plainId, jsonArtifact.id, sharedId);
 
   const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   if (missing.code === 0 || !missing.stderr.includes("FILE_NOT_FOUND")) {
@@ -206,11 +198,10 @@ async function main() {
   const restartedApi = startApi(apiEnv);
   startWeb();
   await waitForJson(`${apiOrigin}/api/v1/health`, (body) => body.status === "ok");
-  await expectItems("mine", [plainId, jsonArtifact.id, sharedId, copiedId]);
+  await expectItems("mine", [plainId, jsonArtifact.id, sharedId]);
   await expectItems("org", [sharedId]);
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
-  await assertContent(copiedId, fixture);
   await expectSql('select count(*) from "user"', "3");
   await revokeKey();
   const revokedUpload = await run(
@@ -286,8 +277,12 @@ function integrationChildEnv() {
   return child;
 }
 
-function viewerUrl(value) {
-  return new RegExp(`^http://127\\.0\\.0\\.1:${e2eWebPort}/artifacts/[0-9a-f-]{36}$`).test(value);
+function artifactIdFromStdout(stdout) {
+  const id = stdout.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || stdout !== `${id}\n`) {
+    throw new Error(`Plain upload did not print only the artifact id.\n${stdout}`);
+  }
+  return id;
 }
 
 async function requireDocker() {
@@ -798,80 +793,6 @@ async function checkViewer(viewer, fixture) {
 
 function shareLinkPattern(id) {
   return new RegExp(`^http://127\\.0\\.0\\.1:${e2eWebPort}/share/${id}/[A-Za-z0-9_-]{43}$`);
-}
-
-async function checkS3Commands(fixture, configDir, plainId, jsonId, sharedId) {
-  const childEnv = cliChildEnv(configDir);
-  const session = [];
-  const uploaded = await must(
-    "pnpm",
-    ["factrove", "cp", "./fixtures/hello.html", "factrove://mine/", "--profile", "e2e", "--endpoint-url", apiOrigin],
-    childEnv,
-  );
-  record(session, "pnpm factrove cp ./fixtures/hello.html factrove://mine/ --profile e2e --endpoint-url " + apiOrigin, uploaded);
-  const uploadMatch = /^upload: \.\/fixtures\/hello\.html to factrove:\/\/mine\/([0-9a-f-]{36})\n$/.exec(uploaded.stdout);
-  if (!uploadMatch || cliStderr(uploaded.stderr) !== "") {
-    throw new Error(`cp upload did not print an aws-style line.\n${uploaded.stdout}\n${uploaded.stderr}`);
-  }
-  const id = uploadMatch[1];
-  if (uploaded.stdout.includes(ownerKey)) {
-    throw new Error("cp upload printed the API key.");
-  }
-
-  const downloaded = await must("pnpm", ["factrove", "cp", `factrove://mine/${id}`, "-", "--profile", "e2e"], childEnv);
-  record(session, `pnpm factrove cp factrove://mine/${id} - --profile e2e`, downloaded);
-  if (!Buffer.from(downloaded.stdout).equals(fixture) || cliStderr(downloaded.stderr) !== `download: factrove://mine/${id} to -`) {
-    throw new Error(`cp to stdout did not return the stored HTML.\nstderr ${downloaded.stderr}`);
-  }
-
-  const quiet = await must("pnpm", ["factrove", "cp", `factrove://mine/${plainId}`, "-", "--quiet", "--profile", "e2e"], childEnv);
-  record(session, `pnpm factrove cp factrove://mine/${plainId} - --quiet --profile e2e`, quiet);
-  if (!Buffer.from(quiet.stdout).equals(fixture) || cliStderr(quiet.stderr) !== "") {
-    throw new Error(`quiet cp to stdout printed a progress line.\n${quiet.stdout}\n${quiet.stderr}`);
-  }
-
-  const legacy = await must("pnpm", ["factrove", "get", id, "--profile", "e2e"], childEnv);
-  record(session, `pnpm factrove get ${id} --profile e2e`, legacy);
-  if (!Buffer.from(legacy.stdout).equals(fixture) || cliStderr(legacy.stderr) !== "") {
-    throw new Error(`get alias did not print only the stored HTML.\n${legacy.stderr}`);
-  }
-
-  await expectItems("mine", [plainId, jsonId, sharedId, id]);
-  await expectItems("org", [sharedId]);
-  const transcript = `${session.join("\n")}\n`;
-  try {
-    await writeFile(join(e2eSessionDirectory(process.env), "s3-cli-session.txt"), transcript);
-  } catch {
-    // The transcript is a record, not a check. A write failure must not skip later checks.
-  }
-  try {
-    process.stdout.write(transcript);
-  } catch {
-    // Same as the file write: printing the record must not abort the run.
-  }
-  return id;
-}
-
-function cliStderr(stderr) {
-  return stderr
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.startsWith("$"))
-    .join("\n");
-}
-
-function cliStdout(stdout) {
-  return stdout
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.startsWith("[ELIFECYCLE]"))
-    .join("\n");
-}
-
-function record(session, command, result) {
-  const stderr = cliStderr(result.stderr);
-  const stdout = cliStdout(result.stdout);
-  const stdoutText = stdout.length === 0 || stdout.endsWith("\n") ? stdout : `${stdout}\n`;
-  const stderrText = stderr.length === 0 || stderr.endsWith("\n") ? stderr : `${stderr}\n`;
-  session.push(`$ ${command}\n${stdoutText}${stderrText}`.trimEnd());
 }
 
 async function checkPublicShare(plainId, fixture, configDir) {

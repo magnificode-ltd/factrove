@@ -15,7 +15,7 @@ export class GetCommand {
   async execute(): Promise<void> {
     const invocation = this.config.load();
     if (invocation.kind !== "get") {
-      throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+      throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
     }
 
     const content = await callApi(invocation.apiUrl, () =>

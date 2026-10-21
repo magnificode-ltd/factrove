@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { Artifact } from "@prisma/client";
+import { Prisma, type Artifact } from "@prisma/client";
 import type {
   ArtifactRecord,
   CreateArtifactInput,
@@ -42,6 +42,29 @@ export class ArtifactsRepository {
       },
     });
     return toArtifactRecord(row);
+  }
+
+  // Updates the current HTML metadata. Share columns and access stay as they are.
+  // A later version can record the previous bytes before this row changes.
+  async replaceCurrentContent(
+    id: string,
+    input: { sizeBytes: number; uploadedAt: Date },
+  ): Promise<ArtifactRecord | null> {
+    try {
+      const row = await this.prisma.artifact.update({
+        where: { id },
+        data: {
+          sizeBytes: input.sizeBytes,
+          uploadedAt: input.uploadedAt,
+        },
+      });
+      return toArtifactRecord(row);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {

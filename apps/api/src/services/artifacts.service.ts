@@ -46,6 +46,7 @@ import {
 } from "../sharing/share-link.js";
 import { hashSharePassword, sharePasswordFingerprint, verifySharePassword } from "../sharing/share-password.js";
 import { decryptShareToken, deriveShareTokenKey, encryptShareToken } from "../sharing/share-token-cipher.js";
+import { ArtifactRowMissing, ContentRestoreFailed, publishCurrentContent } from "./replace-content.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
@@ -120,6 +121,26 @@ export class ArtifactsService {
       await this.deleteOrphan(id, objectKey);
       throw error;
     }
+  }
+
+  async replaceContent(request: HeaderSource, id: string, file: unknown, body: unknown): Promise<ArtifactDto> {
+    const record = await this.requireOwner(request, id);
+    const fields = formFields(body);
+    assertNoIdentityFields(fields);
+    if (Object.hasOwn(fields, "accessType")) {
+      throw new ApiErrorException(400, "INVALID_REQUEST", "accessType cannot be changed when replacing content.");
+    }
+    const upload = readUpload(file);
+    if (!upload) {
+      throw new ApiErrorException(400, "INVALID_REQUEST", "Send exactly one file.");
+    }
+    const violation = rejectHtmlUpload(upload.filename, upload.bytes);
+    if (violation) {
+      throw new ApiErrorException(violation.status, violation.code, violation.message);
+    }
+
+    const replaced = await this.publishReplacement(record.id, upload.bytes);
+    return this.toDto(replaced, false);
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -544,6 +565,79 @@ export class ArtifactsService {
   private shareFlags(record: ArtifactRecord): { shared: boolean; passwordProtected: boolean } {
     const shared = this.readShareToken(record) !== null;
     return { shared, passwordProtected: shared && record.sharePasswordHash !== null };
+  }
+
+  private async publishReplacement(id: string, bytes: Uint8Array): Promise<ArtifactRecord> {
+    const objectKey = artifactObjectKey(id);
+    const previous = await this.readStoredBytes(objectKey);
+    const uploadedAt = new Date();
+    let saved: ArtifactRecord | undefined;
+    try {
+      await publishCurrentContent({
+        previous,
+        next: bytes,
+        write: (body) => this.blobs.put({ objectKey, body, contentType: "text/html" }),
+        record: async () => {
+          const row = await this.artifacts.replaceCurrentContent(id, {
+            sizeBytes: bytes.byteLength,
+            uploadedAt,
+          });
+          if (!row) {
+            throw new ArtifactRowMissing();
+          }
+          saved = row;
+        },
+      });
+    } catch (error) {
+      if (error instanceof ArtifactRowMissing) {
+        await this.deleteStoredQuietly(objectKey);
+        throw artifactNotFound();
+      }
+      if (error instanceof ContentRestoreFailed) {
+        this.logger.error("Could not restore artifact content after a failed replace");
+        this.logger.error(error.restoreError instanceof Error ? error.restoreError.message : "Unknown restore error");
+        throw error.cause;
+      }
+      throw error;
+    }
+    if (!saved) {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    return saved;
+  }
+
+  private async readStoredBytes(objectKey: string): Promise<Uint8Array | null> {
+    let stored: { body: AsyncIterable<Uint8Array> };
+    try {
+      stored = await this.blobs.get(objectKey);
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) {
+        return null;
+      }
+      throw error;
+    }
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for await (const chunk of stored.body) {
+      chunks.push(chunk);
+      length += chunk.byteLength;
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
+
+  private async deleteStoredQuietly(objectKey: string): Promise<void> {
+    try {
+      await this.blobs.delete(objectKey);
+    } catch (error) {
+      this.logger.error("Could not remove an object after a failed content replace");
+      this.logger.error(error instanceof Error ? error.message : "Unknown error");
+    }
   }
 
   private async deleteOrphan(id: string, objectKey: string): Promise<void> {

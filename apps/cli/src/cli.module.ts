@@ -3,7 +3,6 @@ import { createFactroveClient, type FactroveClient } from "@factrove/api-client"
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
-import { CpCommand } from "./cp.command.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { GetCommand } from "./get.command.js";
 import { ShareCommand } from "./share.command.js";
@@ -17,7 +16,6 @@ import { UploadFileService } from "./upload-file.service.js";
     UploadCommand,
     GetCommand,
     ShareCommand,
-    CpCommand,
     ConfigureCommand,
     {
       provide: FACTROVE_CLIENT,
@@ -46,6 +44,7 @@ function lazyClient(config: CliConfigService): FactroveClient {
   return {
     getContext: () => resolve().getContext(),
     uploadArtifact: (input) => resolve().uploadArtifact(input),
+    replaceArtifactContent: (id, input) => resolve().replaceArtifactContent(id, input),
     listArtifacts: (input) => resolve().listArtifacts(input),
     getArtifact: (id) => resolve().getArtifact(id),
     getArtifactContent: (id, input) => resolve().getArtifactContent(id, input),

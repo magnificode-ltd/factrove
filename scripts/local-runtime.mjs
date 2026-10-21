@@ -87,6 +87,7 @@ const optionsWithValues = new Set([
   "--access",
   "--api-url",
   "--api-key",
+  "--artifactId",
   "--endpoint-url",
   "--format",
   "--output",
@@ -146,7 +147,7 @@ export function launcherSkipsEnvFile(argv) {
     }
     positionals.push(arg);
   }
-  return positionals[0] === "help" || (positionals[0] === "s3" && positionals[1] === "help");
+  return positionals[0] === "help";
 }
 
 export function launcherWantsJson(argv) {

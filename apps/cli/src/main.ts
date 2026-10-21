@@ -4,7 +4,6 @@ import { CliConfigService } from "./cli-config.service.js";
 import { CliModule } from "./cli.module.js";
 import { formatFailure } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
-import { CpCommand } from "./cp.command.js";
 import { GetCommand } from "./get.command.js";
 import { cliWantsJson, helpText } from "./parse-args.js";
 import { ShareCommand } from "./share.command.js";
@@ -23,15 +22,13 @@ async function run(): Promise<void> {
     });
     const invocation = app.get(CliConfigService).load();
     if (invocation.kind === "help") {
-      process.stdout.write(helpText());
+      process.stdout.write(helpText(invocation.command));
     } else if (invocation.kind === "configure") {
       await app.get(ConfigureCommand).execute();
     } else if (invocation.kind === "get") {
       await app.get(GetCommand).execute();
     } else if (invocation.kind === "share") {
       await app.get(ShareCommand).execute();
-    } else if (invocation.kind === "cp") {
-      await app.get(CpCommand).execute();
     } else {
       await app.get(UploadCommand).execute();
     }

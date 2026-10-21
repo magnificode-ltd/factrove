@@ -18,7 +18,7 @@ export class ShareCommand {
   async execute(): Promise<void> {
     const invocation = this.config.load();
     if (invocation.kind !== "share") {
-      throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+      throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
     }
 
     const password = invocation.password === null ? undefined : await readPassword(invocation.password);

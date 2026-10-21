@@ -18,29 +18,36 @@ export class UploadCommand {
   async execute(): Promise<void> {
     const invocation = this.config.load();
     if (invocation.kind === "help") {
-      process.stdout.write(helpText());
+      process.stdout.write(helpText(invocation.command));
       return;
     }
     if (invocation.kind !== "upload") {
-      throw new CliError("INVALID_INPUT", "Missing command. Run: pnpm factrove --help");
+      throw new CliError("INVALID_INPUT", "Missing command. Run: factrove --help");
     }
 
     const upload = await this.files.read(invocation.path);
     const file = new Blob([arrayBufferOf(upload.bytes)], { type: "text/html" });
+    const artifactId = invocation.artifactId;
     // One request only. Retrying POST /artifacts would create another artifact.
+    // Replace publishes the current HTML. A later version can keep the previous bytes.
     const envelope = await callApi(invocation.apiUrl, () =>
-      this.client.uploadArtifact({
-        file,
-        filename: upload.filename,
-        accessType: invocation.access,
-      }),
+      artifactId === null
+        ? this.client.uploadArtifact({
+            file,
+            filename: upload.filename,
+            accessType: invocation.access,
+          })
+        : this.client.replaceArtifactContent(artifactId, {
+            file,
+            filename: upload.filename,
+          }),
     );
 
     if (invocation.json) {
       process.stdout.write(`${JSON.stringify(envelope)}\n`);
       return;
     }
-    process.stdout.write(`${envelope.artifact.viewerUrl}\n`);
+    process.stdout.write(`${envelope.artifact.id}\n`);
   }
 }
 

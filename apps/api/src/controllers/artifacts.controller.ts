@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   artifactDtoSchema,
@@ -29,6 +29,17 @@ type JsonRequest = HeaderRequest & {
   body?: unknown;
 };
 
+const htmlUpload = FileInterceptor("file", {
+  limits: {
+    // Busboy emits its limit when the buffered size reaches this ceiling.
+    fileSize: MAX_HTML_BYTES + 1,
+    files: 2,
+    fields: 8,
+    fieldSize: 1024,
+    parts: 12,
+  },
+});
+
 // private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
 // Missing access returns 404 so an id does not reveal that an artifact exists.
 @Controller("artifacts")
@@ -37,20 +48,22 @@ export class ArtifactsController {
 
   @Post()
   @HttpCode(201)
-  @UseInterceptors(
-    FileInterceptor("file", {
-      limits: {
-        // Busboy emits its limit when the buffered size reaches this ceiling.
-        fileSize: MAX_HTML_BYTES + 1,
-        files: 2,
-        fields: 8,
-        fieldSize: 1024,
-        parts: 12,
-      },
-    }),
-  )
+  @UseInterceptors(htmlUpload)
   async upload(@Req() request: HeaderRequest, @UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
     const artifact = await this.artifacts.upload(request, file, body);
+    return { artifact: artifactDtoSchema.parse(artifact) };
+  }
+
+  // Replaces the current HTML. The same share token keeps serving whatever bytes are stored.
+  @Put(":id/content")
+  @UseInterceptors(htmlUpload)
+  async replaceContent(
+    @Req() request: HeaderRequest,
+    @Param("id") id: string,
+    @UploadedFile() file: unknown,
+    @Body() body: unknown,
+  ): Promise<ArtifactEnvelope> {
+    const artifact = await this.artifacts.replaceContent(request, parseArtifactId(id), file, body);
     return { artifact: artifactDtoSchema.parse(artifact) };
   }
 

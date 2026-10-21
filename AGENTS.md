@@ -26,7 +26,7 @@ Documentation follows these roles: README.md provides long-term codebase documen
 
 ## CLI
 
-When in doubt, follow aws s3 conventions. Command names, flags, and follow-ups are described in [README.md](README.md), [docs/CLI_S3_COMPATIBILITY.md](docs/CLI_S3_COMPATIBILITY.md), and [prd/mvp_contract.md](prd/mvp_contract.md).
+Commands are `upload`, `get`, `share`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [README.md](README.md), [docs/CLI.md](docs/CLI.md), and [prd/mvp_contract.md](prd/mvp_contract.md).
 
 ## Tooling
 

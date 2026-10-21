@@ -38,9 +38,9 @@ pnpm factrove upload ./report.html
 pnpm factrove upload ./report.html --access org_shared --json
 ```
 
-The default access type is `private`. Plain output is the viewer URL. JSON output is the shared API response envelope containing the artifact metadata and URLs. Errors go to stderr, return a nonzero exit code, and explain local input, network, or API failures.
+The default access type is `private`. Plain output is the artifact id. JSON output is the shared API response envelope containing the artifact metadata and URLs. `upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. Errors go to stderr, return a nonzero exit code, and explain local input, network, or API failures.
 
-The CLI obtains its API origin from `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile, then the local default. It requires no login, key, or database/storage credentials. Each upload creates a new artifact; automatic retries, overwriting, and further CLI commands are later features. `cp` is the aws s3 name for upload and get. That mapping is [CLI_S3_COMPATIBILITY.md](CLI_S3_COMPATIBILITY.md).
+The CLI obtains its API origin from `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile, then the local default. It requires no login, key, or database/storage credentials. Creating an artifact assigns a new id. Replacing content keeps that id and overwrites the current bytes. Versions, automatic retries, and further CLI commands are later features. The command reference is [CLI.md](CLI.md).
 
 ## Local identity and access classification
 
@@ -120,7 +120,7 @@ There is no user-to-org foreign key or global uniqueness on member.userId encodi
 - The artifact row is inserted only after the object is stored. That insert sets `created_at`, `updated_at`, and `uploaded_at` together.
 - Lists and viewers return stored artifacts. A failed upload has no row.
 - Future metadata-only edits would change `updated_at` without changing `uploaded_at`.
-- Future replacement could retain the artifact ID and `created_at` while updating content metadata and `uploaded_at`. Replacement behavior and concurrency are outside this MVP.
+- Replacing content keeps the artifact id and `created_at`, updates `size_bytes`, `uploaded_at`, and `updated_at`, and writes the new bytes to the same object key. Older bytes are not retained. Version history remains later work.
 
 There are no separate Factrove content, revision, sharing, personal-token, upload-operation, or usage models in this build. Better Auth owns identity schema now; its live authentication flows and API-key plugin are deferred. Schema generation is a development step, followed by reviewed and committed Prisma SQL migrations, not a separate migration system or a running auth server. See [Better Auth's Prisma schema workflow](https://better-auth.com/docs/adapters/prisma#schema-generation--migration).
 
@@ -179,7 +179,7 @@ Migration/seed steps are explicit. Re-running setup and restarting applications 
 The MVP is complete when demonstrated against real local PostgreSQL and the configured S3 bucket:
 
 1. A fresh checkout starts through the documented setup, with committed migrations and an idempotent seed.
-2. An agent invokes the CLI on a local HTML file without credentials and receives a valid viewer URL.
+2. An agent invokes the CLI on a local HTML file and the plain output is the artifact id. JSON output includes a viewer URL for that id.
 3. Refreshing My artifacts shows that upload; clicking it renders the original HTML.
 4. A private upload is absent from Organization artifacts.
 5. An organization-shared upload by the local user appears in both lists.
@@ -193,7 +193,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](../prd/post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](../prd/post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, versioning, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, replacement/history, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](../prd/post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](../prd/post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](../prd/post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, content version history, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

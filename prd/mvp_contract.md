@@ -71,6 +71,7 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/v1/health | None | 200 `{ status: "ok" }` once initialized |
 | GET /api/v1/context | Session cookie or `Authorization: Bearer` | 200 `{ user: { id, name }, organization: { id, name } \| null }` |
 | POST /api/v1/artifacts | multipart/form-data: one `file`, optional `accessType` | 201 `{ artifact: ArtifactDto }` |
+| PUT /api/v1/artifacts/{id}/content | Owner session or API key. multipart/form-data: one `file`. `accessType` is rejected. | 200 `{ artifact: ArtifactDto }` with the same id |
 | GET /api/v1/artifacts?view=mine\|org | Default mine | 200 `{ items: ArtifactDto[] }` |
 | GET /api/v1/artifacts/{id} | Session cookie or `Authorization: Bearer` | 200 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts/{id}/content | Optional `format=html\|markdown`. Omitted means `html`. Optional `access` grant. | 200 HTML bytes, or Markdown converted from those bytes |
@@ -120,10 +121,16 @@ Input larger than the 10 MiB stored-HTML limit is `413 CONTENT_TOO_LARGE` with m
 - The backend assigns text/html; browser-supplied multipart MIME is not authoritative.
 - Maximum file size: 10 MiB (10,485,760 bytes). Enforce during request parsing, not after accepting an unbounded body. Bounded buffering is acceptable for this MVP.
 - accessType defaults to private; reject any other enum value. Reject org_shared when the caller has no current organization. The message is `Organization sharing requires membership in an organization.`
-- Each request creates a new artifact. No idempotency or automatic upload retries; rerunning a successful request creates another artifact.
+- `POST /api/v1/artifacts` creates a new artifact. No idempotency or automatic upload retries; rerunning a successful create creates another artifact.
 - Write the object, then insert the artifact row with `uploaded_at` set. Return the DTO only after both succeed.
 - The upload is atomic. If the object write fails, do not insert an artifact row. A failed upload leaves no artifact in the database.
 - This API does not watch/import files written to S3 outside Factrove.
+
+### Replace content
+
+`PUT /api/v1/artifacts/{id}/content` replaces the stored HTML of an existing artifact and returns the same id. The caller must be the owner, with the same session or API key as the other artifact writes. A missing id and a caller who is not the owner, including an organization member who can read an `org_shared` artifact, return `404 ARTIFACT_NOT_FOUND`. A request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded. The file uses the same extension, size, and UTF-8 checks as create. `accessType` and identity fields are rejected, so replace does not change who can see the artifact. The share token is left in place, and the existing public link serves the new bytes.
+
+The object key stays `{artifactId}.html`. The handler writes the new object, then updates `size_bytes` and `uploaded_at`. If that row update fails, it writes the previous bytes back. If the row is gone, it deletes the new object and returns 404. If the object write fails, the previous bytes and the row stay as they were. This does not store a previous version. A later change can keep those bytes before the write.
 
 ### Errors
 
@@ -143,7 +150,7 @@ Return the common JSON envelope without stack traces or secrets:
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact, an artifact the caller cannot read, or a public link that is not active |
 | 429 | RATE_LIMITED | Too many public views from one client address, or too many password attempts |
-| 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
+| 503 | STORAGE_UNAVAILABLE | S3 failure. A failed create stores no artifact row. A failed replace leaves the previous bytes. |
 | 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 503 | UNLOCK_UNAVAILABLE | Password verification is busy (gate saturated or share check slots full) |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
@@ -158,6 +165,7 @@ A network failure has no API envelope; clients must report it separately.
 createFactroveClient({ baseUrl, fetch?, apiKey?, cookie? })
 client.getContext()
 client.uploadArtifact({ file: Blob, filename, accessType? })
+client.replaceArtifactContent(id, { file: Blob, filename })
 client.listArtifacts({ view: "mine" | "org" })
 client.getArtifact(id)
 client.getArtifactContent(id, { format?: "html" | "markdown" })
@@ -182,6 +190,7 @@ File placement follows the [canonical README backend directory structure](../REA
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
 - `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, uploadedAt? })`
+- `replaceCurrentContent(id, { sizeBytes, uploadedAt })` updates those fields on the current row and leaves access, share, and `createdAt` unchanged. A missing row returns null.
 - `update(id, { organizationId?, accessType?, mimeType?, sizeBytes?, uploadedAt? })`
 - `delete(id)`
 - `findById(id)`
@@ -241,6 +250,7 @@ pnpm factrove configure
 pnpm factrove configure --profile dev --api-url http://localhost:3001
 pnpm factrove upload ./report.html
 pnpm factrove upload ./report.html --access org_shared --json
+pnpm factrove upload ./report.html --artifactId <artifact-id>
 pnpm factrove upload ./report.html --api-url http://localhost:3001 --profile dev --json
 pnpm factrove get <artifact-id>
 pnpm factrove get <artifact-id> --format markdown --json
@@ -251,30 +261,25 @@ pnpm factrove share <artifact-id> --password
 printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
 pnpm factrove share <artifact-id> --remove-password
 pnpm factrove share <artifact-id> --revoke
-pnpm factrove cp ./report.html factrove://mine/
-pnpm factrove cp factrove://mine/<artifact-id> -
-pnpm factrove cp factrove://org/<artifact-id>.html ./report.html
 ```
 
-- When in doubt, follow aws s3 conventions. `cp` is the high-level `aws s3 cp` name for `upload` and `get`. `upload` and `get` keep their original output. `share` keeps its password status lines. The short mapping is [docs/CLI_S3_COMPATIBILITY.md](../docs/CLI_S3_COMPATIBILITY.md). `get` and `cp` to `-` write artifact bytes to stdout.
+- The commands are `upload`, `get`, `share`, and `configure`. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/CLI.md](../docs/CLI.md). `get` writes artifact bytes to stdout.
 - API origin precedence: `--endpoint-url` or `--api-url` (the same value; different values are an error), then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url`, then that profile's `endpoint_url`, then a URL from `apps/cli/.env` when the command is `pnpm factrove`, then http://localhost:3001. `scripts/factrove.mjs` reads that file. `node apps/cli/dist/main.js` does not. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set `FACTROVE_ENDPOINT_URL`. A profile URL wins over the file.
 - API key precedence matches the AWS CLI as implemented for Factrove profiles. An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. Otherwise the key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. The profile is `--profile`, then `FACTROVE_PROFILE`, then `default`. `pnpm factrove` can fill `FACTROVE_PROFILE` from `apps/cli/.env` when the variable is unset. The file does not supply an API key.
 - `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. When the path is a symlink, the rename updates the target and leaves the symlink in place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
-- Access defaults to private. `--access` is only valid for `upload`.
-- `--format html|markdown` is valid for `get`, and for `cp` when the source is a factrove:// URI. It defaults to `html`.
-- `--revoke`, `--password`, `--password-stdin`, and `--remove-password` are only valid for `share`, and only one of them can be used at a time. `--password` takes no value: it prompts twice on the terminal without echoing, and fails when stdin is not a terminal. The confirmation is NFC-normalised before it is compared. `--password-stdin` reads stdin and removes one trailing newline. A password given as an argument is rejected so it stays out of shell history. Passwords are 10 to 128 NFC characters, at least four distinct characters, not all whitespace, and must not be a common password from the bundled top-10k list. These flags stay on `share`. `aws s3 presign` expires and has no password, so the CLI does not rename `share` to `presign` or accept the password flags on `cp`.
-- `--access` is not valid for `cp`. `factrove://mine/` uploads are private. `factrove://org/` uploads are `org_shared`.
-- Plain upload success prints only viewerUrl plus newline to stdout. The viewer URL uses `PUBLIC_BASE_URL`. `--quiet` does not hide that URL.
+- Access defaults to private. `--access` is only valid for `upload` when creating a new artifact. `--artifactId` replaces that artifact's content and is only valid for `upload`. Passing `--access` with `--artifactId` is an error, and the API rejects `accessType` on replace.
+- `--format html|markdown` is valid for `get`. It defaults to `html`.
+- `--revoke`, `--password`, `--password-stdin`, and `--remove-password` are only valid for `share`, and only one of them can be used at a time. `--password` takes no value: it prompts twice on the terminal without echoing, and fails when stdin is not a terminal. The confirmation is NFC-normalised before it is compared. `--password-stdin` reads stdin and removes one trailing newline. A password given as an argument is rejected so it stays out of shell history. Passwords are 10 to 128 NFC characters, at least four distinct characters, not all whitespace, and must not be a common password from the bundled top-10k list. These flags stay on `share`. A share link lasts until revoke and can take a password. The CLI does not add a `presign` command.
+- Plain upload success prints only the artifact id plus a newline. `--json` prints the `{ artifact }` envelope, which includes `viewerUrl` from `PUBLIC_BASE_URL`. `upload <file> --artifactId <id>` prints that same id. `--quiet` does not hide the id.
 - JSON upload success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
 - Plain get success prints the content bytes and does not add a newline of its own.
 - JSON get success prints one line: `{ format, mediaType, content }`, with `mediaType` of `text/html` or `text/markdown`.
 - Plain share success prints the public URL, whether the link is password protected, and a recovery note when it is. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. `--remove-password` prints `Removed the password for {id}.` JSON share success prints `{ share: { shared, shareUrl, passwordProtected } }` on one line. `shareUrl` is null after revoke. No command prints a password. `--quiet` does not hide share output.
-- `cp` text success prints `upload: <path> to factrove://<scope>/<id>` or `download: factrove://<scope>/<id> to <path>`. Download to `-` writes the content to stdout and the download line to stderr. `--quiet` hides those progress lines and does not hide `upload`, `get`, or `share` output.
-- `--output json|text` selects the format. `--json` is `--output json`. JSON is one line. `cp --output json` prints the same payload as `upload --json` or `get --json`. `--output json` on `share` is the same JSON as `share --json`.
+- `--output json|text` selects the format. `--json` is `--output json`. JSON is one line. `--output json` prints the same payload as `--json`. `--json` together with `--output text` is an error in either order.
 - Errors go to stderr and the process exits 1. Success exits 0. In --json or `--output json` mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR. API errors, including a `Retry-After` value on a throttled unlock, pass through the client.
 - No progress/framework startup logs on stdout. Close the Nest application context so the process exits.
-- `configure` is the credentials command. There is no login command, no background process, and no separate CLI server. `upload` and `get` remain as aliases. `cp` is the s3-shaped command. `factrove s3` accepts `cp` only, and `factrove s3 cp` is the same call. `cp` does not read stdin. A key cannot end with `/`. A directory download uses `<id>.html`, or `<id>.md` with `--format markdown`. `--json` together with `--output text` is an error in either order. `share` keeps its password flags.
-- Do not add automatic retries for uploads. `get` and `cp` call the content endpoint once per artifact.
+- `configure` is the credentials command. There is no login command, no background process, and no separate CLI server. `--profile` is accepted on every command and is listed on `configure --help`. `--quiet` is accepted and is omitted from help. `share` keeps its password flags.
+- Do not add automatic retries for uploads. `get` calls the content endpoint once per artifact. `upload --artifactId` calls the replace endpoint once.
 
 ## Configuration and planned root commands
 
@@ -288,10 +293,9 @@ Task 01 establishes script names; 07 makes them runnable and verifies documentat
 | pnpm db:claim-local-artifacts -- --email … | Attach existing `local-user` artifacts to a signed-up account |
 | pnpm dev | Run FE and BE together |
 | pnpm factrove configure | Save an API key and API URL for a profile |
-| pnpm factrove upload ... | Run Nest CLI upload |
+| pnpm factrove upload ... | Create an artifact, or replace its content with --artifactId |
 | pnpm factrove get ... | Print artifact content as HTML or Markdown |
 | pnpm factrove share ... | Create, print, or revoke a public link |
-| pnpm factrove cp ... | Upload or download HTML through a factrove:// URI |
 | pnpm build / pnpm typecheck / pnpm test | Workspace verification |
 | pnpm infra:down | Stop services without removing data volumes |
 | pnpm e2e | Run the local upload, viewer, restart, and S3 integration checks against Compose project factrove-e2e |
