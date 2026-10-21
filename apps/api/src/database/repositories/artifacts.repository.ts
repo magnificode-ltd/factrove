@@ -21,6 +21,7 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     uploadedAt: row.uploadedAt,
     shareToken: row.shareToken,
     shareTokenHash: row.shareTokenHash,
+    sharePasswordHash: row.sharePasswordHash,
   };
 }
 
@@ -82,9 +83,33 @@ export class ArtifactsRepository {
   async clearShare(id: string): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.update({
       where: { id },
-      data: { shareToken: null, shareTokenHash: null },
+      data: { shareToken: null, shareTokenHash: null, sharePasswordHash: null },
     });
     return toArtifactRecord(row);
+  }
+
+  // Applies only while the share with this hash is still active, so a revoke or a new
+  // token in between cannot receive the password.
+  async setSharePassword(id: string, shareTokenHash: string, sharePasswordHash: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id, shareTokenHash },
+      data: { sharePasswordHash },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
+  }
+
+  async clearSharePassword(id: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id, shareTokenHash },
+      data: { sharePasswordHash: null },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
   }
 
   // Public lookup uses the unique hash alone, then compares the id in memory.
@@ -104,6 +129,7 @@ export class ArtifactsRepository {
         uploadedAt: true,
         shareToken: true,
         shareTokenHash: true,
+        sharePasswordHash: true,
       },
     });
     if (!row || row.id !== id) {

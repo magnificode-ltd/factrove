@@ -8,6 +8,11 @@ export function isPublicApiPath(path: string): boolean {
   return normalized === "/api/v1/public" || normalized.startsWith("/api/v1/public/");
 }
 
+export function isPublicUnlockPath(path: string): boolean {
+  const normalized = path.split("?")[0]?.toLowerCase() ?? "";
+  return isPublicApiPath(normalized) && /^\/api\/v1\/public\/artifacts\/[^/]+\/[^/]+\/unlock\/?$/.test(normalized);
+}
+
 export function requestPath(request: { originalUrl?: string; url?: string }): string {
   const raw = request.originalUrl ?? request.url ?? "";
   return raw.split("?")[0] ?? raw;

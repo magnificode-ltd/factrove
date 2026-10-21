@@ -129,21 +129,24 @@ enum AccessType {
 }
 
 model Artifact {
-  id             String        @id @db.Uuid
-  creatorUserId  String        @map("creator_user_id")
-  creator        User          @relation(fields: [creatorUserId], references: [id], onDelete: Restrict)
-  organizationId String?       @map("organization_id")
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  accessType     AccessType    @default(private) @map("access_type")
-  mimeType       String        @map("mime_type")
-  sizeBytes      Int           @map("size_bytes")
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  uploadedAt     DateTime?     @map("uploaded_at") @db.Timestamptz(3)
+  id                String        @id @db.Uuid
+  creatorUserId     String        @map("creator_user_id")
+  creator           User          @relation(fields: [creatorUserId], references: [id], onDelete: Restrict)
+  organizationId    String?       @map("organization_id")
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  accessType        AccessType    @default(private) @map("access_type")
+  mimeType          String        @map("mime_type")
+  sizeBytes         Int           @map("size_bytes")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  uploadedAt        DateTime?     @map("uploaded_at") @db.Timestamptz(3)
   // AES-256-GCM ciphertext for a public link. The hash is the lookup key.
   // A check requires both columns to be null or both to be set. Never log the token.
-  shareToken     String?       @map("share_token")
-  shareTokenHash String?       @unique @map("share_token_hash")
+  shareToken        String?       @map("share_token")
+  shareTokenHash    String?       @unique @map("share_token_hash")
+  // Optional Argon2id PHC string for the active share. Never the plaintext password.
+  // A check requires a share token hash whenever this is set.
+  sharePasswordHash String?       @map("share_password_hash")
 
   @@index([creatorUserId, createdAt(sort: Desc), id(sort: Desc)], map: "artifact_creator_created_id_idx")
   @@index([organizationId, accessType, createdAt(sort: Desc), id(sort: Desc)], map: "artifact_org_access_created_id_idx")

@@ -26,3 +26,8 @@ export function artifactShareUrl(publicBaseUrl: string, artifactId: string, toke
 export function publicContentUrl(apiPublicOrigin: string, artifactId: string, token: string): string {
   return `${apiPublicOrigin}/api/v1/public/artifacts/${artifactId}/${token}/content`;
 }
+
+// A password-protected share adds a short content ticket. The unlock grant is never put in a URL.
+export function ticketedContentUrl(apiPublicOrigin: string, artifactId: string, token: string, ticket: string): string {
+  return `${publicContentUrl(apiPublicOrigin, artifactId, token)}?ticket=${encodeURIComponent(ticket)}`;
+}

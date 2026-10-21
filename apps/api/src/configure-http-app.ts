@@ -6,7 +6,7 @@ import { assignClientIp } from "./auth/client-ip.js";
 import { rejectCookieAuthenticatedWrite } from "./auth/cookie-origin.js";
 import { ApiExceptionFilter } from "./controllers/api-exception.filter.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
-import { assignClientIpForPublicPath, isPublicApiPath, requestPath } from "./sharing/public-api-path.js";
+import { assignClientIpForPublicPath, isPublicApiPath, isPublicUnlockPath, requestPath } from "./sharing/public-api-path.js";
 import { browserOrigins } from "./sharing/public-origin.js";
 
 type HeaderResponse = {
@@ -15,8 +15,10 @@ type HeaderResponse = {
 
 const CREDENTIALED_METHODS = "GET,HEAD,POST,DELETE,OPTIONS";
 const PUBLIC_METHODS = "GET,HEAD,OPTIONS";
+// Only the password unlock route under /api/v1/public accepts a write, still without credentials.
+const PUBLIC_UNLOCK_METHODS = "POST,OPTIONS";
 const CREDENTIALED_HEADERS = "Content-Type,Accept,Authorization";
-const PUBLIC_HEADERS = "Content-Type,Accept";
+const PUBLIC_HEADERS = "Content-Type,Accept,X-Factrove-Share-Grant";
 
 export function configureHttpApp(app: INestApplication): void {
   const config = app.get<ApiConfig>(API_CONFIG);
@@ -77,12 +79,19 @@ function applyCors(request: IncomingMessage, response: ServerResponse, origins: 
     return false;
   }
   if (allowed) {
-    response.setHeader("Access-Control-Allow-Methods", publicApi ? PUBLIC_METHODS : CREDENTIALED_METHODS);
+    response.setHeader("Access-Control-Allow-Methods", allowedMethods(publicApi, requestPath(request)));
     response.setHeader("Access-Control-Allow-Headers", publicApi ? PUBLIC_HEADERS : CREDENTIALED_HEADERS);
   }
   response.statusCode = 204;
   response.end();
   return true;
+}
+
+function allowedMethods(publicApi: boolean, path: string): string {
+  if (!publicApi) {
+    return CREDENTIALED_METHODS;
+  }
+  return isPublicUnlockPath(path) ? PUBLIC_UNLOCK_METHODS : PUBLIC_METHODS;
 }
 
 function headerValue(headers: IncomingHttpHeaders, name: string): string | undefined {

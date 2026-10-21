@@ -128,6 +128,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261018210000_add_apikey",
       "20261020120000_add_artifact_share",
       "20261020143000_pair_artifact_share_columns",
+      "20261021090000_add_share_password",
     ]);
   });
 
@@ -363,10 +364,28 @@ describe("PostgreSQL artifact persistence", () => {
     expect(await repository.findShared(created.id, "b".repeat(64))).toBeNull();
     expect(await repository.findShared(randomUUID(), hash)).toBeNull();
 
+    expect(shared?.sharePasswordHash).toBeNull();
+    const protectedShare = await repository.setSharePassword(created.id, hash, "$argon2id$stored");
+    expect(protectedShare?.sharePasswordHash).toBe("$argon2id$stored");
+    expect((await repository.findShared(created.id, hash))?.sharePasswordHash).toBe("$argon2id$stored");
+    expect(await repository.setSharePassword(created.id, "b".repeat(64), "$argon2id$other")).toBeNull();
+    expect((await repository.findById(created.id))?.sharePasswordHash).toBe("$argon2id$stored");
+    const unprotected = await repository.clearSharePassword(created.id, hash);
+    expect(unprotected?.sharePasswordHash).toBeNull();
+    await repository.setSharePassword(created.id, hash, "$argon2id$again");
+
     const cleared = await repository.clearShare(created.id);
     expect(cleared.shareToken).toBeNull();
     expect(cleared.shareTokenHash).toBeNull();
+    expect(cleared.sharePasswordHash).toBeNull();
     expect(await repository.findShared(created.id, hash)).toBeNull();
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE "artifact" SET "share_password_hash" = $1 WHERE "id" = $2::uuid`,
+        "$argon2id$orphan",
+        created.id,
+      ),
+    ).rejects.toThrow(/artifact_share_password_requires_share_check|23514/);
 
     const paired = await repository.create(artifactInput());
     await expect(

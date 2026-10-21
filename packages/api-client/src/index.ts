@@ -5,6 +5,8 @@ import {
   contentMediaTypes,
   contextEnvelopeSchema,
   publicArtifactEnvelopeSchema,
+  publicUnlockEnvelopeSchema,
+  SHARE_GRANT_HEADER,
   shareEnvelopeSchema,
   type AccessType,
   type ArtifactEnvelope,
@@ -13,6 +15,7 @@ import {
   type ContentMediaType,
   type ContextEnvelope,
   type PublicArtifactEnvelope,
+  type PublicUnlockEnvelope,
   type ShareEnvelope
 } from "@factrove/contracts";
 
@@ -59,9 +62,13 @@ export interface FactroveClient {
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
   getArtifactShare(id: string): Promise<ShareEnvelope>;
-  createArtifactShare(id: string): Promise<ShareEnvelope>;
+  /** password sets or replaces the link password. Omit it to keep the current one. */
+  createArtifactShare(id: string, input?: { password?: string }): Promise<ShareEnvelope>;
   revokeArtifactShare(id: string): Promise<ShareEnvelope>;
-  getPublicArtifact(id: string, token: string): Promise<PublicArtifactEnvelope>;
+  removeArtifactSharePassword(id: string): Promise<ShareEnvelope>;
+  /** grant is sent in the x-factrove-share-grant header, never in the URL. */
+  getPublicArtifact(id: string, token: string, input?: { grant?: string }): Promise<PublicArtifactEnvelope>;
+  unlockPublicArtifact(id: string, token: string, password: string): Promise<PublicUnlockEnvelope>;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -191,15 +198,37 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     getArtifact: (id) => request(`/artifacts/${encodeURIComponent(id)}`, { method: "GET" }, artifactEnvelopeSchema),
     getArtifactShare: (id) =>
       request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "GET" }, shareEnvelopeSchema),
-    createArtifactShare: (id) =>
-      request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "POST" }, shareEnvelopeSchema),
+    createArtifactShare: (id, input) =>
+      request(
+        `/artifacts/${encodeURIComponent(id)}/share`,
+        input?.password === undefined
+          ? { method: "POST" }
+          : {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ password: input.password })
+            },
+        shareEnvelopeSchema
+      ),
     revokeArtifactShare: (id) =>
       request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "DELETE" }, shareEnvelopeSchema),
-    getPublicArtifact: (id, token) =>
+    removeArtifactSharePassword: (id) =>
+      request(`/artifacts/${encodeURIComponent(id)}/share/password`, { method: "DELETE" }, shareEnvelopeSchema),
+    getPublicArtifact: (id, token, input) =>
       request(
         `/public/artifacts/${encodeURIComponent(id)}/${encodeURIComponent(token)}`,
-        { method: "GET" },
+        input?.grant ? { method: "GET", headers: { [SHARE_GRANT_HEADER]: input.grant } } : { method: "GET" },
         publicArtifactEnvelopeSchema
+      ),
+    unlockPublicArtifact: (id, token, password) =>
+      request(
+        `/public/artifacts/${encodeURIComponent(id)}/${encodeURIComponent(token)}/unlock`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password })
+        },
+        publicUnlockEnvelopeSchema
       ),
     getArtifactContent: (id, input) => {
       const format = input?.format ?? "html";

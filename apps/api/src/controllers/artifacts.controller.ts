@@ -14,6 +14,7 @@ import {
 import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
+import { jsonBody } from "./json-body.js";
 import { streamHtml } from "./stream-html.js";
 
 type HeaderResponse = {
@@ -22,6 +23,10 @@ type HeaderResponse = {
 
 type HeaderRequest = {
   headers: IncomingHttpHeaders;
+};
+
+type JsonRequest = HeaderRequest & {
+  body?: unknown;
 };
 
 // private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
@@ -83,10 +88,17 @@ export class ArtifactsController {
     return shareEnvelopeSchema.parse({ share });
   }
 
+  // An optional JSON body { password } sets or replaces the link password.
   @Post(":id/share")
   @HttpCode(200)
-  async createShare(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ShareEnvelope> {
-    const share = await this.artifacts.createShare(request, parseArtifactId(id));
+  async createShare(@Req() request: JsonRequest, @Param("id") id: string): Promise<ShareEnvelope> {
+    const share = await this.artifacts.createShare(request, parseArtifactId(id), () => jsonBody(request));
+    return shareEnvelopeSchema.parse({ share });
+  }
+
+  @Delete(":id/share/password")
+  async removeSharePassword(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ShareEnvelope> {
+    const share = await this.artifacts.removeSharePassword(request, parseArtifactId(id));
     return shareEnvelopeSchema.parse({ share });
   }
 
