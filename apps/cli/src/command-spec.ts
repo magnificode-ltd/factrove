@@ -62,7 +62,7 @@ export type CliCommandSpec = {
 
 const defaultExitCodes: CliExitCode[] = [
   { code: 0, description: "Success." },
-  { code: 1, description: "The command failed. Errors go to stderr. With --json, the body is {\"error\":{\"code\":\"...\",\"message\":\"...\"}}." }
+  { code: 1, description: "The command failed. Errors go to stderr. With --json, stderr is the common JSON error envelope." }
 ];
 
 export const cliFlags: readonly CliFlagSpec[] = [
@@ -335,7 +335,7 @@ export const cliSpec = {
     "Relative upload paths resolve from the directory where you ran pnpm.",
     "JSON success prints one line.",
     "Errors go to stderr and the process exits nonzero.",
-    "With --json, errors use {\"error\":{\"code\":\"...\",\"message\":\"...\"}}.",
+    "With --json, errors use the common JSON error envelope.",
     "Local error codes are FILE_NOT_FOUND, INVALID_INPUT, and NETWORK_ERROR.",
     "API error codes are passed through."
   ]

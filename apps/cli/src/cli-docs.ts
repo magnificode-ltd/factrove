@@ -52,7 +52,7 @@ function renderCommandPage(command: CliCommandSpec): string {
     "",
     GENERATED_BANNER,
     "",
-    command.description,
+    escapeMdx(command.description),
     "",
     "## Usage",
     "",
@@ -69,7 +69,7 @@ function renderCommandPage(command: CliCommandSpec): string {
     for (const positional of command.positionals) {
       const required = positional.required ? "required" : "optional";
       lines.push(`<ParamField path="${positional.name}" body required={${positional.required}}>`);
-      lines.push(`${positional.description} (${required}.)`);
+      lines.push(`${escapeMdx(positional.description)} (${required}.)`);
       lines.push("</ParamField>", "");
     }
   }
@@ -87,7 +87,7 @@ function renderCommandPage(command: CliCommandSpec): string {
     lines.push("## Examples", "");
     for (const example of command.examples) {
       if (example.description) {
-        lines.push(example.description, "");
+        lines.push(escapeMdx(example.description), "");
       }
       lines.push("```bash", example.command, "```", "");
     }
@@ -95,14 +95,14 @@ function renderCommandPage(command: CliCommandSpec): string {
 
   lines.push("## Exit codes", "");
   for (const exit of command.exitCodes) {
-    lines.push(`- \`${exit.code}\`: ${exit.description}`);
+    lines.push(`- \`${exit.code}\`: ${escapeMdx(exit.description)}`);
   }
   lines.push("");
 
   if (command.notes.length > 0) {
     lines.push("## Notes", "");
     for (const note of command.notes) {
-      lines.push(`- ${note}`);
+      lines.push(`- ${escapeMdx(note)}`);
     }
     lines.push("");
   }
@@ -120,7 +120,7 @@ function renderFlag(flag: CliFlagSpec): string {
   const type = flag.kind === "boolean" ? "boolean" : "string";
   const lines = [
     `<ParamField path="${flagLabel(flag)}" query type="${type}">`,
-    flag.description,
+    escapeMdx(flag.description),
   ];
   if (aliases.length > 0) {
     lines.push(`Aliases: ${aliases.map((name) => `\`${name}\``).join(", ")}.`);
@@ -134,4 +134,8 @@ function renderFlag(flag: CliFlagSpec): string {
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function escapeMdx(value: string): string {
+  return value.replaceAll("{", "\\{").replaceAll("}", "\\}");
 }

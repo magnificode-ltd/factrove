@@ -55,10 +55,10 @@ pnpm factrove upload ./report.html --profile dev --api-url http://localhost:3001
 ## Exit codes
 
 - `0`: Success.
-- `1`: The command failed. Errors go to stderr. With --json, the body is {"error":{"code":"...","message":"..."}}.
+- `1`: The command failed. Errors go to stderr. With --json, stderr is the common JSON error envelope.
 
 ## Notes
 
 - Plain success prints only the viewer URL and a newline.
-- JSON success prints the { artifact } envelope on one line.
+- JSON success prints the \{ artifact \} envelope on one line.
 
