@@ -57,6 +57,7 @@ type ArtifactDto = {
   viewerUrl: string;  // PUBLIC_BASE_URL + /artifacts/{id}. PUBLIC_BASE_URL defaults to WEB_ORIGIN.
   contentUrl: string; // API_PUBLIC_ORIGIN + /api/v1/artifacts/{id}/content. Session detail appends ?access=<grant>
   shared: boolean;    // True when the owner has an active public link. The token is not included.
+  passwordProtected: boolean; // True when that link also needs a password. The hash is never included.
 };
 type ApiError = {
   error: { code: string; message: string };
@@ -73,11 +74,13 @@ Do not expose database rows, object keys, bucket details, or filesystem paths in
 | GET /api/v1/artifacts?view=mine\|org | Default mine | 200 `{ items: ArtifactDto[] }` |
 | GET /api/v1/artifacts/{id} | Session cookie or `Authorization: Bearer` | 200 `{ artifact: ArtifactDto }` |
 | GET /api/v1/artifacts/{id}/content | Optional `format=html\|markdown`. Omitted means `html`. Optional `access` grant. | 200 HTML bytes, or Markdown converted from those bytes |
-| GET /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared, shareUrl } }` |
-| POST /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared: true, shareUrl } }`. Repeating it returns the same link. |
-| DELETE /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared: false, shareUrl: null } }` |
-| GET /api/v1/public/artifacts/{id}/{token} | No credentials | 200 `{ artifact: { id, filename, mimeType, sizeBytes, uploadedAt, contentUrl } }` |
-| GET /api/v1/public/artifacts/{id}/{token}/content | No credentials | 200 HTML bytes |
+| GET /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared, shareUrl, passwordProtected } }` |
+| POST /api/v1/artifacts/{id}/share | Owner session or API key. No body, or JSON `{ password? }` | 200 `{ share: { shared: true, shareUrl, passwordProtected } }`. Repeating it returns the same link. A password sets or replaces the link password. No password keeps the current one. |
+| DELETE /api/v1/artifacts/{id}/share | Owner session or API key | 200 `{ share: { shared: false, shareUrl: null, passwordProtected: false } }`. Also clears the password. |
+| DELETE /api/v1/artifacts/{id}/share/password | Owner session or API key | 200 `{ share: { shared: true, shareUrl, passwordProtected: false } }`. The link stays the same. |
+| GET /api/v1/public/artifacts/{id}/{token} | No credentials. Optional `X-Factrove-Share-Grant` | 200 `{ artifact: { id, filename, mimeType, sizeBytes, uploadedAt, contentUrl, passwordProtected } }`, or 401 `PASSWORD_REQUIRED` for a protected link without a valid grant |
+| POST /api/v1/public/artifacts/{id}/{token}/unlock | No credentials. JSON `{ password }` | 200 `{ grant: { token, expiresAt } }`, or `{ grant: null }` when the link has no password |
+| GET /api/v1/public/artifacts/{id}/{token}/content | No credentials. `ticket` query on a protected link | 200 HTML bytes |
 | POST /api/auth/api-key/create | Browser session, JSON `{ name }` | 200 API key, including `key` once |
 | GET /api/auth/api-key/list | Browser session | 200 `{ apiKeys, total }` without `key` |
 | POST /api/auth/api-key/delete | Browser session, JSON `{ keyId }` | 200 `{ success: true }` |
@@ -92,11 +95,13 @@ Artifacts stay private until the owner shares them. `POST /api/v1/artifacts/{id}
 
 `GET /api/v1/public/artifacts/{id}/{token}` and its `/content` route need no session. The response is the filename, size, upload time, and a content URL. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Markdown is not offered on the public route. An invalid id, an invalid token, an unshared artifact, a revoked token, a missing upload time, and an unmatched path under `/api/v1/public` all return the same `404 ARTIFACT_NOT_FOUND` body. Those responses do not say whether the artifact exists. Public responses send `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. Lookup uses the hash alone, compares the id, then decrypts the stored token with the current key and requires that plaintext hash to match. A token the current key cannot read returns the same 404. Public views are rate limited to 60 requests per 60 seconds, keyed by `x-factrove-client-ip` after the API replaces any caller-supplied value. The limit is in memory and per process. Counts live in the current window and the previous window. The window clock is monotonic, and those maps rotate when the window changes, so a request does not scan every visitor. When the current map reaches 10,000 keys, the oldest visitor is dropped and the new visitor is counted. Oldest means the first key inserted in that window. A caller with more than 10,000 addresses can cycle keys and exceed the per-address limit. The cap bounds memory. IPv6 clients share a bucket by their /64. A missing address shares one bucket. A page view counts as one request: the detail request is charged, and up to two content requests in the following 30 seconds are included in that view. A content request with no remaining grant is charged on its own. The limit counts lookups that will 404. The status is `429 RATE_LIMITED` with message `Too many requests. Try again later.` The share page loads this detail from the browser with credentials omitted, so each visitor has a separate bucket. Public path checks are case-insensitive, so a mixed-case `/api/v1/public` path keeps this policy. A `/share` URL whose id or token has the wrong shape is HTTP 404, because the library loading UI does not wrap `/share`. Application logs record a Prisma error code when a share cannot be stored. They do not record the token.
 
+A link can also carry a password. The owner sets it with `POST /share` and a JSON `{ password }` body (8 to 128 characters), and removes it with `DELETE /share/password`. Revoking the share clears the password, so sharing again starts without one. The password is hashed with Argon2id (19 MiB memory, 2 passes, parallelism 1, a 16-byte random salt, and a 32-byte tag) and stored as a PHC string in `artifact.share_password_hash`. A check requires a share hash whenever a password hash is set. Verification recomputes the hash and compares it with `timingSafeEqual`. Detail on a protected link without a valid grant is `401 PASSWORD_REQUIRED`, which the page shows as a password form. An inactive link is still the uniform 404, so the password form never confirms that a dead link existed. `POST /unlock` charges a per-client attempt budget before the lookup (10 per 10 minutes, IPv6 keyed by /64) and a per-share budget after the token matches (30 per 10 minutes). Those budgets are separate from the view limit, every attempt is charged, and a refusal is `429 RATE_LIMITED`. A wrong password is `401 PASSWORD_INCORRECT`. A correct one returns a grant: `g1.{expiry}.{HMAC-SHA256}`, valid for 15 minutes. The HMAC covers the artifact id, the share token hash, a SHA-256 fingerprint of the stored password hash, and the expiry. Its key is HKDF over the same input as the share-token key. A password change or removal changes the fingerprint, a revoke or re-share changes the token hash, and rotating the key changes the key, so each of these invalidates existing grants without a grant table. The browser keeps the grant in `sessionStorage` on the web origin and sends it in `X-Factrove-Share-Grant` on the credentials-omitted detail request. It is never a cookie and never part of a URL. Because a sandboxed iframe cannot send headers, a granted detail returns a `contentUrl` with a `ticket` query: `t1.{expiry}.{nonce}.{HMAC}`, scoped like the grant, valid for 60 seconds, and honored at most 3 times per API process (the frame preflight, a development double render, and the frame load). Content on a protected link without a valid ticket is `401 PASSWORD_REQUIRED`. The artifact document can read its own ticket, but not the grant.
+
 `private` is readable only by the creator. `org_shared` is readable by the creator and by members of `artifact.organizationId`. `org_shared` upload without a current organization is `400 ORGANIZATION_REQUIRED`.
 
 `contentUrl` on list, upload, and API-key responses is the HTML content URL with no query. A session-authenticated `GET /api/v1/artifacts/{id}` appends `?access=<grant>` so the sandboxed iframe can load HTML without cookies or `allow-same-origin`. The grant is an HMAC-SHA256 of `artifactId.exp` under the content-grant subkey. It is not an API key. It lasts at most five minutes, and an expiry more than five minutes plus 60 seconds ahead of the server clock is rejected. It is honored only for HTML (`format` omitted or `format=html`), only for that artifact id, and only when the request has neither `Authorization` nor `x-api-key`. Markdown ignores it. An expired, missing, or ignored grant falls through to normal authentication and is `404 ARTIFACT_NOT_FOUND` when the caller cannot read the artifact. Clients that want Markdown add `format=markdown` and authenticate with a session or `Authorization: Bearer`. An invalid `format` is `400 INVALID_REQUEST`. `Accept` is not used to choose the format: a request with no `format` returns the original HTML bytes and the existing HTML headers, including when the caller sends `Accept: text/markdown`.
 
-A write that authenticates with a session cookie (`POST`, `PUT`, `PATCH`, `DELETE`, and any other method that is not `GET`, `HEAD`, or `OPTIONS`) requires `Origin` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. When `Origin` is absent, the `Referer` origin is used. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` A request that sends `Authorization` is not cookie-authenticated and skips this check. `x-api-key` does not authenticate and does not skip it. `/api/v1/public` uses a separate CORS policy: the same explicit origins, `credentials` omitted, and methods limited to GET, HEAD, and OPTIONS. Other routes still reflect those origins with credentials.
+A write that authenticates with a session cookie (`POST`, `PUT`, `PATCH`, `DELETE`, and any other method that is not `GET`, `HEAD`, or `OPTIONS`) requires `Origin` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. When `Origin` is absent, the `Referer` origin is used. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` A request that sends `Authorization` is not cookie-authenticated and skips this check. `x-api-key` does not authenticate and does not skip it. `/api/v1/public` uses a separate CORS policy: the same explicit origins, `credentials` omitted, and methods limited to GET, HEAD, and OPTIONS. The unlock route allows POST and OPTIONS instead. The allowed request headers include `X-Factrove-Share-Grant`. Other routes still reflect those origins with credentials.
 
 API key creation returns the secret once in `key`. List responses include the name and starting characters, not the secret. Deleting a key makes it fail closed. Managing keys requires a browser session. A request that also sends `Authorization` receives `401` with message `API key management requires a browser session.` and does not use the session cookie. Another user's key id is `404`. Key-management errors use Better Auth's response body.
 
@@ -129,13 +134,15 @@ Return the common JSON envelope without stack traces or secrets:
 | 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/format/ID, invalid UTF-8 |
 | 400 | ORGANIZATION_REQUIRED | org_shared without a current organization membership |
 | 401 | UNAUTHENTICATED | Missing session or API key on a product route |
+| 401 | PASSWORD_REQUIRED | Protected public detail or content without a valid grant or ticket |
+| 401 | PASSWORD_INCORRECT | Wrong password on the public unlock route |
 | 403 | FORBIDDEN | Cookie-authenticated write whose origin is not WEB_ORIGIN |
 | 413 | FILE_TOO_LARGE | Above 10 MiB |
 | 413 | CONTENT_TOO_LARGE | Stored HTML exceeds the Markdown conversion limit |
 | 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact, an artifact the caller cannot read, or a public link that is not active |
-| 429 | RATE_LIMITED | Too many public views from one client address |
+| 429 | RATE_LIMITED | Too many public views from one client address, or too many password attempts |
 | 503 | STORAGE_UNAVAILABLE | S3 failure, which also stores no artifact row |
 | 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
@@ -154,10 +161,14 @@ client.listArtifacts({ view: "mine" | "org" })
 client.getArtifact(id)
 client.getArtifactContent(id, { format?: "html" | "markdown" })
 client.getArtifactShare(id)
-client.createArtifactShare(id)
+client.createArtifactShare(id, { password? })
 client.revokeArtifactShare(id)
-client.getPublicArtifact(id, token)
+client.removeArtifactSharePassword(id)
+client.getPublicArtifact(id, token, { grant? })
+client.unlockPublicArtifact(id, token, password)
 ```
+
+The grant goes in the `X-Factrove-Share-Grant` header and the password in a JSON body. Neither is placed in a URL.
 
 `getArtifactContent` returns `{ format, mediaType, content }`. `format` defaults to `html`. `mediaType` is `text/html` or `text/markdown`. `content` is the response body as text, including a leading UTF-8 BOM when the stored HTML has one. HTML requests omit the format query. Markdown requests use `?format=markdown`. The HTTP success body stays raw text; this object is the client result, not a second JSON envelope from the API.
 
@@ -175,8 +186,9 @@ Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. O
 - `findById(id)`
 - `list({ view, userId, organizationId })`
 - `saveShare(id, shareToken, shareTokenHash)`
-- `clearShare(id)`
+- `clearShare(id)` also clears the share password
 - `findShared(id, shareTokenHash)` looks up an active public share by hash and does not select the raw token
+- `setSharePassword(id, shareTokenHash, passwordHash)` and `clearSharePassword(id, shareTokenHash)` change the password only while that share is still active
 
 Return backend-internal records; task 04 maps them to DTOs. PrismaService remains available for resolving the configured user/org. Concrete repositories are PostgreSQL implementations, not interchangeable adapters.
 
@@ -235,6 +247,9 @@ pnpm factrove get <artifact-id> --api-url http://localhost:3001
 pnpm factrove share <artifact-id>
 pnpm factrove share <artifact-id> --json
 pnpm factrove share <artifact-id> --revoke
+pnpm factrove share <artifact-id> --password
+printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
+pnpm factrove share <artifact-id> --remove-password
 ```
 
 - When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
@@ -243,12 +258,12 @@ pnpm factrove share <artifact-id> --revoke
 - `configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. It writes a mode 0600 temporary file in the same directory and renames it into place. When the path is a symlink, the rename updates the target and leaves the symlink in place. Directories Factrove creates for those files are mode 0700. An existing parent directory keeps its mode. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override those paths. The command does not print the key.
 - Access defaults to private. `--access` is only valid for `upload`.
 - `--format html|markdown` is only valid for `get` and defaults to `html`.
-- `--revoke` is only valid for `share`.
+- `--revoke`, `--password`, `--password-stdin`, and `--remove-password` are only valid for `share`, and only one of them can be used at a time. `--password` takes no value: it prompts twice on the terminal without echoing, and fails when stdin is not a terminal. `--password-stdin` reads stdin and removes one trailing newline. A password given as an argument is rejected so it stays out of shell history. Passwords are 8 to 128 characters.
 - Plain upload success prints only viewerUrl plus newline to stdout. The viewer URL uses `PUBLIC_BASE_URL`.
 - JSON upload success prints the API's `{ artifact: ArtifactDto }` envelope on one line.
 - Plain get success prints the content bytes and does not add a newline of its own.
 - JSON get success prints one line: `{ format, mediaType, content }`, with `mediaType` of `text/html` or `text/markdown`.
-- Plain share success prints only the public URL plus newline. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. JSON share success prints `{ share: { shared, shareUrl } }` on one line. `shareUrl` is null after revoke.
+- Plain share success prints only the public URL plus newline. `--revoke` prints `Revoked the public link for {id}.` and does not print the token. `--remove-password` prints `Removed the password for {id}.` JSON share success prints `{ share: { shared, shareUrl, passwordProtected } }` on one line. `shareUrl` is null after revoke. No command prints a password.
 - Errors go to stderr and exit nonzero. In --json mode, use the common error envelope on stderr; reserve local codes FILE_NOT_FOUND, INVALID_INPUT, NETWORK_ERROR.
 - No progress/framework startup logs on stdout. Close the Nest application context so the process exits.
 - `configure` is the credentials command. There is no login or list command in the CLI, no background process, and no separate CLI server.

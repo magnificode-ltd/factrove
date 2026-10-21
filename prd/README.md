@@ -71,7 +71,8 @@ These items are outside the local MVP task list. They follow the same contract a
 | ID | Brief | Status | Owns |
 | --- | --- | --- | --- |
 | 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — Garage-verified; real AWS not tested | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
-| 15 | [Shareable links](post-mvp/15-shareable-links.md) | Implemented in this change | `PUBLIC_BASE_URL`, owner share and revoke, anonymous public HTML, CLI `share`, web Share control |
+| 14 | [Password-protected links](post-mvp/14-password-protected-links.md) | Implemented in this change | Optional Argon2id link password, public unlock with scoped grants and content tickets, attempt throttling, CLI password flags, web password controls and visitor password page |
+| 15 | [Shareable links](post-mvp/15-shareable-links.md) | Done | `PUBLIC_BASE_URL`, owner share and revoke, anonymous public HTML, CLI `share`, web Share control |
 | 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented in this change | Better Auth sign-in, sessions, hashed API keys, owner and member access |
 
 Task 20 supersedes the unauthenticated local actor in the MVP outcome above. The MVP itself did not require login.

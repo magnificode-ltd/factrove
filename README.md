@@ -39,6 +39,7 @@ apps/api/
 │   │   ├── api.module.ts
 │   │   ├── artifacts.controller.ts
 │   │   ├── public-artifacts.controller.ts
+│   │   ├── json-body.ts              # Optional JSON bodies with a strict content type
 │   │   └── context.controller.ts
 │   ├── services/
 │   │   ├── services.module.ts
@@ -61,8 +62,14 @@ apps/api/
 │   │       └── artifact-record.ts    # Internal persistence records/inputs
 │   ├── sharing/
 │   │   ├── share-link.ts             # Public base URL, share token, and link builders
+│   │   ├── share-token-cipher.ts     # AES-256-GCM share token encryption
+│   │   ├── share-password.ts         # Argon2id link password hashing
+│   │   ├── share-grant.ts            # Unlock grants, content tickets, and the ticket ledger
 │   │   ├── public-origin.ts          # Browser origins for CORS and frame-ancestors
-│   │   └── public-view-limit.ts      # Public view rate limit
+│   │   ├── public-api-path.ts        # Public route matching
+│   │   ├── rate-window.ts            # Two-window in-memory counter
+│   │   ├── public-view-limit.ts      # Public view rate limit
+│   │   └── password-attempt-limit.ts # Per-client and per-share unlock attempt limits
 │   ├── storage/
 │   │   ├── index.ts
 │   │   ├── storage.module.ts
@@ -117,6 +124,8 @@ Sign in at `http://localhost:3000/signup` or `/login`. Private artifacts are rea
 The share token is encrypted at rest with AES-256-GCM, and the ciphertext is bound to the artifact id. Set `SHARE_TOKEN_KEY` to choose the key material. When it is unset, the key is derived from `BETTER_AUTH_SECRET`. Rotating the value that supplies the key revokes existing public links. The old URL returns 404, and the library shows the artifact as not shared, because public lookup decrypts the stored token with the current key and requires the hash to match. Sharing again mints a new link. A decrypted token is shown only when its hash matches the stored hash.
 
 Public views allow 60 requests per minute per client address, in memory, on each API process. Counts live in the current window and the previous window. Those windows use a monotonic clock and rotate so a request does not scan every visitor. When the map is full, the oldest visitor is dropped and the new visitor is still allowed. Oldest means the first address inserted in that window, not the least recently used, so a busy early visitor is dropped before a later one. A caller who can present more than 10,000 addresses can cycle keys and exceed the per-address limit. The cap keeps one process from growing without bound. It is not a defence against a large set of source addresses. One page view counts as one request: the detail request is charged, and up to two following content loads within 30 seconds are included in that view. IPv6 addresses share a bucket by their /64. Behind a reverse proxy, set `TRUSTED_PROXIES` to that proxy so the limit uses the visitor address from `X-Forwarded-For`. Without it, every visitor shares the proxy's address. A share URL whose id or token has the wrong shape is HTTP 404. The library loading UI does not wrap `/share`.
+
+A share link can carry an optional password, 8 to 128 characters. It is hashed with Argon2id from `node:crypto` and only the PHC hash is stored. Visitors to a protected link see a password page. The detail request returns `401 PASSWORD_REQUIRED` until they unlock, while a dead link is still the same 404. A correct password returns a grant that lasts 15 minutes. The grant is an HMAC over the artifact id, the share token hash, a fingerprint of the stored password hash, and the expiry, keyed from the same input as the share token key. The browser keeps it in `sessionStorage` and sends it in the `X-Factrove-Share-Grant` header on the cookie-free detail request, so it never becomes a cookie or a URL. The sandboxed iframe cannot send headers, so its content URL carries a separate ticket that lasts 60 seconds and is honored three times per API process. The artifact document can see only that ticket. Changing or removing the password, revoking or re-sharing the link, and rotating the key all invalidate existing grants. Unlock attempts allow 10 per 10 minutes per client address and 30 per 10 minutes per share, separately from the view limit, in memory on each API process.
 
 ### Prerequisites
 
@@ -192,13 +201,18 @@ pnpm factrove get <artifact-id> --format markdown
 pnpm factrove get <artifact-id> --format markdown --json
 pnpm factrove share <artifact-id>
 pnpm factrove share <artifact-id> --revoke
+pnpm factrove share <artifact-id> --password
+printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
+pnpm factrove share <artifact-id> --remove-password
 ```
 
 Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. Plain CLI success prints only the viewer URL. `--json` prints the `{ artifact }` envelope on one line. Failures go to stderr and the process exits nonzero. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
 `pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
 
-`pnpm factrove share <id>` creates a public link, or prints the existing one. Plain success prints that URL. `--revoke` removes it and prints a confirmation that does not include the token. `--json` prints `{ share: { shared, shareUrl } }`. The owner can also use Share in the library or the viewer. Copy link copies the public URL while a share is on, and the private viewer URL otherwise.
+`pnpm factrove share <id>` creates a public link, or prints the existing one. Plain success prints that URL. `--revoke` removes it and prints a confirmation that does not include the token. `--json` prints `{ share: { shared, shareUrl, passwordProtected } }`. The owner can also use Share in the library or the viewer. Copy link copies the public URL while a share is on, and the private viewer URL otherwise.
+
+A link can also need a password. `--password` prompts twice without echoing and needs a terminal. `--password-stdin` reads it from a pipe and removes one trailing newline. Either one sets or replaces the password and prints the same link. `--remove-password` keeps the link and removes the password. A password typed as an argument, such as `--password=secret`, is refused so it stays out of shell history. In the web app, the Public link panel has Add, Change, and Remove password. Revoking a link also removes its password.
 
 When in doubt, follow aws s3 conventions; existing upload/get/--json kept for now, cp/--output json are follow-ups. `get <id>` writes to stdout the way `aws s3 cp s3://bucket/key -` streams an object to stdout.
 
@@ -214,7 +228,7 @@ pnpm test
 pnpm e2e
 ```
 
-`pnpm e2e` checks that Docker is running and that Playwright Chromium is installed, builds the API and CLI, then starts Compose project `factrove-e2e`. That project has its own volumes. PostgreSQL is published on `127.0.0.1:5433`, Garage on `127.0.0.1:3910`, the web app on `127.0.0.1:3100`, and the API on `127.0.0.1:3101`. The dev project from `pnpm infra:up` keeps its volumes and ports. The script sets the Garage endpoint and credentials for the API and the S3 integration tests, removes `AWS_*` and `S3_*` overrides from those processes, and requires the effective endpoint to be loopback HTTP before any S3 call. `S3_INTEGRATION=1` does the same inside the integration tests. The default `pnpm test` still skips those files unless `S3_INTEGRATION=1`. When `pnpm e2e` exits, it restores `apps/web/next-env.d.ts` if Next.js rewrote it and removes the `factrove-e2e` project.
+`pnpm e2e` checks that Docker is running and that Playwright Chromium is installed, builds the API and CLI, then starts Compose project `factrove-e2e`. That project has its own volumes. PostgreSQL is published on `127.0.0.1:5433`, Garage on `127.0.0.1:3910`, the web app on `127.0.0.1:3100`, and the API on `127.0.0.1:3101`. The dev project from `pnpm infra:up` keeps its volumes and ports. The script sets the Garage endpoint and credentials for the API and the S3 integration tests, removes `AWS_*` and `S3_*` overrides from those processes, and requires the effective endpoint to be loopback HTTP before any S3 call. `S3_INTEGRATION=1` does the same inside the integration tests. The default `pnpm test` still skips those files unless `S3_INTEGRATION=1`. When `pnpm e2e` exits, it restores `apps/web/next-env.d.ts` if Next.js rewrote it and removes the `factrove-e2e` project. Set `FACTROVE_E2E_SCREENSHOTS` to a directory to save screenshots of the password-protected link flow there. The script reads it from its own process environment, not from an `.env` file.
 
 `pnpm --filter @factrove/web dev` and `pnpm --filter @factrove/api dev` still start one app at a time. `pnpm dev` is the command that runs them together.
 
