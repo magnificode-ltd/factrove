@@ -17,8 +17,12 @@ export function cliReferenceFiles() {
 
 export function applyCliNavigation(docs) {
   const tabs = docs.navigation?.tabs;
-  if (!Array.isArray(tabs) || !tabs.some((tab) => tab.tab === "CLI reference")) {
+  const cliTabs = Array.isArray(tabs) ? tabs.filter((tab) => tab.tab === "CLI reference") : [];
+  if (cliTabs.length === 0) {
     throw new Error("docs.json is missing a navigation tab named 'CLI reference'.");
+  }
+  if (cliTabs.length > 1) {
+    throw new Error("docs.json has more than one navigation tab named 'CLI reference'.");
   }
   const navigation = renderCliNavigation();
   return {

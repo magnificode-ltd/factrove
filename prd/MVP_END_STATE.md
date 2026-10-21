@@ -40,7 +40,7 @@ pnpm factrove upload ./report.html --access org_shared --json
 
 The default access type is `private`. Plain output is the artifact id. JSON output is the shared API response envelope containing the artifact metadata and URLs. `upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. Errors go to stderr, return a nonzero exit code, and explain local input, network, or API failures.
 
-The CLI obtains its API origin from `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile, then the local default. It requires no login, key, or database/storage credentials. Creating an artifact assigns a new id. Replacing content keeps that id and overwrites the current bytes. Versions, automatic retries, and further CLI commands are later features. The command reference is [CLI.md](CLI.md).
+The CLI obtains its API origin from `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile, then the local default. It requires no login, key, or database/storage credentials. Creating an artifact assigns a new id. Replacing content keeps that id and overwrites the current bytes. Versions, automatic retries, and further CLI commands are later features. The command reference is [docs/guides/cli.mdx](../docs/guides/cli.mdx).
 
 ## Local identity and access classification
 
