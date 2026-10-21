@@ -1,0 +1,10 @@
+{
+  "group": "Commands",
+  "pages": [
+    "cli-reference/overview",
+    "cli-reference/configure",
+    "cli-reference/upload",
+    "cli-reference/get",
+    "cli-reference/share"
+  ]
+}

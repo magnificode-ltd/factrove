@@ -140,3 +140,5 @@ export type ArtifactEnvelope = z.infer<typeof artifactEnvelopeSchema>;
 export type ArtifactListEnvelope = z.infer<typeof artifactListEnvelopeSchema>;
 export type ContextEnvelope = z.infer<typeof contextEnvelopeSchema>;
 export type HealthEnvelope = z.infer<typeof healthEnvelopeSchema>;
+
+export { apiErrorCatalog, type ApiErrorCode } from "./errors.js";

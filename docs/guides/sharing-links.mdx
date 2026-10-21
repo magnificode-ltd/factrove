@@ -1,0 +1,98 @@
+---
+title: Sharing links
+description: Create public artifact links, optionally protect them with a password, and understand unlock, lockout, and Retry-After.
+---
+
+Artifacts stay private until the owner shares them. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
+
+## Create and revoke a link
+
+In the library or viewer, use Share. From the CLI:
+
+```bash
+pnpm factrove share <artifact-id>
+pnpm factrove share <artifact-id> --revoke
+```
+
+Owner HTTP routes:
+
+- `POST /api/v1/artifacts/{id}/share` creates the link, or returns the existing one
+- `GET /api/v1/artifacts/{id}/share` reads the current state
+- `DELETE /api/v1/artifacts/{id}/share` revokes it
+
+Only the creator can change the share. Another member who can read an `org_shared` artifact gets the same `404 ARTIFACT_NOT_FOUND` as a missing id. A request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded.
+
+Local URL:
+
+```text
+http://localhost:3000/share/{id}/{token}
+```
+
+Placeholder self-hosted URL:
+
+```text
+https://library.example.com/share/{id}/{token}
+```
+
+The token is 32 bytes of base64url. The API stores AES-256-GCM ciphertext bound to the artifact id, plus a SHA-256 hash. The encryption key comes from `SHARE_TOKEN_KEY` when that is set, otherwise from `BETTER_AUTH_SECRET`. Rotating that input revokes existing public links. Sharing again mints a new token.
+
+An invalid id, an invalid token, an unshared artifact, and a revoked token all return the same `404 ARTIFACT_NOT_FOUND` body. Those responses do not say whether the artifact exists.
+
+## Password-protected links
+
+A share can carry an optional password. The owner sets it on create or later with `POST /share` and JSON `{ "password": "..." }`. `DELETE /api/v1/artifacts/{id}/share/password` keeps the URL and clears the password. Revoking the share also clears the password.
+
+Password rules from the shared contracts:
+
+- 10 to 128 characters after NFC normalization
+- at least four distinct characters
+- not all whitespace
+- not on the bundled common-password list
+
+The API hashes the password with Argon2id and stores only the PHC string. The CLI never prints a password. Use `--password` to be prompted twice, or pipe it:
+
+```bash
+pnpm factrove share <artifact-id> --password
+printf '%s' "$LINK_PASSWORD" | pnpm factrove share <artifact-id> --password-stdin
+pnpm factrove share <artifact-id> --remove-password
+```
+
+## Opening a protected link
+
+The public page loads `GET /api/v1/public/artifacts/{id}/{token}` without cookies. If the link has a password and the visitor has no grant, the API returns `401 PASSWORD_REQUIRED` and the page shows a password form. A dead link is still 404, so the form does not confirm that an old URL once existed.
+
+`POST /api/v1/public/artifacts/{id}/{token}/unlock` with `{ "password": "..." }`:
+
+| Result | Status | Body |
+| --- | --- | --- |
+| Correct password | 200 | `{ grant: { token, expiresAt } }` |
+| Link has no password | 200 | `{ grant: null }` |
+| Wrong password | 401 | `PASSWORD_INCORRECT` |
+| Inactive link | 404 | `ARTIFACT_NOT_FOUND` |
+| Missing or non-JSON body | 400 | `INVALID_REQUEST` (no throttle charged) |
+
+The grant lasts 15 minutes. The browser keeps it in `sessionStorage` on the web origin and sends `X-Factrove-Share-Grant` on the credentials-omitted detail request. It is not a cookie and it is not put in the page URL.
+
+The sandboxed iframe cannot send headers, so a granted detail returns `contentUrl` with a `ticket` query. That ticket lasts 60 seconds and is honored at most 3 times per API process. Reverse proxies should not log `?ticket=`. Protected content without a valid ticket is `401 PASSWORD_REQUIRED`.
+
+Changing or removing the password, revoking or re-sharing the link, and rotating the share-token key all invalidate existing grants.
+
+## Rate limits and Retry-After
+
+Public **views** (detail and content) allow 60 requests per 60 seconds per client address, in memory on each API process. That 429 is `RATE_LIMITED` with message `Too many requests. Try again later.` It does **not** set `Retry-After`.
+
+Unlock **guesses** are separate:
+
+- 10 failures per 10 minutes per client address (refunded after a match or an infrastructure failure)
+- 30 wrong passwords per 10 minutes per current share token hash
+- 20 verifies per minute and 100 per 10 minutes per IP, with one in-flight verify per address
+
+An exhausted share is `429 RATE_LIMITED` (`Too many password attempts. Try again later.`) with a `Retry-After` header derived from confirmed failures, and no hash verification. Someone who has the link and keeps failing can lock that link for up to ten minutes at a time. The owner recovers by revoking and sharing again, which mints a new token hash.
+
+A saturated Argon2 gate, or a share whose remaining check slots are all in flight, is `503 UNLOCK_UNAVAILABLE` with `Retry-After`.
+
+The owner share payload may include `guessesLockedOut` when the share budget is exhausted.
+
+## What visitors see
+
+The public JSON is the filename, size, upload time, content URL, and `passwordProtected`. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Markdown is not offered on the public route.

@@ -1,0 +1,36 @@
+---
+title: CLI overview
+description: Install and configure the Factrove CLI, then run generated command pages for flags and examples.
+---
+
+The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. From this repository, run it with `pnpm factrove`. That launcher reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The built binary `node apps/cli/dist/main.js` does not read that file.
+
+## Configure once
+
+```bash
+pnpm factrove configure
+```
+
+See [configure](/cli-reference/configure). The key is not printed.
+
+## Commands in this tree
+
+The pages in this section are generated from `apps/cli/src/command-spec.ts`. After the parser grows (for example aws s3-style `cp`), re-run `pnpm docs:cli`. Do not edit the generated pages by hand.
+
+| Command | What it does |
+| --- | --- |
+| [configure](/cli-reference/configure) | Save a profile key and API origin |
+| [upload](/cli-reference/upload) | Upload one HTML file |
+| [get](/cli-reference/get) | Print stored HTML or converted Markdown |
+| [share](/cli-reference/share) | Create, password-protect, or revoke a public link |
+
+## Output and errors
+
+- Success exit code is `0`. Any failure is `1`.
+- Plain upload prints only the viewer URL. Plain get prints content bytes. Plain share prints the public URL and whether it is password protected.
+- `--json` prints one JSON line on success. Errors then use `{"error":{"code":"...","message":"..."}}` on stderr.
+- Local codes are `FILE_NOT_FOUND`, `INVALID_INPUT`, and `NETWORK_ERROR`. API codes pass through.
+
+## Credentials
+
+The API key is read from `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. An explicit `--profile` ignores `FACTROVE_API_KEY`. `--api-url` overrides the origin for one command.

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Factrove",
+  "theme": "mint",
+  "description": "Guides and references for Factrove, a self-hostable library for HTML artifacts.",
+  "colors": {
+    "primary": "#5e64d6",
+    "light": "#858bee",
+    "dark": "#5055b6"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Get started",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["introduction", "quickstart", "concepts"]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Guides",
+            "pages": ["guides/sharing-links", "guides/self-hosting"]
+          }
+        ]
+      },
+      {
+        "tab": "CLI reference",
+        "groups": [
+          {
+            "$ref": "./cli-reference/pages.json"
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["api-reference/overview"]
+          }
+        ],
+        "openapi": "api-reference/openapi.json"
+      }
+    ]
+  },
+  "api": {
+    "openapi": "api-reference/openapi.json"
+  },
+  "markdown": {
+    "instructions": "Describe what the running code does. Do not invent hosted pricing, launch dates, or security guarantees. Share and viewer links are a configured base URL plus an artifact path. Show localhost and a placeholder origin such as https://library.example.com."
+  }
+}
