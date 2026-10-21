@@ -14,61 +14,6 @@ export function artifactObjectKey(id: string): string {
   return `${id}.html`;
 }
 
-// "filename" is the plain parameter, which busboy decodes as Latin-1.
-// "extended" is filename*, which busboy has already decoded from the declared charset.
-export type MultipartFilenameParameter = "filename" | "extended";
-
-// A plain filename is re-decoded from Latin-1 to UTF-8. Browsers and Node's FormData put
-// UTF-8 bytes in that parameter, so café.html arrives as cafÃ©.html. filename* is already
-// a Unicode string and is kept as busboy decoded it. A plain filename that is already
-// outside Latin-1, or that is not valid UTF-8, is left as busboy decoded it.
-export function decodeMultipartFilename(originalname: string, parameter: MultipartFilenameParameter): string {
-  if (parameter === "extended") {
-    return originalname;
-  }
-  if ([...originalname].some((char) => (char.codePointAt(0) ?? 0) > 0xff)) {
-    return originalname;
-  }
-  const bytes = Buffer.from(originalname, "latin1");
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return originalname;
-  }
-}
-
-// The choice follows the file part's original Content-Disposition, not the decoded text.
-// filename* wins when both parameters are present, matching busboy.
-export function multipartFilenameParameter(body: Buffer, contentType: string | undefined): MultipartFilenameParameter {
-  const boundary = multipartBoundary(contentType);
-  if (boundary === null) {
-    return "filename";
-  }
-  const parts = body.toString("latin1").split(`--${boundary}`);
-  for (const part of parts) {
-    const headerEnd = part.search(/\r\n\r\n|\n\n/);
-    const headers = headerEnd === -1 ? part : part.slice(0, headerEnd);
-    const disposition = /content-disposition[ \t]*:[ \t]*([^\r\n]*)/i.exec(headers)?.[1];
-    if (!disposition || !/filename/i.test(disposition)) {
-      continue;
-    }
-    if (/(?:^|;)\s*filename\*/i.test(disposition)) {
-      return "extended";
-    }
-    return "filename";
-  }
-  return "filename";
-}
-
-function multipartBoundary(contentType: string | undefined): string | null {
-  if (!contentType) {
-    return null;
-  }
-  const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
-  const boundary = (match?.[1] ?? match?.[2] ?? "").trim();
-  return boundary.length > 0 ? boundary : null;
-}
-
 // One immutable object per upload. The artifact id is the prefix so a row cannot point at another artifact.
 export function immutableContentKey(artifactId: string, contentId: string): string {
   return `${artifactId}/${contentId}.html`;

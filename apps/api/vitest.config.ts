@@ -10,6 +10,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    poolOptions: {
+      forks: {
+        execArgv: ["--expose-gc"],
+      },
+    },
     fileParallelism: false,
     hookTimeout: 60_000,
     testTimeout: 60_000,

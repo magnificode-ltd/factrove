@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -997,31 +998,130 @@ describe("HTTP API", () => {
     expect((await upload(baseUrl, "café.html", bytes)).name).toBe("café");
     expect((await upload(baseUrl, "שלום.html", bytes)).name).toBe("שלום");
     expect((await upload(baseUrl, "👍.html", bytes)).name).toBe("👍");
+    expect((await upload(baseUrl, "café; filename*.html", bytes)).name).toBe("café; filename*");
+    expect((await upload(baseUrl, "שלום; filename*.html", bytes)).name).toBe("שלום; filename*");
+    expect((await upload(baseUrl, "👍; filename*.html", bytes)).name).toBe("👍; filename*");
   });
 
   it("keeps a filename* value that busboy already decoded", async () => {
-    const boundary = "----factrove-filename-star";
-    const bytes = Buffer.from("<p>star</p>");
-    const body = Buffer.concat([
-      Buffer.from(
-        `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="file"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n` +
-          `Content-Type: text/html\r\n\r\n`,
-        "utf8",
-      ),
-      bytes,
-      Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
-    ]);
-    const response = await globalThis.fetch(`${baseUrl}/api/v1/artifacts`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${ownerApiKey}`,
-        "content-type": `multipart/form-data; boundary=${boundary}`,
-      },
-      body,
-    });
+    const response = await postMultipart(baseUrl, "----factrove-filename-star", filenameStarBody("----factrove-filename-star", ""));
     expect(response.status).toBe(201);
     expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("caf\u00C3\u00A9");
+  });
+
+  it("keeps filename* when a header-like line precedes the file", async () => {
+    const decoy = "Content-Disposition: form-data; name=\"file\"; filename=\"decoy.html\"\r\n";
+    const response = await postMultipart(baseUrl, "----factrove-decoy-header", filenameStarBody("----factrove-decoy-header", decoy));
+    expect(response.status).toBe(201);
+    expect(artifactEnvelopeSchema.parse(await response.json()).artifact.name).toBe("caf\u00C3\u00A9");
+  });
+
+  it("bounds memory for data before the file and enforces the field limit", async () => {
+    const boundary = "----factrove-preamble";
+    const target = new URL(baseUrl);
+    const tail = Buffer.from(
+      `\r\n--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="tiny.html"\r\n` +
+        `Content-Type: text/html\r\n\r\n` +
+        `<p>tiny</p>\r\n--${boundary}--\r\n`,
+      "utf8",
+    );
+    const preambleBytes = 12 * 1024 * 1024;
+    const chunk = Buffer.alloc(64 * 1024, 0x78);
+    const baseline = retainedBufferBytes();
+    let peak = baseline;
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest({
+        hostname: target.hostname,
+        port: target.port,
+        path: "/api/v1/artifacts",
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ownerApiKey}`,
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+          "content-length": String(preambleBytes + tail.length),
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (part: Buffer) => chunks.push(part));
+        res.on("end", () => {
+          const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+          expect(res.statusCode).toBe(201);
+          expect(artifactEnvelopeSchema.parse(payload).artifact.name).toBe("tiny");
+          resolve();
+        });
+      });
+      req.on("error", reject);
+      const writePreamble = async (): Promise<void> => {
+        let sent = 0;
+        while (sent < preambleBytes) {
+          const ready = req.write(chunk);
+          sent += chunk.length;
+          if (sent % (1024 * 1024) === 0) {
+            peak = Math.max(peak, retainedBufferBytes());
+          }
+          if (!ready) {
+            await once(req, "drain");
+          }
+        }
+        req.end(tail);
+      };
+      void writePreamble().catch(reject);
+    });
+    const after = retainedBufferBytes();
+    // The client reuses one 64 KiB chunk. A parser that kept the preamble would hold about 12 MiB.
+    expect(peak).toBeLessThan(baseline + 4 * 1024 * 1024);
+    expect(after).toBeLessThan(baseline + 4 * 1024 * 1024);
+
+    const fields = Array.from({ length: 9 }, (_, index) =>
+      `--${boundary}\r\nContent-Disposition: form-data; name="extra${index}"\r\n\r\n${index}\r\n`,
+    ).join("");
+    const tooMany = Buffer.from(
+      `${fields}--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="tiny.html"\r\nContent-Type: text/html\r\n\r\n<p>x</p>\r\n--${boundary}--\r\n`,
+      "utf8",
+    );
+    const rejected = await postMultipart(baseUrl, boundary, tooMany);
+    expect(rejected.status).toBe(400);
+    expect((await errorOf(rejected)).code).toBe("INVALID_REQUEST");
+    expect(await prisma.artifact.count()).toBe(1);
+  });
+
+  it("rejects an unauthenticated upload before reading the body", async () => {
+    const target = new URL(baseUrl);
+    const result = await settledWithin(new Promise<{ status: number; written: number; payload: string }>((resolve, reject) => {
+      let settled = false;
+      const req = httpRequest({
+        hostname: target.hostname,
+        port: target.port,
+        path: "/api/v1/artifacts",
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=----factrove-unauth",
+          "content-length": String(12 * 1024 * 1024),
+        },
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          settled = true;
+          resolve({
+            status: res.statusCode ?? 0,
+            written: req.socket?.bytesWritten ?? Number.POSITIVE_INFINITY,
+            payload: Buffer.concat(chunks).toString("utf8"),
+          });
+          req.destroy();
+        });
+      });
+      req.on("error", (error) => {
+        if (!settled) {
+          reject(error);
+        }
+      });
+      req.flushHeaders();
+    }), 2000);
+    expect(result.status).toBe(401);
+    expect(result.payload).toContain("UNAUTHENTICATED");
+    expect(result.written).toBeLessThan(8 * 1024);
   });
 
   it("rejects a trailing break and a C1 control in a submitted name", async () => {
@@ -2978,6 +3078,38 @@ async function createApp(appConfig: ApiConfig, store: BlobStore): Promise<INestA
     throw error;
   }
   return application;
+}
+
+function retainedBufferBytes(): number {
+  const gc = (globalThis as { gc?: (options?: { type?: string; execution?: string }) => void }).gc;
+  expect(typeof gc).toBe("function");
+  gc?.({ type: "major", execution: "sync" });
+  gc?.({ type: "major", execution: "sync" });
+  return process.memoryUsage().arrayBuffers;
+}
+
+function filenameStarBody(boundary: string, preamble: string): Buffer {
+  return Buffer.concat([
+    Buffer.from(
+      `${preamble}\r\n--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename*=UTF-8''caf%C3%83%C2%A9.html\r\n` +
+        `Content-Type: text/html\r\n\r\n`,
+      "utf8",
+    ),
+    Buffer.from("<p>star</p>"),
+    Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
+  ]);
+}
+
+function postMultipart(url: string, boundary: string, body: Buffer, apiKey = ownerApiKey): Promise<Response> {
+  return globalThis.fetch(`${url}/api/v1/artifacts`, {
+    method: "POST",
+    headers: {
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
 }
 
 function postFile(

@@ -676,7 +676,7 @@
           "Artifacts"
         ],
         "summary": "Replace an artifact's stored HTML",
-        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` is set in the same conditional update as the new object and the revision check. Omit `name` and that update does not change the column, so the current name stays. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. When this request's update lands, the response is 200 even if a later replace has landed since. A content commit that throws can still land later, and that landing sets the name when this request included one. If the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+        "description": "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` is set in the same conditional update as the new object and the revision check. Omit `name` and that update does not change the column, so the current name stays. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. When this request's update lands, the response is 200 even if a later replace has landed since. The 200 shows the artifact's current state, which may already include a later replace. A content commit that throws can still land later, and that landing sets the name when this request included one. If the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
         "security": [
           {
             "bearerAuth": []
@@ -728,7 +728,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The same artifact id with the new size and upload time.",
+            "description": "The same artifact id with the new size and upload time. The 200 shows the artifact's current state, which may already include a later replace.",
             "content": {
               "application/json": {
                 "schema": {

@@ -24,7 +24,7 @@ import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js"
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
-import { artifactObjectKey, decodeMultipartFilename, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
+import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
 import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
 import { browserOrigins } from "../sharing/public-origin.js";
@@ -843,15 +843,12 @@ function readUpload(file: unknown): { filename: string; bytes: Uint8Array } | un
   if (typeof file !== "object" || file === null) {
     return undefined;
   }
-  const record = file as { originalname?: unknown; buffer?: unknown; filenameParameter?: unknown };
+  const record = file as { originalname?: unknown; buffer?: unknown };
   if (typeof record.originalname !== "string" || !Buffer.isBuffer(record.buffer)) {
     return undefined;
   }
   return {
-    filename: decodeMultipartFilename(
-      record.originalname,
-      record.filenameParameter === "extended" ? "extended" : "filename",
-    ),
+    filename: record.originalname,
     bytes: Uint8Array.from(record.buffer),
   };
 }

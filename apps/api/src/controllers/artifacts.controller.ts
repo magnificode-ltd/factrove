@@ -1,7 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Transform } from "node:stream";
-import { Body, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors, type CallHandler, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
+import { BadRequestException, Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, PayloadTooLargeException, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
+import multer from "multer";
 import {
   artifactDtoSchema,
   artifactViewSchema,
@@ -12,7 +11,8 @@ import {
   type ContentFormat,
   type ShareEnvelope,
 } from "@factrove/contracts";
-import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES, multipartFilenameParameter } from "../rendering/html-policy.js";
+import { ActorService } from "../auth/actor.service.js";
+import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
 import { jsonBody } from "./json-body.js";
@@ -30,51 +30,69 @@ type JsonRequest = HeaderRequest & {
   body?: unknown;
 };
 
-type MultipartRequest = HeaderRequest & {
-  pipe: (destination: NodeJS.WritableStream, options?: { end?: boolean }) => NodeJS.WritableStream;
-  multipartChunks?: Buffer[];
-};
-
-// Records the file part's bytes so the upload can see whether the header used filename*.
+// Runs before the multipart parser, so a missing login never buffers the body.
 @Injectable()
-class CaptureMultipartFilename implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler) {
-    const request = context.switchToHttp().getRequest<MultipartRequest>();
-    const chunks: Buffer[] = [];
-    request.multipartChunks = chunks;
-    const originalPipe = request.pipe.bind(request);
-    request.pipe = (destination, options) => {
-      const tee = new Transform({
-        transform(chunk: Buffer | string, _encoding, callback) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          callback(null, chunk);
-        },
-      });
-      originalPipe(tee);
-      return tee.pipe(destination, options);
-    };
-    return next.handle();
+class RequireActorGuard implements CanActivate {
+  constructor(@Inject(ActorService) private readonly actors: ActorService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    await this.actors.requireActor(context.switchToHttp().getRequest<HeaderRequest>());
+    return true;
   }
 }
 
-const htmlUpload = FileInterceptor("file", {
+// Multer 2.4 passes fileSize + 1 and parts + 1 to busboy, so these values are the
+// largest file and part count that are still accepted. Plain filenames are decoded
+// as UTF-8. filename* is decoded by busboy from its RFC 5987 charset.
+const uploadHtml = multer({
+  defParamCharset: "utf8",
   limits: {
-    // Busboy emits its limit when the buffered size reaches this ceiling.
-    fileSize: MAX_HTML_BYTES + 1,
+    fileSize: MAX_HTML_BYTES,
     files: 2,
     fields: 8,
     fieldSize: 1024,
     parts: 12,
   },
-  fileFilter(req, file, callback) {
-    const request = req as MultipartRequest;
-    const header = request.headers["content-type"];
-    const contentType = Array.isArray(header) ? header[0] : header;
-    const parameter = multipartFilenameParameter(Buffer.concat(request.multipartChunks ?? []), contentType);
-    Object.assign(file, { filenameParameter: parameter });
-    callback(null, true);
+}).single("file");
+
+const htmlUpload: NestInterceptor = {
+  async intercept(context, next) {
+    const http = context.switchToHttp();
+    await new Promise<void>((resolve, reject) => {
+      uploadHtml(http.getRequest(), http.getResponse(), (error?: unknown) => {
+        if (error) {
+          reject(mapMultipartError(error));
+          return;
+        }
+        resolve();
+      });
+    });
+    return next.handle();
   },
-});
+};
+
+function mapMultipartError(error: unknown): Error {
+  if (!(error instanceof Error)) {
+    return new BadRequestException("The request is invalid.");
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  if (code === "LIMIT_FILE_SIZE") {
+    return new PayloadTooLargeException("File too large");
+  }
+  if (code === "LIMIT_FILE_COUNT" || code === "LIMIT_UNEXPECTED_FILE" || code === "LIMIT_PART_COUNT") {
+    return new BadRequestException("Unexpected field");
+  }
+  if (code === "LIMIT_FIELD_COUNT" || code === "LIMIT_FIELD_VALUE" || code === "LIMIT_FIELD_KEY" || code === "MISSING_FIELD_NAME") {
+    return new BadRequestException(error.message);
+  }
+  if (error.message.startsWith("Multipart:")) {
+    return new BadRequestException(error.message);
+  }
+  if (error.message === "Malformed part header" || error.message === "Unexpected end of form" || error.message === "Unexpected end of file") {
+    return new BadRequestException(`Multipart: ${error.message}`);
+  }
+  return error;
+}
 
 // private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
 // Missing access returns 404 so an id does not reveal that an artifact exists.
@@ -84,7 +102,8 @@ export class ArtifactsController {
 
   @Post()
   @HttpCode(201)
-  @UseInterceptors(CaptureMultipartFilename, htmlUpload)
+  @UseGuards(RequireActorGuard)
+  @UseInterceptors(htmlUpload)
   async upload(@Req() request: HeaderRequest, @UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
     const artifact = await this.artifacts.upload(request, file, body);
     return { artifact: artifactDtoSchema.parse(artifact) };
@@ -92,7 +111,8 @@ export class ArtifactsController {
 
   // Replaces the current HTML. The same share token keeps serving whatever bytes are stored.
   @Put(":id/content")
-  @UseInterceptors(CaptureMultipartFilename, htmlUpload)
+  @UseGuards(RequireActorGuard)
+  @UseInterceptors(htmlUpload)
   async replaceContent(
     @Req() request: HeaderRequest,
     @Param("id") id: string,
