@@ -210,7 +210,7 @@
             }
           },
           "400": {
-            "description": "Name length is outside 1 to 32 characters. Better Auth `INVALID_NAME_LENGTH`."
+            "description": "Empty or missing name is Better Auth `NAME_REQUIRED` (`API Key name is required.`). A name longer than 32 characters is `INVALID_NAME_LENGTH`."
           },
           "401": {
             "description": "No browser session, or Authorization was also sent."

@@ -16,16 +16,17 @@ export function cliReferenceFiles() {
 }
 
 export function applyCliNavigation(docs) {
+  const tabs = docs.navigation?.tabs;
+  if (!Array.isArray(tabs) || !tabs.some((tab) => tab.tab === "CLI reference")) {
+    throw new Error("docs.json is missing a navigation tab named 'CLI reference'.");
+  }
   const navigation = renderCliNavigation();
-  const tabs = docs.navigation.tabs.map((tab) => {
-    if (tab.tab !== "CLI reference") {
-      return tab;
-    }
-    return { ...tab, groups: [navigation] };
-  });
   return {
     ...docs,
-    navigation: { ...docs.navigation, tabs },
+    navigation: {
+      ...docs.navigation,
+      tabs: tabs.map((tab) => (tab.tab === "CLI reference" ? { ...tab, groups: [navigation] } : tab)),
+    },
   };
 }
 

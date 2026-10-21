@@ -27,8 +27,13 @@ export async function checkGeneratedDocs() {
 
   const docsJsonPath = join(repoRoot, "docs", "docs.json");
   const committedDocsJson = await readOptional(docsJsonPath);
-  if (committedDocsJson === null || committedDocsJson !== docsJsonWithCliNavigation(committedDocsJson)) {
+  if (committedDocsJson === null) {
     mismatches.push(relative(docsJsonPath));
+  } else {
+    const expectedDocsJson = docsJsonWithCliNavigation(committedDocsJson);
+    if (committedDocsJson !== expectedDocsJson) {
+      mismatches.push(relative(docsJsonPath));
+    }
   }
 
   const cliDir = join(repoRoot, "docs", "cli-reference");
@@ -37,24 +42,27 @@ export async function checkGeneratedDocs() {
     if (expectedCliPaths.has(path)) {
       continue;
     }
-    if (name === "overview.mdx") {
+    if (name === "pages.json") {
+      mismatches.push(`${relative(path)} (stale generated CLI navigation)`);
       continue;
     }
-    if (name.endsWith(".mdx")) {
-      const contents = await readOptional(path);
-      if (contents?.includes(generatedBanner) || name !== "overview.mdx") {
-        mismatches.push(`${relative(path)} (stale generated CLI page)`);
-      }
+    if (!name.endsWith(".mdx")) {
       continue;
     }
-    mismatches.push(`${relative(path)} (unexpected file in generated CLI directory)`);
+    const contents = await readOptional(path);
+    if (contents?.includes(generatedBanner)) {
+      mismatches.push(`${relative(path)} (stale generated CLI page)`);
+    }
   }
 
   const apiDir = join(repoRoot, "docs", "api-reference");
-  const allowedApi = new Set(["overview.mdx", "openapi.json"]);
   for (const name of await readdir(apiDir)) {
-    if (!allowedApi.has(name)) {
-      mismatches.push(`${relative(join(apiDir, name))} (unexpected file in generated API directory)`);
+    if (name === "openapi.json" || !name.endsWith(".mdx")) {
+      continue;
+    }
+    const contents = await readOptional(join(apiDir, name));
+    if (contents?.includes(generatedBanner)) {
+      mismatches.push(`${relative(join(apiDir, name))} (stale generated API page)`);
     }
   }
 
