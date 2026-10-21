@@ -9,9 +9,13 @@ export type ApiConfig = {
   port: number;
   webOrigin: string;
   apiPublicOrigin: string;
+  // Origin embedded in viewer and share links. Embeds reuse this same value.
+  publicBaseUrl: string;
   authSecret: string;
   authCookieDomain: string | null;
   trustedProxies: readonly string[];
+  // HKDF input for share-token encryption. Null derives the key from authSecret.
+  shareTokenKey: string | null;
 };
 
 const DEFAULT_WEB_ORIGIN = "http://localhost:3000";
@@ -21,15 +25,26 @@ const MIN_AUTH_SECRET_LENGTH = 32;
 export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const webOrigin = readOrigin(env.WEB_ORIGIN, DEFAULT_WEB_ORIGIN, "WEB_ORIGIN");
   const apiPublicOrigin = readOrigin(env.API_PUBLIC_ORIGIN, DEFAULT_API_ORIGIN, "API_PUBLIC_ORIGIN");
+  const publicBaseUrl = readPublicBaseUrl(env.PUBLIC_BASE_URL, webOrigin);
   return {
     host: readHost(env.HOST),
     port: readPort(env.PORT),
     webOrigin,
     apiPublicOrigin,
+    publicBaseUrl,
     authSecret: readAuthSecret(env.BETTER_AUTH_SECRET),
-    authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin),
+    authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin, publicBaseUrl),
     trustedProxies: readTrustedProxies(env.TRUSTED_PROXIES),
+    shareTokenKey: readShareTokenKey(env.SHARE_TOKEN_KEY),
   };
+}
+
+function readPublicBaseUrl(value: string | undefined, webOrigin: string): string {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return webOrigin;
+  }
+  return readOrigin(raw, webOrigin, "PUBLIC_BASE_URL");
 }
 
 function readHost(value: string | undefined): string {
@@ -72,9 +87,37 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readCookieDomain(value: string | undefined, webOrigin: string, apiPublicOrigin: string): string | null {
+function readShareTokenKey(value: string | undefined): string | null {
   const raw = value?.trim() ?? "";
   if (raw.length === 0) {
+    return null;
+  }
+  if (raw.length < MIN_AUTH_SECRET_LENGTH) {
+    throw new Error("SHARE_TOKEN_KEY must be at least 32 characters.");
+  }
+  return raw;
+}
+
+function readCookieDomain(
+  value: string | undefined,
+  webOrigin: string,
+  apiPublicOrigin: string,
+  publicBaseUrl: string,
+): string | null {
+  const raw = value?.trim() ?? "";
+  const webHost = new URL(webOrigin).hostname;
+  const publicHost = new URL(publicBaseUrl).hostname;
+  if (raw.length === 0) {
+    if (webHost.toLowerCase() !== publicHost.toLowerCase()) {
+      if (cookieDomainCannotCover(webHost) || cookieDomainCannotCover(publicHost)) {
+        throw new Error(
+          "Use the same host for WEB_ORIGIN and PUBLIC_BASE_URL. A cookie domain cannot cover localhost or an IP address.",
+        );
+      }
+      throw new Error(
+        "Set AUTH_COOKIE_DOMAIN to a parent of WEB_ORIGIN and PUBLIC_BASE_URL when those hosts differ.",
+      );
+    }
     return null;
   }
   const domain = (raw.startsWith(".") ? raw.slice(1) : raw).toLowerCase();
@@ -91,12 +134,15 @@ function readCookieDomain(value: string | undefined, webOrigin: string, apiPubli
   if ("error" in parsed || parsed.domain === null) {
     throw new Error("AUTH_COOKIE_DOMAIN must be a registrable domain, not a public suffix");
   }
-  const webHost = new URL(webOrigin).hostname;
   const apiHost = new URL(apiPublicOrigin).hostname;
-  if (!hostIsAtOrUnder(webHost, domain) || !hostIsAtOrUnder(apiHost, domain)) {
-    throw new Error("AUTH_COOKIE_DOMAIN must be WEB_ORIGIN and API_PUBLIC_ORIGIN or a parent of both");
+  if (!hostIsAtOrUnder(webHost, domain) || !hostIsAtOrUnder(apiHost, domain) || !hostIsAtOrUnder(publicHost, domain)) {
+    throw new Error("AUTH_COOKIE_DOMAIN must cover WEB_ORIGIN, API_PUBLIC_ORIGIN, and PUBLIC_BASE_URL");
   }
   return domain;
+}
+
+function cookieDomainCannotCover(host: string): boolean {
+  return host.toLowerCase() === "localhost" || isIP(host) !== 0;
 }
 
 function hostIsAtOrUnder(host: string, domain: string): boolean {

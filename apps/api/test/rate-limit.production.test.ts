@@ -9,6 +9,7 @@ import { Test } from "@nestjs/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLIENT_IP_HEADER } from "../src/auth/client-ip.js";
 import { configureHttpApp } from "../src/configure-http-app.js";
+import { PublicViewLimiter } from "../src/sharing/public-view-limit.js";
 import { AppModule } from "../src/app.module.js";
 import { API_CONFIG, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, type BlobStore } from "../src/storage/blob-store.js";
@@ -30,9 +31,11 @@ const config: ApiConfig = {
   port: 3001,
   webOrigin: "http://localhost:3000",
   apiPublicOrigin: "http://localhost:3001",
+  publicBaseUrl: "http://localhost:3000",
   authSecret: TEST_AUTH_SECRET,
   authCookieDomain: null,
   trustedProxies: [],
+  shareTokenKey: null,
 };
 
 class UnusedBlobStore implements BlobStore {
@@ -65,6 +68,8 @@ describe("sign-in rate limit", () => {
       .useValue(config)
       .overrideProvider(BLOB_STORE)
       .useValue(new UnusedBlobStore())
+      .overrideProvider(PublicViewLimiter)
+      .useValue(new PublicViewLimiter(3, 60_000))
       .compile();
     app = moduleRef.createNestApplication({ logger: false, bodyParser: false });
     configureHttpApp(app);
@@ -103,7 +108,61 @@ describe("sign-in rate limit", () => {
     const secondPeer = await postSignIn(port, "127.0.0.2", 12);
     expect(secondPeer).toBe(401);
   });
+
+  it("gives two visitors opening a public link separate buckets", async () => {
+    const token = "a".repeat(43);
+    const first = await publicView(port, "127.0.0.1", token, 1);
+    const second = await publicView(port, "127.0.0.1", token, 2);
+    const third = await publicView(port, "127.0.0.1", token, 3);
+    expect([first.status, second.status, third.status]).toEqual([404, 404, 404]);
+    for (const response of [first, second, third]) {
+      expect(response.body).not.toContain(token);
+    }
+
+    const limited = await publicView(port, "127.0.0.1", token, 4);
+    expect(limited.status).toBe(429);
+    expect(limited.body).toContain("RATE_LIMITED");
+    expect(limited.body).not.toContain(token);
+
+    const otherPeer = await publicView(port, "127.0.0.2", token, 5);
+    expect(otherPeer.status).toBe(404);
+    expect(otherPeer.body).not.toContain(token);
+  });
 });
+
+function publicView(
+  port: number,
+  localAddress: string,
+  token: string,
+  attempt: number,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        localAddress,
+        method: "GET",
+        path: `/api/v1/public/artifacts/00000000-0000-4000-8000-000000000000/${token}`,
+        headers: {
+          "x-forwarded-for": `203.0.113.${attempt}`,
+          [CLIENT_IP_HEADER]: `198.51.100.${attempt}`,
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        response.on("end", () => {
+          resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
 
 function postSignIn(port: number, localAddress: string, attempt: number): Promise<number> {
   const body = JSON.stringify({

@@ -3,16 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FactroveApiError } from "@factrove/api-client";
 import type { ArtifactDto } from "@factrove/contracts";
 import { artifactReturnPath, authPageHref } from "../src/auth/return-path";
-import Loading from "../src/app/loading";
-import LoadingArtifact from "../src/app/artifacts/[id]/loading";
+import Loading from "../src/app/(browse)/loading";
+import LoadingArtifact from "../src/app/(browse)/artifacts/[id]/loading";
 import LibraryError from "../src/app/error";
-import HomePage from "../src/app/page";
-import ArtifactPage from "../src/app/artifacts/[id]/page";
+import HomePage from "../src/app/(browse)/page";
+import ArtifactPage from "../src/app/(browse)/artifacts/[id]/page";
 
 const api = vi.hoisted(() => ({
   getContext: vi.fn(),
   listArtifacts: vi.fn(),
   getArtifact: vi.fn(),
+  getArtifactShare: vi.fn(),
   uploadArtifact: vi.fn()
 }));
 
@@ -32,13 +33,16 @@ const artifact: ArtifactDto = {
   updatedAt: "2026-10-11T10:00:00.000Z",
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
-  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content"
+  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content",
+  shared: false
 };
 
 beforeEach(() => {
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
   api.getArtifact.mockReset();
+  api.getArtifactShare.mockReset();
+  api.getArtifactShare.mockResolvedValue({ share: { shared: false, shareUrl: null } });
   api.getContext.mockResolvedValue({
     user: { id: "local-user", name: "Local User" },
     organization: { id: "local-org", name: "Local Organization" }

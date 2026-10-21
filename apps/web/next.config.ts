@@ -6,6 +6,11 @@ applyNextPublicApiUrl(process.env, appEnvFile);
 const publicApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
 
 const noStore = [{ key: "Cache-Control", value: "no-store" }];
+const shareHeaders = [
+  ...noStore,
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "X-Robots-Tag", value: "noindex" }
+];
 
 const nextConfig: NextConfig = {
   ...(publicApiUrl ? { env: { NEXT_PUBLIC_API_URL: publicApiUrl } } : {}),
@@ -13,6 +18,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/", headers: noStore },
+      { source: "/share/:path*", headers: shareHeaders },
       { source: "/:path*", headers: noStore }
     ];
   }

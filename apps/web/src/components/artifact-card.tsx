@@ -3,10 +3,19 @@
 import type { PointerEvent } from "react";
 import type { ArtifactDto } from "@factrove/contracts";
 import { CopyButton } from "@/components/copy-button";
+import { ShareControl } from "@/components/share-control";
 import { Badge } from "@/components/ui/badge";
 import { accessLabel, formatBytes, formatRelativeTime, formatUploadedAt } from "@/format";
 
-export function ArtifactCard({ artifact, now }: { artifact: ArtifactDto; now: number }) {
+export function ArtifactCard({
+  artifact,
+  now,
+  canShare = false
+}: {
+  artifact: ArtifactDto;
+  now: number;
+  canShare?: boolean;
+}) {
   const uploaded = formatUploadedAt(artifact.uploadedAt);
 
   function onMove(event: PointerEvent<HTMLLIElement>) {
@@ -35,6 +44,15 @@ export function ArtifactCard({ artifact, now }: { artifact: ArtifactDto; now: nu
         </a>
         <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
           <code className="font-mono text-[13px] tracking-tight text-ink">{artifact.id}</code>
+          {canShare ? (
+            <span className="pointer-events-auto relative z-10">
+              <ShareControl
+                artifactId={artifact.id}
+                initial={{ shared: artifact.shared, shareUrl: null }}
+                compact
+              />
+            </span>
+          ) : null}
           <span className="pointer-events-auto">
             <CopyButton
               className="h-8"

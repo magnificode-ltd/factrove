@@ -4,12 +4,16 @@ import {
   artifactListEnvelopeSchema,
   contentMediaTypes,
   contextEnvelopeSchema,
+  publicArtifactEnvelopeSchema,
+  shareEnvelopeSchema,
   type AccessType,
   type ArtifactEnvelope,
   type ArtifactListEnvelope,
   type ContentFormat,
   type ContentMediaType,
-  type ContextEnvelope
+  type ContextEnvelope,
+  type PublicArtifactEnvelope,
+  type ShareEnvelope
 } from "@factrove/contracts";
 
 const API_PREFIX = "/api/v1";
@@ -54,6 +58,10 @@ export interface FactroveClient {
   listArtifacts(input?: { view?: "mine" | "org" }): Promise<ArtifactListEnvelope>;
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
+  getArtifactShare(id: string): Promise<ShareEnvelope>;
+  createArtifactShare(id: string): Promise<ShareEnvelope>;
+  revokeArtifactShare(id: string): Promise<ShareEnvelope>;
+  getPublicArtifact(id: string, token: string): Promise<PublicArtifactEnvelope>;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -181,6 +189,18 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       return request(`/artifacts?${query.toString()}`, { method: "GET" }, artifactListEnvelopeSchema);
     },
     getArtifact: (id) => request(`/artifacts/${encodeURIComponent(id)}`, { method: "GET" }, artifactEnvelopeSchema),
+    getArtifactShare: (id) =>
+      request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "GET" }, shareEnvelopeSchema),
+    createArtifactShare: (id) =>
+      request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "POST" }, shareEnvelopeSchema),
+    revokeArtifactShare: (id) =>
+      request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "DELETE" }, shareEnvelopeSchema),
+    getPublicArtifact: (id, token) =>
+      request(
+        `/public/artifacts/${encodeURIComponent(id)}/${encodeURIComponent(token)}`,
+        { method: "GET" },
+        publicArtifactEnvelopeSchema
+      ),
     getArtifactContent: (id, input) => {
       const format = input?.format ?? "html";
       const mediaType = contentMediaTypes[format];

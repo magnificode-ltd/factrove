@@ -1,20 +1,20 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Readable } from "node:stream";
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   artifactDtoSchema,
   artifactViewSchema,
   contentFormatSchema,
+  shareEnvelopeSchema,
   type ArtifactEnvelope,
   type ArtifactListEnvelope,
   type ContentFormat,
+  type ShareEnvelope,
 } from "@factrove/contracts";
 import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
-import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
-import { ApiErrorException, type ApiErrorCode } from "../services/api-error.js";
+import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
-import { BlobNotFoundError, BlobStoreUnavailableError } from "../storage/index.js";
+import { streamHtml } from "./stream-html.js";
 
 type HeaderResponse = {
   setHeader(name: string, value: string): void;
@@ -28,10 +28,7 @@ type HeaderRequest = {
 // Missing access returns 404 so an id does not reveal that an artifact exists.
 @Controller("artifacts")
 export class ArtifactsController {
-  constructor(
-    @Inject(ArtifactsService) private readonly artifacts: ArtifactsService,
-    @Inject(API_CONFIG) private readonly config: ApiConfig,
-  ) {}
+  constructor(@Inject(ArtifactsService) private readonly artifacts: ArtifactsService) {}
 
   @Post()
   @HttpCode(201)
@@ -74,30 +71,29 @@ export class ArtifactsController {
       }
       return new StreamableFile(opened.body);
     }
-    for (const [name, value] of htmlContentHeaders(this.config.webOrigin, opened.sizeBytes)) {
+    for (const [name, value] of htmlContentHeaders(this.artifacts.framingOrigins(), opened.sizeBytes)) {
       response.setHeader(name, value);
     }
-    const file = new StreamableFile(Readable.from(opened.body));
-    file.setErrorHandler((error, streamResponse) => {
-      if (streamResponse.headersSent) {
-        // Keep the socket from idling on a Content-Length the rest of the body will never fill.
-        if (!streamResponse.destroyed && "destroy" in streamResponse && typeof streamResponse.destroy === "function") {
-          streamResponse.destroy();
-        }
-        return;
-      }
-      if (streamResponse.destroyed) {
-        return;
-      }
-      const mapped = contentFailure(error);
-      streamResponse.statusCode = mapped.status;
-      if ("setHeader" in streamResponse && typeof streamResponse.setHeader === "function") {
-        streamResponse.setHeader("Content-Type", "application/json; charset=utf-8");
-        streamResponse.setHeader("X-Content-Type-Options", "nosniff");
-      }
-      streamResponse.send(JSON.stringify({ error: { code: mapped.code, message: mapped.message } }));
-    });
-    return file;
+    return streamHtml(opened.body);
+  }
+
+  @Get(":id/share")
+  async shareState(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ShareEnvelope> {
+    const share = await this.artifacts.shareState(request, parseArtifactId(id));
+    return shareEnvelopeSchema.parse({ share });
+  }
+
+  @Post(":id/share")
+  @HttpCode(200)
+  async createShare(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ShareEnvelope> {
+    const share = await this.artifacts.createShare(request, parseArtifactId(id));
+    return shareEnvelopeSchema.parse({ share });
+  }
+
+  @Delete(":id/share")
+  async revokeShare(@Req() request: HeaderRequest, @Param("id") id: string): Promise<ShareEnvelope> {
+    const share = await this.artifacts.revokeShare(request, parseArtifactId(id));
+    return shareEnvelopeSchema.parse({ share });
   }
 
   @Get(":id")
@@ -135,17 +131,4 @@ function parseArtifactId(value: string): string {
     throw new ApiErrorException(400, "INVALID_REQUEST", "Artifact id must be a UUID.");
   }
   return parsed.data;
-}
-
-function contentFailure(error: unknown): { status: number; code: ApiErrorCode; message: string } {
-  if (error instanceof ApiErrorException) {
-    return { status: error.status, code: error.code, message: error.message };
-  }
-  if (error instanceof BlobNotFoundError) {
-    return { status: 404, code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." };
-  }
-  if (error instanceof BlobStoreUnavailableError) {
-    return { status: 503, code: "STORAGE_UNAVAILABLE", message: "Object storage is unavailable." };
-  }
-  return { status: 500, code: "INTERNAL_ERROR", message: "An unexpected error occurred." };
 }

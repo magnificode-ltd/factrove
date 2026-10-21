@@ -36,7 +36,7 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 ## Scope exclusions
 
-Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred.
+Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, password-protected links, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred. Public links for people outside the owner's Mac are task 15.
 
 Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary. Local development uses Garage. Real AWS S3 remains the configuration with `S3_ENDPOINT` unset.
 
@@ -71,6 +71,7 @@ These items are outside the local MVP task list. They follow the same contract a
 | ID | Brief | Status | Owns |
 | --- | --- | --- | --- |
 | 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — Garage-verified; real AWS not tested | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
+| 15 | [Shareable links](post-mvp/15-shareable-links.md) | Implemented in this change | `PUBLIC_BASE_URL`, owner share and revoke, anonymous public HTML, CLI `share`, web Share control |
 | 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented in this change | Better Auth sign-in, sessions, hashed API keys, owner and member access |
 
 Task 20 supersedes the unauthenticated local actor in the MVP outcome above. The MVP itself did not require login.

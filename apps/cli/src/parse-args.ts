@@ -34,27 +34,40 @@ export type ConfigureInvocation = {
   suggestedApiUrl: string;
 };
 
-export type CliInvocation = UploadInvocation | GetInvocation | ConfigureInvocation | { kind: "help" };
+export type ShareInvocation = {
+  kind: "share";
+  id: string;
+  revoke: boolean;
+  json: boolean;
+  apiUrl: string;
+  profile: string;
+  profileExplicit: boolean;
+};
+
+export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | { kind: "help" };
 
 const HELP = `Upload HTML and print artifact content.
 
 Usage:
   pnpm factrove upload <path> [--access private|org_shared] [--api-url <origin>] [--profile <name>] [--json]
   pnpm factrove get <id> [--format html|markdown] [--json] [--api-url <origin>] [--profile <name>]
+  pnpm factrove share <id> [--revoke] [--json] [--api-url <origin>] [--profile <name>]
   pnpm factrove configure [--profile <name>] [--api-key <key>] [--api-url <origin>]
 
 Commands:
   upload      Upload a local HTML file and print its viewer URL.
   get         Print an artifact's stored HTML, or Markdown converted from that HTML.
+  share       Create a public link, or revoke it with --revoke.
   configure   Save an API key and API URL for a profile.
 
 Options:
   --access <private|org_shared>  upload only. Defaults to private.
   --format <html|markdown>       get only. Defaults to html.
+  --revoke                       share only. Remove the public link.
   --api-url <origin>             API origin. Overrides FACTROVE_API_URL and the profile.
   --api-key <key>                configure only. Prefer a prompt or stdin so the key stays out of shell history.
   --profile <name>               Credentials profile. Overrides FACTROVE_PROFILE. Defaults to default.
-  --json                         Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content.
+  --json                         Print one JSON line. upload prints the artifact envelope. get prints format, mediaType, and content. share prints the share envelope.
   -h, --help                     Show this help.
 
 The API key is read from FACTROVE_API_KEY, then the selected profile in ~/.factrove/credentials.
@@ -70,9 +83,13 @@ Examples:
   pnpm factrove upload ./report.html --profile dev --api-url http://localhost:3001 --json
   pnpm factrove get 123e4567-e89b-42d3-a456-426614174000
   pnpm factrove get 123e4567-e89b-42d3-a456-426614174000 --format markdown --json
+  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000
+  pnpm factrove share 123e4567-e89b-42d3-a456-426614174000 --revoke
 
 Relative upload paths resolve from the directory where you ran pnpm.
 Plain upload success prints only the viewer URL and a newline.
+Plain share success prints only the public link and a newline.
+Plain share --revoke prints a confirmation and does not print the old link.
 Plain get success prints the content with no extra bytes.
 JSON success prints one line.
 Errors go to stderr and the process exits nonzero.
@@ -98,6 +115,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
 
   const positionals: string[] = [];
   let json = false;
+  let revoke: boolean | undefined;
   let access: AccessType | undefined;
   let format: ContentFormat | undefined;
   let apiUrlFlag: string | undefined;
@@ -115,6 +133,13 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     }
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--revoke") {
+      if (revoke !== undefined) {
+        throw new CliError("INVALID_INPUT", "--revoke was provided more than once.");
+      }
+      revoke = true;
       continue;
     }
     if (arg === "--access" || arg.startsWith("--access=")) {
@@ -179,7 +204,7 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (positionals.length > 1) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    if (access !== undefined || format !== undefined || json) {
+    if (access !== undefined || format !== undefined || json || revoke !== undefined) {
       throw new CliError("INVALID_INPUT", "configure accepts --profile, --api-key, and --api-url.");
     }
     return {
@@ -196,6 +221,9 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   if (command === "upload") {
     if (format !== undefined) {
       throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
     }
     const filePath = positionals[1];
     if (filePath === undefined) {
@@ -218,6 +246,9 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (access !== undefined) {
       throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
     }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
     const id = positionals[1];
     if (id === undefined) {
       throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove get <id>");
@@ -232,6 +263,33 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       kind: "get",
       id,
       format: format ?? "html",
+      json,
+      apiUrl,
+      profile,
+      profileExplicit: profileFlag !== undefined,
+    };
+  }
+  if (command === "share") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    const id = positionals[1];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: pnpm factrove share <id>");
+    }
+    if (positionals.length > 2) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    return {
+      kind: "share",
+      id,
+      revoke: revoke ?? false,
       json,
       apiUrl,
       profile,

@@ -21,7 +21,30 @@ export const artifactDtoSchema = z.object({
   updatedAt: z.string().datetime({ offset: true }),
   uploadedAt: z.string().datetime({ offset: true }),
   viewerUrl: z.string().url(),
+  contentUrl: z.string().url(),
+  shared: z.boolean()
+});
+
+export const shareStateSchema = z.object({
+  shared: z.boolean(),
+  shareUrl: z.string().url().nullable()
+});
+
+export const shareEnvelopeSchema = z.object({
+  share: shareStateSchema
+});
+
+export const publicArtifactSchema = z.object({
+  id: z.string().uuid(),
+  filename: z.string(),
+  mimeType: z.literal("text/html"),
+  sizeBytes: z.number().int().nonnegative(),
+  uploadedAt: z.string().datetime({ offset: true }),
   contentUrl: z.string().url()
+});
+
+export const publicArtifactEnvelopeSchema = z.object({
+  artifact: publicArtifactSchema
 });
 
 export const apiErrorSchema = z.object({
@@ -41,6 +64,10 @@ export type ArtifactView = z.infer<typeof artifactViewSchema>;
 export type ContentFormat = z.infer<typeof contentFormatSchema>;
 export type ContentMediaType = (typeof contentMediaTypes)[ContentFormat];
 export type ArtifactDto = z.infer<typeof artifactDtoSchema>;
+export type ShareState = z.infer<typeof shareStateSchema>;
+export type ShareEnvelope = z.infer<typeof shareEnvelopeSchema>;
+export type PublicArtifact = z.infer<typeof publicArtifactSchema>;
+export type PublicArtifactEnvelope = z.infer<typeof publicArtifactEnvelopeSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type ArtifactEnvelope = z.infer<typeof artifactEnvelopeSchema>;
 export type ArtifactListEnvelope = z.infer<typeof artifactListEnvelopeSchema>;

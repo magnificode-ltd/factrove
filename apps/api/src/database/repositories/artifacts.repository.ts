@@ -19,6 +19,8 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     uploadedAt: row.uploadedAt,
+    shareToken: row.shareToken,
+    shareTokenHash: row.shareTokenHash,
   };
 }
 
@@ -63,6 +65,51 @@ export class ArtifactsRepository {
   async findById(id: string): Promise<ArtifactRecord | null> {
     const row = await this.prisma.artifact.findUnique({ where: { id } });
     return row ? toArtifactRecord(row) : null;
+  }
+
+  // Stores a new token only while the artifact is unshared. A concurrent share keeps the first token.
+  async saveShare(id: string, shareToken: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id, shareTokenHash: null },
+      data: { shareToken, shareTokenHash },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
+  }
+
+  async clearShare(id: string): Promise<ArtifactRecord> {
+    const row = await this.prisma.artifact.update({
+      where: { id },
+      data: { shareToken: null, shareTokenHash: null },
+    });
+    return toArtifactRecord(row);
+  }
+
+  // Public lookup uses the unique hash alone, then compares the id in memory.
+  // The ciphertext is selected so the caller can require decryption with the current key.
+  async findShared(id: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+    const row = await this.prisma.artifact.findUnique({
+      where: { shareTokenHash },
+      select: {
+        id: true,
+        creatorUserId: true,
+        organizationId: true,
+        accessType: true,
+        mimeType: true,
+        sizeBytes: true,
+        createdAt: true,
+        updatedAt: true,
+        uploadedAt: true,
+        shareToken: true,
+        shareTokenHash: true,
+      },
+    });
+    if (!row || row.id !== id) {
+      return null;
+    }
+    return row;
   }
 
   async list(input: ListArtifactsInput): Promise<ArtifactRecord[]> {

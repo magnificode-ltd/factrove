@@ -1,6 +1,7 @@
 import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../database/index.js";
 import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
+import { browserOrigins } from "../sharing/public-origin.js";
 import { createAuth, type FactroveAuth } from "./create-auth.js";
 
 @Injectable()
@@ -17,7 +18,8 @@ export class AuthService implements OnModuleInit {
       prisma: this.prisma,
       baseURL: this.config.apiPublicOrigin,
       secret: this.config.authSecret,
-      trustedOrigins: [this.config.webOrigin, this.config.apiPublicOrigin],
+      // Sign-in is trusted on the owner app, the public base URL, and the API origin.
+      trustedOrigins: [...new Set([...browserOrigins(this.config.webOrigin, this.config.publicBaseUrl), this.config.apiPublicOrigin])],
       cookieDomain: this.config.authCookieDomain,
     });
   }

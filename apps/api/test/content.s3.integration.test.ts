@@ -63,9 +63,11 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       port: 3001,
       webOrigin: "http://localhost:3000",
       apiPublicOrigin: "http://localhost:3001",
+      publicBaseUrl: "http://localhost:3000",
       authSecret: TEST_AUTH_SECRET,
       authCookieDomain: null,
       trustedProxies: [],
+      shareTokenKey: null,
     };
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(API_CONFIG)
@@ -123,7 +125,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
     });
     expect(content.status).toBe(200);
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
-    expect(content.headers.get("content-security-policy")).toBe(contentSecurityPolicy("http://localhost:3000"));
+    expect(content.headers.get("content-security-policy")).toBe(contentSecurityPolicy(["http://localhost:3000"]));
   });
 });
 

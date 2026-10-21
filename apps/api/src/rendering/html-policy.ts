@@ -14,7 +14,7 @@ export function artifactObjectKey(id: string): string {
   return `${id}.html`;
 }
 
-export function contentSecurityPolicy(webOrigin: string): string {
+export function contentSecurityPolicy(frameAncestors: readonly string[]): string {
   return [
     // allow-scripts only: no same-origin access, forms, or top-level navigation.
     "sandbox allow-scripts",
@@ -30,18 +30,18 @@ export function contentSecurityPolicy(webOrigin: string): string {
     "child-src 'none'",
     "worker-src 'none'",
     "base-uri 'none'",
-    `frame-ancestors ${webOrigin}`,
+    `frame-ancestors ${frameAncestors.join(" ")}`,
   ].join("; ");
 }
 
-export function htmlContentHeaders(webOrigin: string, sizeBytes: number): Array<[string, string]> {
+export function htmlContentHeaders(frameAncestors: readonly string[], sizeBytes: number): Array<[string, string]> {
   return [
     ["Content-Type", HTML_CONTENT_TYPE],
     ["Content-Length", String(sizeBytes)],
     ["Cache-Control", "no-store"],
     ["X-Content-Type-Options", "nosniff"],
     ["Referrer-Policy", "no-referrer"],
-    ["Content-Security-Policy", contentSecurityPolicy(webOrigin)],
+    ["Content-Security-Policy", contentSecurityPolicy(frameAncestors)],
   ];
 }
 

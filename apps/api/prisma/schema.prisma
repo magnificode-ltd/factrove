@@ -140,6 +140,10 @@ model Artifact {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
   uploadedAt     DateTime?     @map("uploaded_at") @db.Timestamptz(3)
+  // AES-256-GCM ciphertext for a public link. The hash is the lookup key.
+  // A check requires both columns to be null or both to be set. Never log the token.
+  shareToken     String?       @map("share_token")
+  shareTokenHash String?       @unique @map("share_token_hash")
 
   @@index([creatorUserId, createdAt(sort: Desc), id(sort: Desc)], map: "artifact_creator_created_id_idx")
   @@index([organizationId, accessType, createdAt(sort: Desc), id(sort: Desc)], map: "artifact_org_access_created_id_idx")

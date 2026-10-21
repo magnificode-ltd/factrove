@@ -13,7 +13,8 @@ const artifact = {
   updatedAt: "2026-10-11T10:00:00.000Z",
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
-  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content"
+  contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content",
+  shared: false
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -162,6 +163,54 @@ describe("Factrove API client", () => {
       mediaType: "text/html",
       content
     });
+  });
+
+  it("creates, reads, and revokes a share without sending the token to a different path", async () => {
+    const token = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const share = {
+      share: {
+        shared: true,
+        shareUrl: `https://factrove.app/share/${artifact.id}/${token}`
+      }
+    };
+    const calls: Array<{ url: string; method: string | undefined }> = [];
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method });
+      if (init?.method === "DELETE") {
+        return jsonResponse({ share: { shared: false, shareUrl: null } });
+      }
+      if (String(input).includes("/public/")) {
+        return jsonResponse({
+          artifact: {
+            id: artifact.id,
+            filename: `${artifact.id}.html`,
+            mimeType: "text/html",
+            sizeBytes: 13,
+            uploadedAt: artifact.uploadedAt,
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}/content`
+          }
+        });
+      }
+      return jsonResponse(share);
+    });
+    const client = createFactroveClient({
+      baseUrl: "http://localhost:3001",
+      apiKey: "ftrv_test_key",
+      fetch: fetchStub as typeof fetch
+    });
+    await expect(client.createArtifactShare(artifact.id)).resolves.toEqual(share);
+    await expect(client.getArtifactShare(artifact.id)).resolves.toEqual(share);
+    await expect(client.revokeArtifactShare(artifact.id)).resolves.toEqual({ share: { shared: false, shareUrl: null } });
+    const opened = await client.getPublicArtifact(artifact.id, token);
+    expect(opened.artifact.id).toBe(artifact.id);
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      `POST http://localhost:3001/api/v1/artifacts/${artifact.id}/share`,
+      `GET http://localhost:3001/api/v1/artifacts/${artifact.id}/share`,
+      `DELETE http://localhost:3001/api/v1/artifacts/${artifact.id}/share`,
+      `GET http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}`
+    ]);
+    const authorization = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.headers;
+    expect(new Headers(authorization).get("authorization")).toBe("Bearer ftrv_test_key");
   });
 
   it("maps fetch/network failures without inventing an HTTP status", async () => {
