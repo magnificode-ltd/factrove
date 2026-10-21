@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { Injectable } from "@nestjs/common";
+import { RateWindow } from "./rate-window.js";
 
 // In-memory public HTML views per API process. Processes do not share buckets.
 // Keyed by x-factrove-client-ip after assignClientIp. Behind a proxy, set
@@ -32,29 +33,26 @@ type ContentGrant = {
 
 @Injectable()
 export class PublicViewLimiter {
-  private windowStart: number;
-  private current = new Map<string, number>();
-  private previous = new Map<string, number>();
+  private readonly views: RateWindow;
   private readonly companions = new Map<string, ContentGrant>();
 
   constructor(
-    private readonly max = PUBLIC_VIEW_RATE_MAX,
-    private readonly windowMs = PUBLIC_VIEW_RATE_WINDOW_MS,
+    max = PUBLIC_VIEW_RATE_MAX,
+    windowMs = PUBLIC_VIEW_RATE_WINDOW_MS,
     private readonly now: () => number = () => performance.now(),
     private readonly maxKeys = PUBLIC_VIEW_RATE_MAX_KEYS,
   ) {
-    this.windowStart = this.windowOf(this.now());
+    this.views = new RateWindow(max, windowMs, maxKeys, this.now());
   }
 
   get size(): number {
-    return this.current.size;
+    return this.views.size;
   }
 
   allow(clientIp: string | null): boolean {
     const at = this.now();
-    this.rotate(at);
     const key = rateLimitKey(clientIp);
-    if (!this.charge(key, at)) {
+    if (!this.views.take(key, at)) {
       return false;
     }
     this.grantCompanions(key, at);
@@ -63,31 +61,11 @@ export class PublicViewLimiter {
 
   allowContent(clientIp: string | null): boolean {
     const at = this.now();
-    this.rotate(at);
     const key = rateLimitKey(clientIp);
     if (this.takeCompanion(key, at)) {
       return true;
     }
-    return this.charge(key, at);
-  }
-
-  private charge(key: string, at: number): boolean {
-    const elapsed = at - this.windowStart;
-    const previousWeight = Math.min(1, Math.max(0, this.windowMs - elapsed) / this.windowMs);
-    const estimate = (this.previous.get(key) ?? 0) * previousWeight + (this.current.get(key) ?? 0);
-    if (estimate >= this.max) {
-      return false;
-    }
-    // Insertion order, not recency. Evicting the oldest admits the new visitor
-    // and lets a large set of addresses cycle past the per-address limit.
-    if (!this.current.has(key) && this.current.size >= this.maxKeys) {
-      const oldest = this.current.keys().next().value;
-      if (oldest !== undefined) {
-        this.current.delete(oldest);
-      }
-    }
-    this.current.set(key, (this.current.get(key) ?? 0) + 1);
-    return true;
+    return this.views.take(key, at) !== null;
   }
 
   private grantCompanions(key: string, at: number): void {
@@ -117,25 +95,6 @@ export class PublicViewLimiter {
       this.companions.delete(key);
     }
     return true;
-  }
-
-  private rotate(at: number): void {
-    const start = this.windowOf(at);
-    // A backward step keeps the budgets already charged in this window.
-    if (start <= this.windowStart) {
-      return;
-    }
-    const steps = (start - this.windowStart) / this.windowMs;
-    this.previous = steps === 1 ? this.current : new Map();
-    this.current = new Map();
-    this.windowStart = start;
-  }
-
-  private windowOf(at: number): number {
-    if (!Number.isFinite(at) || this.windowMs <= 0) {
-      return 0;
-    }
-    return Math.floor(at / this.windowMs) * this.windowMs;
   }
 }
 

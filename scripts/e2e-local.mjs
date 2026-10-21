@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
@@ -38,6 +38,7 @@ const databaseUrl = `postgresql://factrove:factrove@127.0.0.1:${e2ePostgresPort}
 const fixturePath = join(repoRoot, "fixtures/hello.html");
 const nextEnvPath = join(webAppDir, "next-env.d.ts");
 const nextEnvSnapshot = snapshotFile(nextEnvPath);
+const screenshotDir = process.env.FACTROVE_E2E_SCREENSHOTS?.trim() || null;
 const children = [];
 let browser;
 let ownerContext;
@@ -173,6 +174,7 @@ async function main() {
   await expectOwnerOnly(plainId);
   await expectKeyHash(owner.secret);
   await checkPublicShare(plainId, fixture, configDir);
+  await checkPasswordShare(jsonArtifact.id, fixture, configDir);
 
   const missing = await run("pnpm", ["factrove", "upload", "./fixtures/missing.html", "--json", "--profile", "e2e"], cliChildEnv(configDir));
   if (missing.code === 0 || !missing.stderr.includes("FILE_NOT_FOUND")) {
@@ -705,6 +707,7 @@ async function checkLibrary(plainId, jsonId, sharedId) {
   page.setDefaultNavigationTimeout(60000);
   try {
     await page.goto(`${webOrigin}/`);
+    await renderedLibrary(page);
     await page.getByRole("link", { name: "Refresh" }).click();
     await page.waitForURL(`${webOrigin}/`);
     const mineHtml = await page.content();
@@ -721,6 +724,7 @@ async function checkLibrary(plainId, jsonId, sharedId) {
     await page.goBack();
 
     await page.goto(`${webOrigin}/?view=org`);
+    await renderedLibrary(page);
     await page.getByRole("link", { name: "Refresh" }).click();
     await page.waitForURL(`${webOrigin}/?view=org`);
     const orgHtml = await page.content();
@@ -735,6 +739,11 @@ async function checkLibrary(plainId, jsonId, sharedId) {
   } finally {
     await page.close();
   }
+}
+
+// The loading skeleton has its own Refresh link to "/". Wait for the list so the click uses the current view.
+async function renderedLibrary(page) {
+  await page.locator('[aria-label="Artifact lists"] a[aria-current="page"]').waitFor();
 }
 
 async function checkSignedOutReturn(viewer, email, password) {
@@ -802,8 +811,8 @@ async function checkPublicShare(plainId, fixture, configDir) {
   }
 
   const shared = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
-  const shareUrl = shared.stdout.trim();
-  if (!shareLinkPattern(plainId).test(shareUrl)) {
+  const shareUrl = printedShareUrl(shared.stdout);
+  if (!shareLinkPattern(plainId).test(shareUrl) || !shared.stdout.includes("This link is not password protected.")) {
     throw new Error(`Share did not print a public link on the configured base URL.\n${shared.stdout}`);
   }
   if (shareUrl.startsWith("http://localhost:3000/") || shared.stdout.includes(ownerKey)) {
@@ -863,8 +872,7 @@ async function checkPublicShare(plainId, fixture, configDir) {
   ownerPage.setDefaultNavigationTimeout(60000);
   try {
     await ownerPage.goto(`${webOrigin}/artifacts/${plainId}`);
-    const region = ownerPage.getByRole("region", { name: "Public link" });
-    await region.waitFor();
+    const region = await openOwnerSharePanel(ownerPage);
     const shown = (await ownerPage.getByTestId("share-url").innerText()).trim();
     if (shown !== shareUrl) {
       throw new Error(`Viewer share link was ${shown}`);
@@ -890,7 +898,7 @@ async function checkPublicShare(plainId, fixture, configDir) {
   await expectPublicMissing(shareUrl, token);
 
   const rotated = await must("pnpm", ["factrove", "share", plainId, "--profile", "e2e"], cliChildEnv(configDir));
-  const nextUrl = rotated.stdout.trim();
+  const nextUrl = printedShareUrl(rotated.stdout);
   if (!shareLinkPattern(plainId).test(nextUrl) || nextUrl === shareUrl) {
     throw new Error(`A new share did not replace the revoked link.\n${rotated.stdout}`);
   }
@@ -909,12 +917,320 @@ async function checkPublicShare(plainId, fixture, configDir) {
   stopPage.setDefaultNavigationTimeout(60000);
   try {
     await stopPage.goto(`${webOrigin}/artifacts/${plainId}`);
+    await openOwnerSharePanel(stopPage);
     await stopPage.getByRole("button", { name: "Stop sharing" }).click();
     await stopPage.getByRole("button", { name: "Share" }).waitFor();
   } finally {
     await stopPage.close();
   }
   await expectPublicMissing(nextUrl, nextToken);
+}
+
+async function checkPasswordShare(id, fixture, configDir) {
+  const firstPassword = "first secret pass";
+  const secondPassword = "second secret pass";
+  const inline = await run(
+    "pnpm",
+    ["factrove", "share", id, `--password=${firstPassword}`, "--json", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  const inlineError = inline.stderr.trim().split("\n").at(-1) ?? "";
+  if (inline.code === 0 || inlineError.includes(firstPassword) || JSON.parse(inlineError).error?.code !== "INVALID_INPUT") {
+    throw new Error(`An inline --password value was not refused.\n${inline.stderr}`);
+  }
+  const protectedShare = await runInput(
+    "pnpm",
+    ["factrove", "share", id, "--password-stdin", "--profile", "e2e"],
+    `${firstPassword}\n`,
+    cliChildEnv(configDir),
+  );
+  const shareUrl = printedShareUrl(protectedShare.stdout);
+  if (
+    protectedShare.code !== 0
+    || !shareLinkPattern(id).test(shareUrl)
+    || !protectedShare.stdout.includes("This link is password protected.")
+    || !protectedShare.stdout.includes("revoke, then share again")
+  ) {
+    throw new Error(`share --password-stdin failed.\n${protectedShare.stdout}\n${protectedShare.stderr}`);
+  }
+  if (`${protectedShare.stdout}${protectedShare.stderr}`.includes(firstPassword)) {
+    throw new Error("share --password-stdin printed the password.");
+  }
+  const token = shareUrl.slice(shareUrl.lastIndexOf("/") + 1);
+  const detailUrl = `${apiOrigin}/api/v1/public/artifacts/${id}/${token}`;
+  await expectSql(
+    `select share_password_hash like '$argon2id$v=19$m=19456,t=2,p=1$%' and position('${firstPassword}' in share_password_hash) = 0 from artifact where id = '${id}'`,
+    "t",
+  );
+
+  const lockedDetail = await fetch(detailUrl);
+  const lockedBody = await lockedDetail.json();
+  if (lockedDetail.status !== 401 || lockedBody.error?.code !== "PASSWORD_REQUIRED" || "artifact" in lockedBody) {
+    throw new Error(`A protected link without a grant returned ${lockedDetail.status} ${JSON.stringify(lockedBody)}.`);
+  }
+  const lockedContent = await fetch(`${detailUrl}/content`);
+  const lockedContentBody = await lockedContent.text();
+  if (lockedContent.status !== 401 || lockedContentBody.includes("Inline JavaScript")) {
+    throw new Error(`Protected content without a ticket returned ${lockedContent.status}.`);
+  }
+
+  const visitor = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+  const page = await visitor.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  let grant = "";
+  try {
+    const lockedRequest = page.waitForRequest((request) => request.method() === "GET" && request.url() === detailUrl);
+    await page.goto(shareUrl);
+    const lockedResponse = await (await lockedRequest).response();
+    if (lockedResponse?.status() !== 401) {
+      throw new Error(`The locked page detail request returned ${lockedResponse?.status()}.`);
+    }
+    await page.getByRole("heading", { name: "This artifact is locked" }).waitFor();
+    if ((await page.locator("iframe").count()) !== 0 || (await page.content()).includes("Inline JavaScript")) {
+      throw new Error("The locked page rendered artifact content.");
+    }
+    if ((await page.getByText("This artifact does not exist.").count()) !== 0) {
+      throw new Error("The locked page showed the missing notice.");
+    }
+    await waitForRestingPaint(page);
+    await screenshot(page, "visitor-password-page");
+
+    const field = page.getByLabel("Password", { exact: true });
+    await field.fill("not the password");
+    const wrongRequest = page.waitForRequest((request) => request.url() === `${detailUrl}/unlock`);
+    await page.getByRole("button", { name: "Unlock" }).click();
+    const wrong = await wrongRequest;
+    if (wrong.headers().cookie || wrong.url().includes("not")) {
+      throw new Error("The unlock request carried a cookie or put the password in the URL.");
+    }
+    await page.getByRole("alert").filter({ hasText: "That password didn't work" }).waitFor();
+    if ((await field.getAttribute("aria-invalid")) !== "true" || (await page.locator("iframe").count()) !== 0) {
+      throw new Error("A wrong password did not flag the field or revealed the artifact.");
+    }
+    await waitForRestingPaint(page);
+    await screenshot(page, "visitor-wrong-password");
+
+    await field.fill(firstPassword);
+    const grantedRequest = page.waitForRequest(
+      (request) => request.method() === "GET" && request.url() === detailUrl && Boolean(request.headers()["x-factrove-share-grant"]),
+    );
+    await page.getByRole("button", { name: "Unlock" }).click();
+    const granted = await grantedRequest;
+    if (granted.headers().cookie) {
+      throw new Error("The granted detail request attached a cookie.");
+    }
+    await assertIsolatedFrame(page, fixture);
+    grant = await page.evaluate((artifactId) => {
+      const stored = JSON.parse(sessionStorage.getItem(`factrove:share-grant:${artifactId}`) ?? "{}");
+      return stored.grant ?? "";
+    }, id);
+    if (!/^g1\./.test(grant) || (await visitor.cookies()).length !== 0) {
+      throw new Error("The unlock did not store a grant in sessionStorage.");
+    }
+    if (granted.headers()["x-factrove-share-grant"] !== grant) {
+      throw new Error("The detail request did not send the stored grant.");
+    }
+    const src = (await page.locator("iframe").getAttribute("src")) ?? "";
+    if (!src.startsWith(`${detailUrl}/content?ticket=t1.`) || src.includes(grant)) {
+      throw new Error(`The iframe src was ${src}`);
+    }
+    const inside = await page.frameLocator("iframe").locator("body").evaluate(() => {
+      let storage = "blocked";
+      try {
+        void window.sessionStorage.length;
+        storage = "readable";
+      } catch {
+        storage = "blocked";
+      }
+      return { href: window.location.href, referrer: document.referrer, storage, cookie: (() => {
+        try {
+          return document.cookie;
+        } catch {
+          return "";
+        }
+      })() };
+    });
+    if (inside.href.includes(grant) || inside.referrer || inside.storage !== "blocked" || inside.cookie) {
+      throw new Error(`The artifact iframe could see the grant: ${JSON.stringify(inside)}`);
+    }
+    // The page spent at least two uses (preflight and frame load), so a third outside fetch is the last allowed.
+    const lastUse = await fetch(src);
+    await lastUse.arrayBuffer();
+    const exhausted = await fetch(src);
+    await exhausted.arrayBuffer();
+    if (exhausted.status !== 401) {
+      throw new Error(`A content ticket was honored past its use limit (${exhausted.status}).`);
+    }
+    await page.getByText("Unlocked with password").waitFor();
+    await waitForRestingPaint(page);
+    await screenshot(page, "visitor-unlocked-view");
+
+    await page.reload();
+    await page.locator("iframe").waitFor({ timeout: 20000 });
+    if ((await page.getByLabel("Password", { exact: true }).count()) !== 0) {
+      throw new Error("A reload in the same tab asked for the password again.");
+    }
+
+    const other = await visitor.newPage();
+    try {
+      await other.goto(shareUrl);
+      await other.getByRole("heading", { name: "This artifact is locked" }).waitFor();
+    } finally {
+      await other.close();
+    }
+
+    await ownerPasswordChange(id, secondPassword);
+    const stale = await fetch(detailUrl, { headers: { "x-factrove-share-grant": grant } });
+    await stale.arrayBuffer();
+    if (stale.status !== 401) {
+      throw new Error(`A grant survived a password change (${stale.status}).`);
+    }
+    await page.reload();
+    await page.getByText("Your access expired or the password changed.").waitFor();
+    await page.getByLabel("Password", { exact: true }).fill(firstPassword);
+    await page.getByRole("button", { name: "Unlock" }).click();
+    await page.getByRole("alert").filter({ hasText: "That password didn't work" }).waitFor();
+    await page.getByLabel("Password", { exact: true }).fill(secondPassword);
+    await page.getByRole("button", { name: "Unlock" }).click();
+    await page.locator("iframe").waitFor({ timeout: 20000 });
+
+    await ownerRemovePassword(id);
+    await page.reload();
+    await assertIsolatedFrame(page, fixture);
+    if ((await page.getByText("Unlocked with password").count()) !== 0) {
+      throw new Error("An unprotected link still said it was unlocked with a password.");
+    }
+    const open = await fetch(detailUrl);
+    const openBody = await open.json();
+    if (open.status !== 200 || openBody.artifact?.passwordProtected !== false || openBody.artifact.contentUrl.includes("ticket=")) {
+      throw new Error(`Removing the password left ${open.status} ${JSON.stringify(openBody)}.`);
+    }
+  } finally {
+    await page.close();
+    await visitor.close();
+  }
+
+  const relocked = await runInput(
+    "pnpm",
+    ["factrove", "share", id, "--password-stdin", "--json", "--profile", "e2e"],
+    firstPassword,
+    cliChildEnv(configDir),
+  );
+  const relockedShare = JSON.parse(relocked.stdout).share;
+  if (relocked.code !== 0 || relockedShare.shareUrl !== shareUrl || relockedShare.passwordProtected !== true) {
+    throw new Error(`Re-protecting the link changed it or failed.\n${relocked.stdout}\n${relocked.stderr}`);
+  }
+  const unlock = await fetch(`${detailUrl}/unlock`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: firstPassword }),
+  });
+  const unlockBody = await unlock.json();
+  if (unlock.status !== 200 || !unlockBody.grant?.token) {
+    throw new Error(`Unlock returned ${unlock.status} ${JSON.stringify(unlockBody)}.`);
+  }
+  const revoked = await must("pnpm", ["factrove", "share", id, "--revoke", "--profile", "e2e"], cliChildEnv(configDir));
+  if (revoked.stdout.trim() !== `Revoked the public link for ${id}.`) {
+    throw new Error(`Revoke output was ${JSON.stringify(revoked.stdout)}`);
+  }
+  await expectSql(`select share_password_hash is null from artifact where id = '${id}'`, "t");
+  const afterRevoke = await fetch(detailUrl, { headers: { "x-factrove-share-grant": unlockBody.grant.token } });
+  const afterRevokeBody = await afterRevoke.json();
+  if (afterRevoke.status !== 404 || afterRevokeBody.error?.code !== "ARTIFACT_NOT_FOUND") {
+    throw new Error(`A grant survived revoke: ${afterRevoke.status} ${JSON.stringify(afterRevokeBody)}.`);
+  }
+  const unlockRevoked = await fetch(`${detailUrl}/unlock`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: firstPassword }),
+  });
+  await unlockRevoked.arrayBuffer();
+  if (unlockRevoked.status !== 404) {
+    throw new Error(`Unlocking a revoked link returned ${unlockRevoked.status}.`);
+  }
+  await expectPublicMissing(shareUrl, token);
+}
+
+async function ownerPasswordChange(id, password) {
+  const page = await ownerContext.newPage();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.goto(`${webOrigin}/artifacts/${id}`);
+    const region = await openOwnerSharePanel(page);
+    const controls = region.getByRole("region", { name: "Link password" });
+    await controls.getByText("Password protected").waitFor();
+    if (!(await controls.getByText("Visitors unlock it once per tab").count())) {
+      throw new Error("The owner panel did not explain how visitors unlock the link.");
+    }
+    await controls.getByRole("button", { name: "Change password" }).click();
+    const field = controls.getByLabel("New link password");
+    await field.fill(password);
+    await waitForRestingPaint(page);
+    await screenshot(page, "owner-password-controls");
+    await controls.getByRole("button", { name: "Save new password" }).click();
+    await page.getByText("Password changed").first().waitFor();
+    if ((await controls.getByLabel("New link password").count()) !== 0) {
+      throw new Error("The password form stayed open after saving.");
+    }
+    if ((await page.content()).includes(password)) {
+      throw new Error("The owner page kept the password in the document.");
+    }
+  } finally {
+    await page.close();
+  }
+}
+
+async function ownerRemovePassword(id) {
+  const page = await ownerContext.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  try {
+    await page.goto(`${webOrigin}/artifacts/${id}`);
+    await openOwnerSharePanel(page);
+    const controls = page.getByRole("region", { name: "Link password" });
+    await controls.getByRole("button", { name: "Remove password" }).click();
+    await controls.getByText("No password").waitFor();
+  } finally {
+    await page.close();
+  }
+}
+
+async function screenshot(page, name) {
+  if (!screenshotDir) {
+    return;
+  }
+  await mkdir(screenshotDir, { recursive: true });
+  await page.screenshot({ path: join(screenshotDir, `${name}.png`) });
+}
+
+function printedShareUrl(stdout) {
+  return stdout.trim().split(/\r?\n/)[0] ?? "";
+}
+
+async function openOwnerSharePanel(page) {
+  const region = page.getByRole("region", { name: "Public link" });
+  if ((await region.count()) === 0) {
+    await page.getByRole("button", { name: /Sharing/ }).click();
+  }
+  await region.waitFor();
+  return region;
+}
+
+async function waitForRestingPaint(page) {
+  await page.evaluate(() =>
+    Promise.all(
+      document.getAnimations().flatMap((animation) => {
+        const iterations = animation.effect?.getComputedTiming().iterations;
+        if (iterations === Infinity) {
+          return [];
+        }
+        return [animation.finished.catch(() => undefined)];
+      }),
+    ),
+  );
 }
 
 async function expectPublicMissing(shareUrl, token) {

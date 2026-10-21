@@ -20,7 +20,8 @@ const artifact: ArtifactDto = {
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
   contentUrl,
-  shared: false
+  shared: false,
+  passwordProtected: false
 };
 
 const root = document.getElementById("root");

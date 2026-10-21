@@ -5,6 +5,8 @@ import {
   contentMediaTypes,
   contextEnvelopeSchema,
   publicArtifactEnvelopeSchema,
+  publicUnlockEnvelopeSchema,
+  SHARE_GRANT_HEADER,
   shareEnvelopeSchema,
   type AccessType,
   type ArtifactEnvelope,
@@ -13,6 +15,7 @@ import {
   type ContentMediaType,
   type ContextEnvelope,
   type PublicArtifactEnvelope,
+  type PublicUnlockEnvelope,
   type ShareEnvelope
 } from "@factrove/contracts";
 
@@ -21,12 +24,14 @@ const API_PREFIX = "/api/v1";
 export class FactroveApiError extends Error {
   readonly status: number | null;
   readonly code: string;
+  readonly retryAfterSeconds?: number;
 
-  constructor(message: string, options: { status: number | null; code: string }) {
+  constructor(message: string, options: { status: number | null; code: string; retryAfterSeconds?: number }) {
     super(message);
     this.name = "FactroveApiError";
     this.status = options.status;
     this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -59,9 +64,13 @@ export interface FactroveClient {
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
   getArtifactShare(id: string): Promise<ShareEnvelope>;
-  createArtifactShare(id: string): Promise<ShareEnvelope>;
+  /** password sets or replaces the link password. Omit it to keep the current one. */
+  createArtifactShare(id: string, input?: { password?: string }): Promise<ShareEnvelope>;
   revokeArtifactShare(id: string): Promise<ShareEnvelope>;
-  getPublicArtifact(id: string, token: string): Promise<PublicArtifactEnvelope>;
+  removeArtifactSharePassword(id: string): Promise<ShareEnvelope>;
+  /** grant is sent in the x-factrove-share-grant header, never in the URL. */
+  getPublicArtifact(id: string, token: string, input?: { grant?: string }): Promise<PublicArtifactEnvelope>;
+  unlockPublicArtifact(id: string, token: string, password: string): Promise<PublicUnlockEnvelope>;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -81,18 +90,30 @@ function normalizeBaseUrl(baseUrl: string): string {
   return `${parsed.origin}${pathname}`.replace(/\/$/, "");
 }
 
-function parseErrorPayload(payload: unknown, status: number): FactroveApiError {
+function parseErrorPayload(payload: unknown, status: number, headers?: Headers): FactroveApiError {
   const parsed = apiErrorSchema.safeParse(payload);
+  const retryAfterSeconds = readRetryAfterSeconds(headers);
   if (parsed.success) {
     return new FactroveApiError(parsed.data.error.message, {
       status,
-      code: parsed.data.error.code
+      code: parsed.data.error.code,
+      retryAfterSeconds
     });
   }
   return new FactroveApiError(`Request failed with HTTP ${status}`, {
     status,
-    code: "INVALID_RESPONSE"
+    code: "INVALID_RESPONSE",
+    retryAfterSeconds
   });
+}
+
+function readRetryAfterSeconds(headers?: Headers): number | undefined {
+  const raw = headers?.get("retry-after");
+  if (!raw) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(raw, 10);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
 export function createFactroveClient(options: FactroveClientOptions): FactroveClient {
@@ -129,14 +150,14 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     try {
       payload = await response.json();
     } catch {
-      if (!response.ok) throw parseErrorPayload(null, response.status);
+      if (!response.ok) throw parseErrorPayload(null, response.status, response.headers);
       throw new FactroveApiError("The API returned an invalid JSON response", {
         status: response.status,
         code: "INVALID_RESPONSE"
       });
     }
 
-    if (!response.ok) throw parseErrorPayload(payload, response.status);
+    if (!response.ok) throw parseErrorPayload(payload, response.status, response.headers);
     try {
       return schema.parse(payload);
     } catch {
@@ -156,7 +177,7 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       } catch {
         payload = null;
       }
-      throw parseErrorPayload(payload, response.status);
+      throw parseErrorPayload(payload, response.status, response.headers);
     }
     const received = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
     if (received !== mediaType) {
@@ -191,15 +212,37 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     getArtifact: (id) => request(`/artifacts/${encodeURIComponent(id)}`, { method: "GET" }, artifactEnvelopeSchema),
     getArtifactShare: (id) =>
       request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "GET" }, shareEnvelopeSchema),
-    createArtifactShare: (id) =>
-      request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "POST" }, shareEnvelopeSchema),
+    createArtifactShare: (id, input) =>
+      request(
+        `/artifacts/${encodeURIComponent(id)}/share`,
+        input?.password === undefined
+          ? { method: "POST" }
+          : {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ password: input.password })
+            },
+        shareEnvelopeSchema
+      ),
     revokeArtifactShare: (id) =>
       request(`/artifacts/${encodeURIComponent(id)}/share`, { method: "DELETE" }, shareEnvelopeSchema),
-    getPublicArtifact: (id, token) =>
+    removeArtifactSharePassword: (id) =>
+      request(`/artifacts/${encodeURIComponent(id)}/share/password`, { method: "DELETE" }, shareEnvelopeSchema),
+    getPublicArtifact: (id, token, input) =>
       request(
         `/public/artifacts/${encodeURIComponent(id)}/${encodeURIComponent(token)}`,
-        { method: "GET" },
+        input?.grant ? { method: "GET", headers: { [SHARE_GRANT_HEADER]: input.grant } } : { method: "GET" },
         publicArtifactEnvelopeSchema
+      ),
+    unlockPublicArtifact: (id, token, password) =>
+      request(
+        `/public/artifacts/${encodeURIComponent(id)}/${encodeURIComponent(token)}/unlock`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password })
+        },
+        publicUnlockEnvelopeSchema
       ),
     getArtifactContent: (id, input) => {
       const format = input?.format ?? "html";

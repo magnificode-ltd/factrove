@@ -5,6 +5,9 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import { configureHttpApp } from "./configure-http-app.js";
 import { API_CONFIG, type ApiConfig } from "./services/api-config.js";
+import { ARGON2_UNAVAILABLE_MESSAGE, assertSharePasswordSupport } from "./sharing/share-password.js";
+
+assertSharePasswordSupport();
 
 loadLocalEnv();
 
@@ -35,6 +38,9 @@ function startupMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "API failed to start";
   if (/postgres(ql)?:\/\//i.test(message)) {
     return "API failed to start. Check database configuration.";
+  }
+  if (/export named 'argon2'|argon2 is not a function/i.test(message)) {
+    return ARGON2_UNAVAILABLE_MESSAGE;
   }
   return message;
 }

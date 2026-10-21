@@ -3,13 +3,17 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import {
   accessTypeSchema,
   artifactDtoSchema,
+  createShareRequestSchema,
   publicArtifactSchema,
+  publicUnlockRequestSchema,
   shareStateSchema,
   type AccessType,
   type ArtifactDto,
   type ArtifactView,
   type ContentFormat,
+  type CreateShareRequest,
   type PublicArtifact,
+  type PublicUnlockEnvelope,
   type ShareState,
 } from "@factrove/contracts";
 import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
@@ -18,8 +22,19 @@ import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markd
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
+import { argon2VerifyGate } from "../sharing/argon2-gate.js";
+import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
 import { browserOrigins } from "../sharing/public-origin.js";
 import { PublicViewLimiter } from "../sharing/public-view-limit.js";
+import {
+  deriveShareGrantKey,
+  mintShareGrant,
+  mintShareTicket,
+  readShareTicket,
+  shareGrantAllows,
+  ShareTicketLedger,
+  type ShareGrantScope,
+} from "../sharing/share-grant.js";
 import {
   artifactShareUrl,
   artifactViewerUrl,
@@ -27,7 +42,9 @@ import {
   hashShareToken,
   isShareToken,
   publicContentUrl,
+  ticketedContentUrl,
 } from "../sharing/share-link.js";
+import { hashSharePassword, sharePasswordFingerprint, verifySharePassword } from "../sharing/share-password.js";
 import { decryptShareToken, deriveShareTokenKey, encryptShareToken } from "../sharing/share-token-cipher.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
@@ -53,6 +70,8 @@ export class ArtifactsService {
     @Inject(ActorService) private readonly actors: ActorService,
     @Inject(API_CONFIG) private readonly config: ApiConfig,
     @Inject(PublicViewLimiter) private readonly publicViews: PublicViewLimiter,
+    @Inject(PasswordAttemptLimiter) private readonly passwordAttempts: PasswordAttemptLimiter,
+    @Inject(ShareTicketLedger) private readonly tickets: ShareTicketLedger,
   ) {}
 
   async upload(request: HeaderSource, file: unknown, body: unknown): Promise<ArtifactDto> {
@@ -117,10 +136,36 @@ export class ArtifactsService {
     return this.toShareState(await this.requireOwner(request, id));
   }
 
-  async createShare(request: HeaderSource, id: string): Promise<ShareState> {
+  async createShare(request: HeaderSource, id: string, readBody: () => unknown): Promise<ShareState> {
+    const owned = await this.requireOwner(request, id);
+    const input = readCreateShareInput(readBody());
+    const passwordHash = input.password === undefined ? undefined : await hashSharePassword(input.password);
+    return this.toShareState(await this.ensureShare(request, owned, passwordHash));
+  }
+
+  async removeSharePassword(request: HeaderSource, id: string): Promise<ShareState> {
     const record = await this.requireOwner(request, id);
-    if (this.readShareToken(record)) {
+    if (!this.readShareToken(record) || !record.shareTokenHash || !record.sharePasswordHash) {
       return this.toShareState(record);
+    }
+    const updated = await this.artifacts.clearSharePassword(record.id, record.shareTokenHash);
+    return this.toShareState(updated ?? (await this.requireOwner(request, id)));
+  }
+
+  private async ensureShare(
+    request: HeaderSource,
+    record: ArtifactRecord,
+    passwordHash?: string,
+  ): Promise<ArtifactRecord> {
+    if (this.readShareToken(record) && record.shareTokenHash) {
+      if (passwordHash === undefined) {
+        return record;
+      }
+      const updated = await this.artifacts.setSharePassword(record.id, record.shareTokenHash, passwordHash);
+      if (!updated) {
+        throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+      }
+      return updated;
     }
     if (record.shareTokenHash) {
       await this.artifacts.clearShare(record.id);
@@ -132,6 +177,7 @@ export class ArtifactsService {
         record.id,
         encryptShareToken(token, this.shareKey(), record.id),
         hashShareToken(token),
+        passwordHash ?? null,
       );
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown";
@@ -139,33 +185,47 @@ export class ArtifactsService {
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
     if (!saved?.shareToken) {
-      const current = await this.requireOwner(request, id);
-      if (current.shareToken) {
-        return this.toShareState(current);
+      const current = await this.requireOwner(request, record.id);
+      if (current.shareToken && current.shareTokenHash) {
+        if (passwordHash === undefined) {
+          return current;
+        }
+        const updated = await this.artifacts.setSharePassword(current.id, current.shareTokenHash, passwordHash);
+        if (!updated) {
+          throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+        }
+        return updated;
       }
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
-    return this.toShareState(saved);
+    return saved;
   }
 
   async revokeShare(request: HeaderSource, id: string): Promise<ShareState> {
     const record = await this.requireOwner(request, id);
     if (!record.shareTokenHash) {
-      return { shared: false, shareUrl: null };
+      return { shared: false, shareUrl: null, passwordProtected: false };
     }
     return this.toShareState(await this.artifacts.clearShare(record.id));
   }
 
-  async openPublic(id: string, token: string, clientIp: string | null): Promise<PublicArtifact> {
+  async openPublic(id: string, token: string, clientIp: string | null, grant: unknown): Promise<PublicArtifact> {
     this.chargePublicView(clientIp, "view");
     const record = await this.findPublic(id, token);
+    const scope = this.grantScope(record);
+    if (scope && !shareGrantAllows(grant, scope, this.grantKey())) {
+      throw passwordRequired();
+    }
     return publicArtifactSchema.parse({
       id: record.id,
       filename: artifactObjectKey(record.id),
       mimeType: "text/html",
       sizeBytes: record.sizeBytes,
       uploadedAt: record.uploadedAt.toISOString(),
-      contentUrl: publicContentUrl(this.config.apiPublicOrigin, record.id, token),
+      contentUrl: scope
+        ? ticketedContentUrl(this.config.apiPublicOrigin, record.id, token, mintShareTicket(scope, this.grantKey()))
+        : publicContentUrl(this.config.apiPublicOrigin, record.id, token),
+      passwordProtected: scope !== null,
     });
   }
 
@@ -173,9 +233,17 @@ export class ArtifactsService {
     id: string,
     token: string,
     clientIp: string | null,
+    ticket: unknown,
   ): Promise<Extract<OpenedArtifactContent, { format: "html" }>> {
     this.chargePublicView(clientIp, "content");
     const record = await this.findPublic(id, token);
+    const scope = this.grantScope(record);
+    if (scope) {
+      const redeemable = readShareTicket(ticket, scope, this.grantKey());
+      if (!redeemable || !this.tickets.redeem(redeemable.nonce, redeemable.expiresAtMs)) {
+        throw passwordRequired();
+      }
+    }
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
       stored = await this.blobs.get(artifactObjectKey(record.id));
@@ -186,6 +254,96 @@ export class ArtifactsService {
       throw error;
     }
     return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+  }
+
+  // Invalid bodies are rejected before any bucket is touched. The client failure budget is
+  // reserved before lookup and refunded after a match or an infrastructure error. An in-flight
+  // share check is reserved before Argon2 so concurrent wrongs cannot overshoot the confirmed
+  // cap; a match or server error releases it, and a wrong password converts it to a confirmed
+  // failure. Exhausted confirmed failures are 429 with no hash work. When the cap still has
+  // room but every remaining slot is in flight, unlock is 503 like a saturated gate and still
+  // spends the per-IP verify budget. Every verify spends that budget; a saturated gate keeps
+  // the charge. Recent confirmed failures add a short delay before verify, not a rejection.
+  // The process-wide gate is held only around Argon2.
+  async unlockPublic(
+    id: string,
+    token: string,
+    clientIp: string | null,
+    readBody: () => unknown,
+  ): Promise<PublicUnlockEnvelope> {
+    const password = readUnlockPassword(readBody());
+    const clientCharge = this.passwordAttempts.reserveClient(clientIp);
+    if (!clientCharge) {
+      throw tooManyPasswordAttempts(this.passwordAttempts.clientRetryAfterSeconds(clientIp));
+    }
+    let record: ArtifactRecord & { uploadedAt: Date };
+    try {
+      record = await this.findPublic(id, token);
+    } catch (error) {
+      if (!(error instanceof ApiErrorException && error.status === 404)) {
+        this.passwordAttempts.refundClient(clientCharge);
+      }
+      throw error;
+    }
+    const scope = this.grantScope(record);
+    if (!scope || !record.sharePasswordHash || !record.shareTokenHash) {
+      this.passwordAttempts.refundClient(clientCharge);
+      return { grant: null };
+    }
+    const shareTokenHash = record.shareTokenHash;
+    const delayMs = this.passwordAttempts.shareDelayMs(shareTokenHash);
+    const admission = this.passwordAttempts.beginShareCheck(shareTokenHash);
+    if (admission === "locked") {
+      this.passwordAttempts.refundClient(clientCharge);
+      throw tooManyPasswordAttempts(this.passwordAttempts.shareRetryAfterSeconds(shareTokenHash));
+    }
+    if (admission === "busy") {
+      if (!this.passwordAttempts.reserveVerify(clientIp)) {
+        this.passwordAttempts.refundClient(clientCharge);
+        throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
+      }
+      this.passwordAttempts.refundClient(clientCharge);
+      throw unlockBusy();
+    }
+    if (!this.passwordAttempts.reserveVerify(clientIp)) {
+      this.passwordAttempts.releaseShareCheck(shareTokenHash);
+      this.passwordAttempts.refundClient(clientCharge);
+      throw tooManyPasswordAttempts(this.passwordAttempts.verifyRetryAfterSeconds(clientIp));
+    }
+    try {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      if (!this.passwordAttempts.tryBeginVerify(clientIp)) {
+        throw tooManyPasswordAttempts(1);
+      }
+      try {
+        if (!argon2VerifyGate.tryAcquire()) {
+          throw unlockBusy();
+        }
+        try {
+          if (!(await verifySharePassword(password, record.sharePasswordHash))) {
+            throw new ApiErrorException(401, "PASSWORD_INCORRECT", "That password is not right.");
+          }
+          this.passwordAttempts.releaseShareCheck(shareTokenHash);
+          this.passwordAttempts.refundClient(clientCharge);
+          const grant = mintShareGrant(scope, this.grantKey());
+          return { grant: { token: grant.token, expiresAt: grant.expiresAt.toISOString() } };
+        } finally {
+          argon2VerifyGate.release();
+        }
+      } finally {
+        this.passwordAttempts.endVerify(clientIp);
+      }
+    } catch (error) {
+      if (error instanceof ApiErrorException && error.status === 401) {
+        this.passwordAttempts.confirmShareFailure(shareTokenHash);
+      } else {
+        this.passwordAttempts.releaseShareCheck(shareTokenHash);
+        this.passwordAttempts.refundClient(clientCharge);
+      }
+      throw error;
+    }
   }
 
   framingOrigins(): readonly string[] {
@@ -289,6 +447,21 @@ export class ArtifactsService {
     return deriveShareTokenKey(this.config.shareTokenKey ?? this.config.authSecret);
   }
 
+  private grantKey(): Buffer {
+    return deriveShareGrantKey(this.config.shareTokenKey ?? this.config.authSecret);
+  }
+
+  private grantScope(record: ArtifactRecord): ShareGrantScope | null {
+    if (!record.sharePasswordHash || !record.shareTokenHash) {
+      return null;
+    }
+    return {
+      artifactId: record.id,
+      shareTokenHash: record.shareTokenHash,
+      passwordFingerprint: sharePasswordFingerprint(record.sharePasswordHash),
+    };
+  }
+
   private readShareToken(record: ArtifactRecord): string | null {
     if (!record.shareToken || !record.shareTokenHash) {
       return null;
@@ -303,11 +476,15 @@ export class ArtifactsService {
   private toShareState(record: ArtifactRecord): ShareState {
     const token = this.readShareToken(record);
     if (!token) {
-      return shareStateSchema.parse({ shared: false, shareUrl: null });
+      return shareStateSchema.parse({ shared: false, shareUrl: null, passwordProtected: false });
     }
     return shareStateSchema.parse({
       shared: true,
       shareUrl: artifactShareUrl(this.config.publicBaseUrl, record.id, token),
+      passwordProtected: record.sharePasswordHash !== null,
+      ...(record.sharePasswordHash && record.shareTokenHash && !this.passwordAttempts.shareHasRoom(record.shareTokenHash)
+        ? { guessesLockedOut: true }
+        : {}),
     });
   }
 
@@ -357,11 +534,16 @@ export class ArtifactsService {
       updatedAt: record.updatedAt.toISOString(),
       uploadedAt: record.uploadedAt.toISOString(),
       viewerUrl: artifactViewerUrl(this.config.publicBaseUrl, record.id),
-      shared: this.readShareToken(record) !== null,
+      ...this.shareFlags(record),
       contentUrl: includeGrant
         ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
         : artifactContentUrl(this.config.apiPublicOrigin, record.id),
     });
+  }
+
+  private shareFlags(record: ArtifactRecord): { shared: boolean; passwordProtected: boolean } {
+    const shared = this.readShareToken(record) !== null;
+    return { shared, passwordProtected: shared && record.sharePasswordHash !== null };
   }
 
   private async deleteOrphan(id: string, objectKey: string): Promise<void> {
@@ -391,6 +573,46 @@ export type OpenedArtifactContent =
 
 function artifactNotFound(): ApiErrorException {
   return new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+}
+
+function passwordRequired(): ApiErrorException {
+  return new ApiErrorException(401, "PASSWORD_REQUIRED", "This link needs a password.");
+}
+
+function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
+  return new ApiErrorException(
+    429,
+    "RATE_LIMITED",
+    "Too many password attempts. Try again later.",
+    Math.max(1, retryAfterSeconds),
+  );
+}
+
+function unlockBusy(): ApiErrorException {
+  return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
+}
+
+function readCreateShareInput(body: unknown): CreateShareRequest {
+  if (body === undefined) {
+    return {};
+  }
+  const parsed = createShareRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const message = issue?.path[0] === "password" && issue.code !== "invalid_type"
+      ? `The password is invalid. ${issue.message}`
+      : "Send an optional password string.";
+    throw new ApiErrorException(400, "INVALID_REQUEST", message);
+  }
+  return parsed.data;
+}
+
+function readUnlockPassword(body: unknown): string {
+  const parsed = publicUnlockRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", "Send the password as a string.");
+  }
+  return parsed.data.password;
 }
 
 function isArtifactId(value: string): boolean {

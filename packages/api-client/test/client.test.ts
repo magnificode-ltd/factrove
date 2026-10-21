@@ -14,7 +14,8 @@ const artifact = {
   uploadedAt: "2026-10-11T10:00:00.000Z",
   viewerUrl: "http://localhost:3000/artifacts/123e4567-e89b-42d3-a456-426614174000",
   contentUrl: "http://localhost:3001/api/v1/artifacts/123e4567-e89b-42d3-a456-426614174000/content",
-  shared: false
+  shared: false,
+  passwordProtected: false
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -71,6 +72,22 @@ describe("Factrove API client", () => {
     const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
     await expect(client.getArtifact("missing")).rejects.toMatchObject({
       name: "FactroveApiError", status: 404, code: "ARTIFACT_NOT_FOUND", message: "Artifact not found"
+    });
+  });
+
+  it("reads Retry-After on throttled unlock errors", async () => {
+    const fetchStub = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many password attempts. Try again later." } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "17" }
+      })
+    );
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+    await expect(client.unlockPublicArtifact(artifact.id, "a".repeat(43), "open sesame 42")).rejects.toMatchObject({
+      name: "FactroveApiError",
+      status: 429,
+      code: "RATE_LIMITED",
+      retryAfterSeconds: 17
     });
   });
 
@@ -170,14 +187,15 @@ describe("Factrove API client", () => {
     const share = {
       share: {
         shared: true,
-        shareUrl: `https://factrove.app/share/${artifact.id}/${token}`
+        shareUrl: `https://factrove.app/share/${artifact.id}/${token}`,
+        passwordProtected: false
       }
     };
     const calls: Array<{ url: string; method: string | undefined }> = [];
     const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(input), method: init?.method });
       if (init?.method === "DELETE") {
-        return jsonResponse({ share: { shared: false, shareUrl: null } });
+        return jsonResponse({ share: { shared: false, shareUrl: null, passwordProtected: false } });
       }
       if (String(input).includes("/public/")) {
         return jsonResponse({
@@ -187,7 +205,8 @@ describe("Factrove API client", () => {
             mimeType: "text/html",
             sizeBytes: 13,
             uploadedAt: artifact.uploadedAt,
-            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}/content`
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}/content`,
+            passwordProtected: false
           }
         });
       }
@@ -200,7 +219,7 @@ describe("Factrove API client", () => {
     });
     await expect(client.createArtifactShare(artifact.id)).resolves.toEqual(share);
     await expect(client.getArtifactShare(artifact.id)).resolves.toEqual(share);
-    await expect(client.revokeArtifactShare(artifact.id)).resolves.toEqual({ share: { shared: false, shareUrl: null } });
+    await expect(client.revokeArtifactShare(artifact.id)).resolves.toEqual({ share: { shared: false, shareUrl: null, passwordProtected: false } });
     const opened = await client.getPublicArtifact(artifact.id, token);
     expect(opened.artifact.id).toBe(artifact.id);
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
@@ -211,6 +230,66 @@ describe("Factrove API client", () => {
     ]);
     const authorization = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.headers;
     expect(new Headers(authorization).get("authorization")).toBe("Bearer ftrv_test_key");
+  });
+
+  it("sends share passwords and unlock grants in the body and a header, never in the URL", async () => {
+    const token = "c".repeat(43);
+    const password = "correct horse battery";
+    const grant = "g1.abc.signature";
+    const calls: Array<{ url: string; method: string | undefined; headers: Headers; body: unknown }> = [];
+    const protectedShare = {
+      share: { shared: true, shareUrl: `https://factrove.app/share/${artifact.id}/${token}`, passwordProtected: true }
+    };
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method, headers: new Headers(init?.headers), body: init?.body });
+      const url = String(input);
+      if (url.endsWith("/unlock")) {
+        return jsonResponse({ grant: { token: grant, expiresAt: "2026-10-21T10:15:00.000Z" } });
+      }
+      if (url.includes("/public/")) {
+        return jsonResponse({
+          artifact: {
+            id: artifact.id,
+            filename: `${artifact.id}.html`,
+            mimeType: "text/html",
+            sizeBytes: 13,
+            uploadedAt: artifact.uploadedAt,
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}/content?ticket=t1.x`,
+            passwordProtected: true
+          }
+        });
+      }
+      if (url.endsWith("/share/password")) {
+        return jsonResponse({ share: { ...protectedShare.share, passwordProtected: false } });
+      }
+      return jsonResponse(protectedShare);
+    });
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+
+    await expect(client.createArtifactShare(artifact.id, { password })).resolves.toEqual(protectedShare);
+    await client.removeArtifactSharePassword(artifact.id);
+    await expect(client.unlockPublicArtifact(artifact.id, token, password)).resolves.toEqual({
+      grant: { token: grant, expiresAt: "2026-10-21T10:15:00.000Z" }
+    });
+    await client.getPublicArtifact(artifact.id, token, { grant });
+    await client.getPublicArtifact(artifact.id, token);
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      `POST http://localhost:3001/api/v1/artifacts/${artifact.id}/share`,
+      `DELETE http://localhost:3001/api/v1/artifacts/${artifact.id}/share/password`,
+      `POST http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}/unlock`,
+      `GET http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}`,
+      `GET http://localhost:3001/api/v1/public/artifacts/${artifact.id}/${token}`
+    ]);
+    expect(calls[0]?.headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(String(calls[0]?.body))).toEqual({ password });
+    expect(JSON.parse(String(calls[2]?.body))).toEqual({ password });
+    expect(calls[3]?.headers.get("x-factrove-share-grant")).toBe(grant);
+    expect(calls[4]?.headers.has("x-factrove-share-grant")).toBe(false);
+    for (const call of calls) {
+      expect(call.url).not.toContain(password);
+      expect(call.url).not.toContain(grant);
+    }
   });
 
   it("maps fetch/network failures without inventing an HTTP status", async () => {

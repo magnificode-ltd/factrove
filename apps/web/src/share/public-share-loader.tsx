@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPublicBrowserClient } from "@/api/client";
 import { ViewerBar } from "@/components/chrome";
-import { loadPublicArtifact, type PublicShareModel } from "@/share/load-public-artifact";
+import { loadPublicArtifact, unlockPublicArtifact, type PublicShareModel } from "@/share/load-public-artifact";
+import type { UnlockFeedback } from "@/share/locked-share";
 import { PublicShareScreen } from "@/share/public-share-screen";
+import { clearShareGrant, readShareGrant, saveShareGrant } from "@/share/share-grant-store";
+
+const UNLOCK_MOTION_MS = 720;
 
 export function PublicShareLoader({
   id,
@@ -16,19 +20,64 @@ export function PublicShareLoader({
   fetchImpl?: typeof fetch;
 }) {
   const [state, setState] = useState<PublicShareModel | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [unlocked, setUnlocked] = useState(false);
+  const active = useRef(true);
+  const client = useMemo(() => createPublicBrowserClient(fetchImpl), [fetchImpl]);
 
   useEffect(() => {
-    const client = createPublicBrowserClient(fetchImpl);
-    let active = true;
-    void loadPublicArtifact(client, id, token).then((next) => {
-      if (active) {
-        setState(next);
+    active.current = true;
+    const grant = readShareGrant(id, token);
+    void loadPublicArtifact(client, id, token, grant).then((next) => {
+      if (!active.current) {
+        return;
       }
+      if (next.status === "locked") {
+        clearShareGrant(id);
+      }
+      setState(next);
     });
     return () => {
-      active = false;
+      active.current = false;
     };
-  }, [fetchImpl, id, token]);
+  }, [client, id, token]);
+
+  const onUnlock = useCallback(
+    async (password: string): Promise<UnlockFeedback> => {
+      const result = await unlockPublicArtifact(client, id, token, password);
+      if (!active.current) {
+        return null;
+      }
+      if (result.status === "incorrect" || result.status === "throttled" || result.status === "busy") {
+        return result;
+      }
+      if (result.status !== "unlocked") {
+        setState(result);
+        return null;
+      }
+      if (result.grant) {
+        saveShareGrant(id, token, result.grant);
+      }
+      const next = await loadPublicArtifact(client, id, token, result.grant?.token ?? null);
+      if (!active.current) {
+        return null;
+      }
+      if (next.status !== "ready") {
+        clearShareGrant(id);
+        setState(next);
+        return null;
+      }
+      setOpening(true);
+      await wait(prefersReducedMotion() ? 0 : UNLOCK_MOTION_MS);
+      if (active.current) {
+        setOpening(false);
+        setUnlocked(true);
+        setState(next);
+      }
+      return null;
+    },
+    [client, id, token]
+  );
 
   if (!state) {
     return (
@@ -43,5 +92,13 @@ export function PublicShareLoader({
     );
   }
 
-  return <PublicShareScreen state={state} />;
+  return <PublicShareScreen state={state} opening={opening} unlocked={unlocked} onUnlock={onUnlock} />;
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

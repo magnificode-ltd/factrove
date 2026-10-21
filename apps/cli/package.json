@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@factrove/api-client": "workspace:*",
+    "@factrove/contracts": "workspace:*",
     "@nestjs/common": "11.1.9",
     "@nestjs/core": "11.1.9",
     "reflect-metadata": "0.2.2",
@@ -23,3 +24,4 @@
     "vitest": "3.2.4"
   }
 }
+

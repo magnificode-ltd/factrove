@@ -21,6 +21,7 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     uploadedAt: row.uploadedAt,
     shareToken: row.shareToken,
     shareTokenHash: row.shareTokenHash,
+    sharePasswordHash: row.sharePasswordHash,
   };
 }
 
@@ -68,10 +69,17 @@ export class ArtifactsRepository {
   }
 
   // Stores a new token only while the artifact is unshared. A concurrent share keeps the first token.
-  async saveShare(id: string, shareToken: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+  // When a password hash is supplied it is written in the same update, so a failure cannot leave
+  // a live unprotected link.
+  async saveShare(
+    id: string,
+    shareToken: string,
+    shareTokenHash: string,
+    sharePasswordHash: string | null = null,
+  ): Promise<ArtifactRecord | null> {
     const updated = await this.prisma.artifact.updateMany({
       where: { id, shareTokenHash: null },
-      data: { shareToken, shareTokenHash },
+      data: { shareToken, shareTokenHash, sharePasswordHash },
     });
     if (updated.count !== 1) {
       return null;
@@ -82,9 +90,33 @@ export class ArtifactsRepository {
   async clearShare(id: string): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.update({
       where: { id },
-      data: { shareToken: null, shareTokenHash: null },
+      data: { shareToken: null, shareTokenHash: null, sharePasswordHash: null },
     });
     return toArtifactRecord(row);
+  }
+
+  // Applies only while the share with this hash is still active, so a revoke or a new
+  // token in between cannot receive the password.
+  async setSharePassword(id: string, shareTokenHash: string, sharePasswordHash: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id, shareTokenHash },
+      data: { sharePasswordHash },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
+  }
+
+  async clearSharePassword(id: string, shareTokenHash: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id, shareTokenHash },
+      data: { sharePasswordHash: null },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
   }
 
   // Public lookup uses the unique hash alone, then compares the id in memory.
@@ -104,6 +136,7 @@ export class ArtifactsRepository {
         uploadedAt: true,
         shareToken: true,
         shareTokenHash: true,
+        sharePasswordHash: true,
       },
     });
     if (!row || row.id !== id) {

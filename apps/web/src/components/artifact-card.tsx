@@ -48,7 +48,7 @@ export function ArtifactCard({
             <span className="pointer-events-auto relative z-10">
               <ShareControl
                 artifactId={artifact.id}
-                initial={{ shared: artifact.shared, shareUrl: null }}
+                initial={{ shared: artifact.shared, shareUrl: null, passwordProtected: artifact.passwordProtected }}
                 compact
               />
             </span>

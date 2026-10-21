@@ -12,6 +12,7 @@ export type ArtifactRecord = {
   uploadedAt: Date | null;
   shareToken: string | null;
   shareTokenHash: string | null;
+  sharePasswordHash: string | null;
 };
 
 export type CreateArtifactInput = {

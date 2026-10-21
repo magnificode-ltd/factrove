@@ -1,7 +1,6 @@
 packages:
   - apps/*
   - packages/*
-nodeVersion: 24.16.0
 engineStrict: true
 allowBuilds:
   '@nestjs/core': true
