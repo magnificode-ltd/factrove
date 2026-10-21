@@ -781,6 +781,135 @@ describe("HTTP API", () => {
     expect(store.objects.size).toBe(0);
   });
 
+  it("returns 400 for a file part with no filename and keeps serving", async () => {
+    const missingId = "00000000-0000-4000-8000-000000000099";
+    const bodies = [
+      ["----factrove-nofile", undefined],
+      ["----factrove-emptyfile", ""],
+    ] as const;
+    for (const [boundary, filename] of bodies) {
+      const body = filePartWithoutFilename(boundary, filename);
+      const created = await postMultipart(baseUrl, boundary, body);
+      expect(created.status).toBe(400);
+      expect((await errorOf(created)).message).toBe("Send exactly one file.");
+      const replaced = await putMultipart(baseUrl, missingId, boundary, body);
+      expect(replaced.status).toBe(400);
+      expect((await errorOf(replaced)).message).toBe("Send exactly one file.");
+    }
+    expect(await prisma.artifact.count()).toBe(0);
+    const alive = await upload(baseUrl, "alive.html", new TextEncoder().encode("<p>alive</p>"));
+    expect(alive.name).toBe("alive");
+  });
+
+  it("answers known multipart errors while the client is still trickling", async () => {
+    const boundary = "----factrove-pause";
+    const wrongField =
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="document"; filename="a.html"\r\n` +
+      `Content-Type: text/html\r\n\r\n`;
+    const malformed = `--${boundary}\r\nThis is not a header\r\n`;
+    const tooManyFields = Array.from({ length: 9 }, (_, index) =>
+      `--${boundary}\r\nContent-Disposition: form-data; name="extra${index}"\r\n\r\n${index}\r\n`,
+    ).join("");
+    const cases = [
+      ["POST", "/api/v1/artifacts", wrongField, "Send exactly one file."],
+      ["PUT", "/api/v1/artifacts/00000000-0000-4000-8000-000000000099/content", wrongField, "Send exactly one file."],
+      ["POST", "/api/v1/artifacts", malformed, "The request must be multipart form data with one file."],
+      ["POST", "/api/v1/artifacts", tooManyFields, "The request is invalid."],
+    ] as const;
+    for (const [method, path, head, message] of cases) {
+      const result = await tricklingMultipart(baseUrl, method, path, boundary, Buffer.from(head, "utf8"));
+      expect(result.status).toBe(400);
+      expect(result.message).toBe(message);
+      expect(result.elapsed).toBeLessThan(1000);
+    }
+    expect(await prisma.artifact.count()).toBe(0);
+    expect((await upload(baseUrl, "after-trickle.html", new TextEncoder().encode("<p>after</p>"))).name).toBe("after-trickle");
+  });
+
+  it("rejects an empty field name before saving create or replace", async () => {
+    const boundary = "----factrove-empty-name";
+    const file = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="ok.html"\r\nContent-Type: text/html\r\n\r\n<p>new</p>\r\n--${boundary}--\r\n`;
+    for (const nameHeader of [
+      `Content-Disposition: form-data; name=""`,
+      `Content-Disposition: form-data`,
+    ]) {
+      const body = Buffer.from(`--${boundary}\r\n${nameHeader}\r\n\r\nhello\r\n${file}`, "utf8");
+      const created = await postMultipart(baseUrl, boundary, body);
+      expect(created.status).toBe(400);
+      expect((await errorOf(created)).message).toBe("The request is invalid.");
+    }
+    expect(await prisma.artifact.count()).toBe(0);
+    expect(store.objects.size).toBe(0);
+
+    const artifact = await upload(baseUrl, "kept.html", new TextEncoder().encode("<p>kept</p>"));
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const replaceBody = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name=""\r\n\r\nhello\r\n${file}`,
+      "utf8",
+    );
+    const replaced = await putMultipart(baseUrl, artifact.id, boundary, replaceBody);
+    expect(replaced.status).toBe(400);
+    expect((await errorOf(replaced)).message).toBe("The request is invalid.");
+    const after = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(after.name).toBe(before.name);
+    expect(after.contentRevision).toBe(before.contentRevision);
+    expect(after.sizeBytes).toBe(before.sizeBytes);
+    expect(after.objectKey).toBe(before.objectKey);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(new TextDecoder().decode(await content.arrayBuffer())).toBe("<p>kept</p>");
+    const missingName = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data\r\n\r\nhello\r\n${file}`,
+      "utf8",
+    );
+    const replacedAgain = await putMultipart(baseUrl, artifact.id, boundary, missingName);
+    expect(replacedAgain.status).toBe(400);
+    expect((await errorOf(replacedAgain)).message).toBe("The request is invalid.");
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).objectKey).toBe(before.objectKey);
+  });
+
+  it("keeps the non-multipart message and main's part ceiling", async () => {
+    const text = await ownerFetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: "hello",
+    });
+    expect(text.status).toBe(400);
+    expect((await errorOf(text)).message).toBe("Send exactly one file.");
+
+    const json = await ownerFetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(json.status).toBe(400);
+    expect((await errorOf(json)).message).toBe("Send exactly one file.");
+
+    const bare = await rawRequest(baseUrl, "POST", "/api/v1/artifacts", { "content-length": "5" }, Buffer.from("hello"));
+    expect(bare.status).toBe(400);
+    expect(bare.message).toBe("Send exactly one file.");
+
+    const boundaryMissing = await ownerFetch(`${baseUrl}/api/v1/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data" },
+      body: "hello",
+    });
+    expect(boundaryMissing.status).toBe(400);
+    expect((await errorOf(boundaryMissing)).message).toBe("The request must be multipart form data with one file.");
+
+    const boundary = "----factrove-parts";
+    const ignored = `--${boundary}\r\nContent-Type: text/plain\r\n\r\nignore\r\n`;
+    const file = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="ok.html"\r\nContent-Type: text/html\r\n\r\n<p>ok</p>\r\n--${boundary}--\r\n`;
+    const rejected = await postMultipart(baseUrl, boundary, Buffer.from(`${ignored.repeat(11)}${file}`, "utf8"));
+    expect(rejected.status).toBe(400);
+    expect((await errorOf(rejected)).message).toBe("Send exactly one file.");
+    expect(await prisma.artifact.count()).toBe(0);
+
+    const accepted = await postMultipart(baseUrl, boundary, Buffer.from(`${ignored.repeat(10)}${file}`, "utf8"));
+    expect(accepted.status).toBe(201);
+    expect(artifactEnvelopeSchema.parse(await accepted.json()).artifact.name).toBe("ok");
+  });
+
   it("rejects an oversized upload while accepting the 10 MiB boundary", async () => {
     const tooBig = new Uint8Array(MAX_HTML_BYTES + 1);
     tooBig.fill("a".charCodeAt(0));
@@ -3132,6 +3261,113 @@ function postMultipart(url: string, boundary: string, body: Buffer, apiKey = own
       "content-type": `multipart/form-data; boundary=${boundary}`,
     },
     body,
+  });
+}
+
+function putMultipart(url: string, id: string, boundary: string, body: Buffer, apiKey = ownerApiKey): Promise<Response> {
+  return globalThis.fetch(`${url}/api/v1/artifacts/${id}/content`, {
+    method: "PUT",
+    headers: {
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
+}
+
+function filePartWithoutFilename(boundary: string, filename: string | undefined): Buffer {
+  const disposition = filename === undefined
+    ? `Content-Disposition: form-data; name="file"`
+    : `Content-Disposition: form-data; name="file"; filename="${filename}"`;
+  return Buffer.from(
+    `--${boundary}\r\n${disposition}\r\nContent-Type: application/octet-stream\r\n\r\n<html></html>\r\n--${boundary}--\r\n`,
+    "utf8",
+  );
+}
+
+function rawRequest(
+  url: string,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body?: Buffer,
+): Promise<{ status: number; message: string }> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: target.hostname,
+      port: target.port,
+      path,
+      method,
+      headers: {
+        authorization: `Bearer ${ownerApiKey}`,
+        ...headers,
+      },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { error?: { message?: string } };
+        resolve({ status: res.statusCode ?? 0, message: payload.error?.message ?? "" });
+      });
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+function tricklingMultipart(
+  url: string,
+  method: string,
+  path: string,
+  boundary: string,
+  head: Buffer,
+): Promise<{ status: number; message: string; elapsed: number }> {
+  const target = new URL(url);
+  const started = performance.now();
+  const agent = new Agent({ keepAlive: false });
+  let req: ReturnType<typeof httpRequest> | undefined;
+  let trickle: ReturnType<typeof setInterval> | undefined;
+  const work = new Promise<{ status: number; message: string }>((resolve, reject) => {
+    let finished = false;
+    req = httpRequest({
+      agent,
+      hostname: target.hostname,
+      port: target.port,
+      path,
+      method,
+      headers: {
+        authorization: `Bearer ${ownerApiKey}`,
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        "content-length": String(2_000_000),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        finished = true;
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { error?: { message?: string } };
+        resolve({ status: res.statusCode ?? 0, message: payload.error?.message ?? "" });
+      });
+    });
+    req.on("error", (error) => {
+      if (!finished) {
+        reject(error);
+      }
+    });
+    req.write(head);
+    trickle = setInterval(() => {
+      if (!req?.destroyed) {
+        req?.write(Buffer.from("x"));
+      }
+    }, 50);
+  });
+  return settledWithin(work, 1000).then((result) => ({ ...result, elapsed: performance.now() - started })).finally(() => {
+    if (trickle) {
+      clearInterval(trickle);
+    }
+    req?.destroy();
+    agent.destroy();
   });
 }
 

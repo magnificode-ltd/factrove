@@ -3,7 +3,7 @@ declare module "busboy" {
   import type { Readable, Writable } from "node:stream";
 
   interface BusboyFileInfo {
-    filename: string;
+    filename?: string;
     encoding: string;
     mimeType: string;
   }
@@ -14,8 +14,8 @@ declare module "busboy" {
   }
 
   interface BusboyParser extends Writable {
-    on(event: "file", listener: (name: string, stream: Readable, info: BusboyFileInfo) => void): this;
-    on(event: "field", listener: (name: string, value: string, info: BusboyFieldInfo) => void): this;
+    on(event: "file", listener: (name: string | undefined, stream: Readable, info: BusboyFileInfo) => void): this;
+    on(event: "field", listener: (name: string | undefined, value: string, info: BusboyFieldInfo) => void): this;
     on(event: "error", listener: (error: Error) => void): this;
     on(event: "close", listener: () => void): this;
     on(event: "filesLimit" | "fieldsLimit" | "partsLimit", listener: () => void): this;
