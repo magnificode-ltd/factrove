@@ -964,6 +964,53 @@ describe("HTTP API", () => {
     expect(opened.artifact.filename).toBe(`${created.id}.html`);
   });
 
+  it("returns a 120-emoji name from create, replace, list, get, and the public artifact", async () => {
+    const emoji = "👍".repeat(120);
+    const bytes = new TextEncoder().encode("<p>emoji</p>");
+    const created = await upload(baseUrl, "emoji.html", bytes, { name: emoji });
+    expect(created.name).toBe(emoji);
+    expect([...created.name ?? ""].length).toBe(120);
+
+    const replaced = artifactEnvelopeSchema.parse(
+      await (await putContent(baseUrl, created.id, "emoji.html", bytes, { name: emoji })).json(),
+    ).artifact;
+    expect(replaced.name).toBe(emoji);
+
+    const detail = artifactEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${created.id}`)).json(),
+    ).artifact;
+    expect(detail.name).toBe(emoji);
+
+    const listed = artifactListEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts?view=mine`)).json());
+    expect(listed.items.find((item) => item.id === created.id)?.name).toBe(emoji);
+
+    const shared = shareEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${created.id}/share`, { method: "POST" })).json(),
+    );
+    const token = shared.share.shareUrl?.split("/").at(-1) ?? "";
+    const opened = publicArtifactEnvelopeSchema.parse(await (await globalThis.fetch(publicPath(baseUrl, created.id, token))).json());
+    expect(opened.artifact.name).toBe(emoji);
+  });
+
+  it("derives the library name from a UTF-8 filename", async () => {
+    const bytes = new TextEncoder().encode("<p>utf8</p>");
+    expect((await upload(baseUrl, "café.html", bytes)).name).toBe("café");
+    expect((await upload(baseUrl, "שלום.html", bytes)).name).toBe("שלום");
+    expect((await upload(baseUrl, "👍.html", bytes)).name).toBe("👍");
+  });
+
+  it("rejects a trailing break and a C1 control in a submitted name", async () => {
+    const bytes = new TextEncoder().encode("<p>controls</p>");
+    const trailing = await postFile(baseUrl, "break.html", bytes, { name: "hello\n" });
+    expect(trailing.status).toBe(400);
+    expect((await errorOf(trailing)).message).toBe("name must be one line of 1 to 120 characters.");
+    const separator = await postFile(baseUrl, "sep.html", bytes, { name: "hello\u2028" });
+    expect(separator.status).toBe(400);
+    const c1 = await postFile(baseUrl, "c1.html", bytes, { name: "hello\u0085" });
+    expect(c1.status).toBe(400);
+    expect((await errorOf(c1)).message).toBe("name must be one line of 1 to 120 characters.");
+  });
+
   it("refuses a content replace when the caller cannot write that artifact", async () => {
     const original = new TextEncoder().encode("<p>keep-private</p>");
     const artifact = await upload(baseUrl, "private.html", original);
@@ -1153,7 +1200,7 @@ describe("HTTP API", () => {
   it("keeps the new object when a content commit drops its connection", async () => {
     const original = new TextEncoder().encode("<p>before-drop</p>");
     const next = new TextEncoder().encode("<p>after-drop</p>");
-    const artifact = await upload(baseUrl, "drop.html", original);
+    const artifact = await upload(baseUrl, "drop.html", original, { name: "Before drop" });
     const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
     const repository = app.get(ArtifactsRepository);
     const originalCommit = repository.commitContent.bind(repository);
@@ -1176,6 +1223,7 @@ describe("HTTP API", () => {
             sizeBytes: input.sizeBytes,
             uploadedAt: input.uploadedAt,
             contentRevision: { increment: 1 },
+            ...(input.name === undefined ? {} : { name: input.name }),
           },
         });
         markUpdateStarted();
@@ -1187,7 +1235,7 @@ describe("HTTP API", () => {
     };
 
     try {
-      const failed = await putContent(baseUrl, artifact.id, "dropped.html", next);
+      const failed = await putContent(baseUrl, artifact.id, "dropped.html", next, { name: "After drop" });
       expect(failed.status).toBe(500);
       expect(await errorOf(failed)).toEqual({
         code: "INTERNAL_ERROR",
@@ -1197,6 +1245,7 @@ describe("HTTP API", () => {
       expect(during.objectKey).toBe(before.objectKey);
       expect(during.sizeBytes).toBe(original.byteLength);
       expect(during.contentRevision).toBe(before.contentRevision);
+      expect(during.name).toBe("Before drop");
       const newKeys = [...store.objects.keys()].filter((key) => key !== before.objectKey);
       expect(newKeys).toHaveLength(1);
       const newKey = newKeys[0] ?? "";
@@ -1209,6 +1258,7 @@ describe("HTTP API", () => {
       expect(after.objectKey).toBe(newKey);
       expect(after.sizeBytes).toBe(next.byteLength);
       expect(after.contentRevision).toBe(before.contentRevision + 1);
+      expect(after.name).toBe("Before drop");
       expect(Buffer.from(store.objects.get(after.objectKey) ?? new Uint8Array())).toEqual(Buffer.from(next));
       const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
       expect(content.status).toBe(200);
@@ -1217,6 +1267,32 @@ describe("HTTP API", () => {
     } finally {
       releaseCommit();
       await commitDone.catch(() => undefined);
+      repository.commitContent = originalCommit;
+    }
+  });
+
+  it("does not keep a name from a replace that loses to one that landed after it", async () => {
+    const bytes = new TextEncoder().encode("<p>named-race</p>");
+    const artifact = await upload(baseUrl, "named-race.html", bytes, { name: "Original" });
+    const repository = app.get(ArtifactsRepository);
+    const originalCommit = repository.commitContent.bind(repository);
+    repository.commitContent = async (input) => {
+      const committed = await originalCommit(input);
+      await originalCommit({
+        ...input,
+        expectedRevision: input.expectedRevision + 1,
+        objectKey: `${artifact.id}/${randomUUID()}.html`,
+        name: undefined,
+      });
+      return committed;
+    };
+    try {
+      const lost = await putContent(baseUrl, artifact.id, "lost.html", bytes, { name: "Lost the race" });
+      expect(lost.status).toBe(409);
+      expect((await errorOf(lost)).code).toBe("CONTENT_CONFLICT");
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+      expect(row.name).toBe("Original");
+    } finally {
       repository.commitContent = originalCommit;
     }
   });

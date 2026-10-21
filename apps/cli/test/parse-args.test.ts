@@ -69,6 +69,15 @@ describe("CLI argument parsing", () => {
     expect(failure(["upload", file, "--name", "hello\nthere"], {}).message).toBe(
       "name must be one line of 1 to 120 characters.",
     );
+    expect(failure(["upload", file, "--name", "hello\n"], {}).message).toBe(
+      "name must be one line of 1 to 120 characters.",
+    );
+    expect(failure(["upload", file, "--name", "hello\u2028"], {}).message).toBe(
+      "name must be one line of 1 to 120 characters.",
+    );
+    expect(failure(["upload", file, "--name", "hello\u0085"], {}).message).toBe(
+      "name must be one line of 1 to 120 characters.",
+    );
     expect(failure(["upload", file, "--name", "   "], {}).message).toBe("Missing value for --name.");
     expect(failure(["upload", file, "--name"], {}).message).toBe("Missing value for --name.");
     expect(failure(["upload", file, "--name", "One", "--name", "Two"], {}).message).toMatch(/more than once/);

@@ -14,6 +14,21 @@ export function artifactObjectKey(id: string): string {
   return `${id}.html`;
 }
 
+// Busboy's default filename charset is Latin-1. Browsers and Node's FormData put UTF-8
+// bytes in that parameter, so café.html arrives as cafÃ©.html. A string that is already
+// Unicode, or that is not valid UTF-8, is left as busboy decoded it.
+export function decodeMultipartFilename(originalname: string): string {
+  if ([...originalname].some((char) => (char.codePointAt(0) ?? 0) > 0xff)) {
+    return originalname;
+  }
+  const bytes = Buffer.from(originalname, "latin1");
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return originalname;
+  }
+}
+
 // One immutable object per upload. The artifact id is the prefix so a row cannot point at another artifact.
 export function immutableContentKey(artifactId: string, contentId: string): string {
   return `${artifactId}/${contentId}.html`;

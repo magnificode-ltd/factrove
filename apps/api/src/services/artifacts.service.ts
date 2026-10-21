@@ -24,7 +24,7 @@ import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js"
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
-import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
+import { artifactObjectKey, decodeMultipartFilename, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
 import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
 import { browserOrigins } from "../sharing/public-origin.js";
@@ -605,13 +605,14 @@ export class ArtifactsService {
     }
 
     try {
+      // The name stays out of this statement. A lost acknowledgement can still commit
+      // the new object, and that delayed commit must not leave a new name.
       await this.artifacts.commitContent({
         id: record.id,
         expectedRevision: record.contentRevision,
         objectKey: newKey,
         sizeBytes: bytes.byteLength,
         uploadedAt,
-        ...(name === undefined ? {} : { name }),
       });
     } catch (error) {
       const visible = await this.visibleObjectKey(record.id);
@@ -635,7 +636,25 @@ export class ArtifactsService {
       await this.deleteStoredQuietly(decision.deleteKey);
     }
     if (decision.outcome === "published" && current?.objectKey === newKey) {
-      return current;
+      if (name === undefined) {
+        return current;
+      }
+      // Only the acknowledged winner is renamed, and only while its revision and object are still current.
+      // A 409 from a later replace, or a commit that has not been acknowledged, leaves the previous name.
+      await this.artifacts.renameIfCurrent({
+        id: record.id,
+        expectedRevision: current.contentRevision,
+        objectKey: newKey,
+        name,
+      });
+      const named = await this.artifacts.findById(record.id);
+      if (named?.objectKey === newKey && named.name === name) {
+        return named;
+      }
+      if (!named || named.objectKey !== newKey) {
+        throw contentConflict();
+      }
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
     if (!current) {
       throw artifactNotFound();
@@ -833,7 +852,7 @@ function readUpload(file: unknown): { filename: string; bytes: Uint8Array } | un
     return undefined;
   }
   return {
-    filename: record.originalname,
+    filename: decodeMultipartFilename(record.originalname),
     bytes: Uint8Array.from(record.buffer),
   };
 }

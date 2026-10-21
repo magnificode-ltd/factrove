@@ -9,7 +9,7 @@ An artifact is one uploaded HTML document. The API stores metadata in PostgreSQL
 
 Replacing content keeps the same id, access, and share token. Another replace of the same revision is `409 CONTENT_CONFLICT`. A rare `500` after the object is written can still mean the new bytes are live; GET the artifact before retrying. Factrove currently exposes only the current content. Replacement provides no version-history or undo interface and normally removes the previous object.
 
-The name is the label in the library, the viewer header, and a public share. It is stored on the artifact. It is not the object key, and it is not the public filename. The public filename stays `{artifactId}.html`. A missing name falls back to that filename, then to the id. Replacing content keeps the name unless the request sends a new one. A name is one line of 1 to 120 characters. There is no request that clears it.
+The name is the label in the library, the viewer header, and a public share. It is stored on the artifact. It is not the object key, and it is not the public filename. The public filename stays `{artifactId}.html`. A missing name falls back to that filename, then to the id. Replacing content keeps the name unless the request sends a new one. A name is one line of 1 to 120 characters. There is no request that clears it. When an upload omits the name and the file name without `.html` or `.htm` is empty, longer than 120 characters, or not one line, the stored name is null and the upload still succeeds.
 
 Each artifact has:
 

@@ -1,4 +1,4 @@
-import { ARTIFACT_NAME_MESSAGE, normalizeArtifactName } from "@factrove/contracts";
+import { ARTIFACT_NAME_MESSAGE, artifactNameHasForbiddenCharacter, normalizeArtifactName } from "@factrove/contracts";
 import { CliError } from "./cli-error.js";
 import { ARTIFACT_ID, helpPage, type HelpCommand } from "./command-spec.js";
 import { readStoredProfileSync, resolveApiKey, selectedProfile } from "./credentials.js";
@@ -205,11 +205,17 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     }
     if (arg === "--name" || arg.startsWith("--name=")) {
       const inline = arg.startsWith("--name=");
-      const value = readOption(argv, arg, "--name", index);
+      const raw = readOptionValue(argv, arg, "--name", index);
       if (!inline) {
         index += 1;
       }
-      const normalized = normalizeArtifactName(value);
+      if (artifactNameHasForbiddenCharacter(raw)) {
+        throw new CliError("INVALID_INPUT", ARTIFACT_NAME_MESSAGE);
+      }
+      if (raw.trim().length === 0) {
+        throw new CliError("INVALID_INPUT", "Missing value for --name.");
+      }
+      const normalized = normalizeArtifactName(raw);
       if (normalized === null) {
         throw new CliError("INVALID_INPUT", ARTIFACT_NAME_MESSAGE);
       }
@@ -474,13 +480,17 @@ function requestedHelp(argv: readonly string[]): HelpInvocation | undefined {
   return { kind: "help", command: null };
 }
 
-function readOption(argv: readonly string[], arg: string, name: string, index: number): string {
+function readOptionValue(argv: readonly string[], arg: string, name: string, index: number): string {
   const inlinePrefix = `${name}=`;
   const raw = arg.startsWith(inlinePrefix) ? arg.slice(inlinePrefix.length) : argv[index + 1];
   if (raw === undefined || (!arg.startsWith(inlinePrefix) && raw.startsWith("-"))) {
     throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
   }
-  const value = raw.trim();
+  return raw;
+}
+
+function readOption(argv: readonly string[], arg: string, name: string, index: number): string {
+  const value = readOptionValue(argv, arg, name, index).trim();
   if (value.length === 0) {
     throw new CliError("INVALID_INPUT", `Missing value for ${name}.`);
   }

@@ -359,6 +359,17 @@ describe("PostgreSQL artifact persistence", () => {
     expect(Number(column[0]?.character_maximum_length)).toBe(120);
     expect(column[0]?.is_nullable).toBe("YES");
 
+    const emoji = "👍".repeat(120);
+    const wide = await repository.create(artifactInput({ name: emoji }));
+    expect(wide.name).toBe(emoji);
+    const storedLength = await prisma.$queryRaw<{ length: number }[]>`
+      SELECT char_length("name")::int AS length FROM "artifact" WHERE "id" = ${wide.id}::uuid
+    `;
+    expect(Number(storedLength[0]?.length)).toBe(120);
+    await expect(
+      prisma.$executeRaw`UPDATE "artifact" SET "name" = ${"👍".repeat(121)} WHERE "id" = ${wide.id}::uuid`,
+    ).rejects.toThrow(/value too long|22001/);
+
     const unnamed = await repository.create(artifactInput());
     expect(unnamed.name).toBeNull();
     const named = await repository.create(artifactInput({ name: "X launch calendar" }));
@@ -398,6 +409,20 @@ describe("PostgreSQL artifact persistence", () => {
     const stored = await repository.findById(named.id);
     expect(stored?.name).toBe("Renamed calendar");
     expect(stored?.objectKey).toBe(renamedKey);
+    const renamedRow = stored;
+    expect(await repository.renameIfCurrent({
+      id: named.id,
+      expectedRevision: (renamedRow?.contentRevision ?? 0) + 1,
+      objectKey: renamedKey,
+      name: "Too late",
+    })).toBe(false);
+    expect(await repository.renameIfCurrent({
+      id: named.id,
+      expectedRevision: renamedRow?.contentRevision ?? -1,
+      objectKey: `${named.id}/other.html`,
+      name: "Wrong object",
+    })).toBe(false);
+    expect((await repository.findById(named.id))?.name).toBe("Renamed calendar");
     const shared = await repository.saveShare(named.id, "share-token-value", "c".repeat(64));
     expect((await repository.findShared(named.id, "c".repeat(64)))?.name).toBe("Renamed calendar");
     expect(shared?.name).toBe("Renamed calendar");
