@@ -200,6 +200,33 @@ describe("share password controls", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Too many wrong guesses");
   });
 
+  it("gives protected copy the full row and keeps actions underneath", async () => {
+    ownerApi({ passwordProtected: true });
+    const container = await renderControl(true);
+    await openPanel(container);
+    const layout = container.querySelector('[data-testid="share-password-layout"]');
+    const actions = container.querySelector('[data-testid="share-password-actions"]');
+    expect(layout?.className).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(layout?.className).not.toContain("flex-wrap");
+    expect(actions?.className).toContain("col-start-2");
+    expect(container.querySelector('[data-testid="share-password-copy"]')?.textContent).toContain(
+      "Visitors unlock it once per tab. Access lasts 15 minutes."
+    );
+  });
+
+  it("keeps the unlocked password controls in one wrapping row", async () => {
+    ownerApi();
+    const container = await renderControl(false);
+    await openPanel(container);
+    const layout = container.querySelector('[data-testid="share-password-layout"]');
+    const actions = container.querySelector('[data-testid="share-password-actions"]');
+    expect(layout?.className).toContain("flex-wrap");
+    expect(layout?.className).toContain("items-center");
+    expect(layout?.className).not.toContain("grid-cols-");
+    expect(actions?.className).not.toContain("col-start-2");
+    expect(container.querySelector('[data-testid="share-password-copy"]')?.textContent).toContain("No password");
+  });
+
   it("changes and removes an existing password", async () => {
     const calls = ownerApi({ passwordProtected: true });
     const container = await renderControl(true);
