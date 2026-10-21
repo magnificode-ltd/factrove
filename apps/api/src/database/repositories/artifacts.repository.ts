@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { Prisma, type Artifact } from "@prisma/client";
+import { type Artifact } from "@prisma/client";
 import type {
   ArtifactRecord,
   CreateArtifactInput,
@@ -16,6 +16,8 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     accessType: row.accessType,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
+    objectKey: row.objectKey,
+    contentRevision: row.contentRevision,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     uploadedAt: row.uploadedAt,
@@ -38,33 +40,32 @@ export class ArtifactsRepository {
         accessType: input.accessType,
         mimeType: input.mimeType,
         sizeBytes: input.sizeBytes,
+        objectKey: input.objectKey ?? `${input.id}.html`,
         uploadedAt: input.uploadedAt ?? null,
       },
     });
     return toArtifactRecord(row);
   }
 
-  // Updates the current HTML metadata. Share columns and access stay as they are.
-  // A later version can record the previous bytes before this row changes.
-  async replaceCurrentContent(
-    id: string,
-    input: { sizeBytes: number; uploadedAt: Date },
-  ): Promise<ArtifactRecord | null> {
-    try {
-      const row = await this.prisma.artifact.update({
-        where: { id },
-        data: {
-          sizeBytes: input.sizeBytes,
-          uploadedAt: input.uploadedAt,
-        },
-      });
-      return toArtifactRecord(row);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-        return null;
-      }
-      throw error;
-    }
+  // Commits one immutable object. Share columns, access, and createdAt stay as they are.
+  // The update matches the revision the caller read, so a concurrent replace cannot share this write.
+  async commitContent(input: {
+    id: string;
+    expectedRevision: number;
+    objectKey: string;
+    sizeBytes: number;
+    uploadedAt: Date;
+  }): Promise<boolean> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id: input.id, contentRevision: input.expectedRevision },
+      data: {
+        objectKey: input.objectKey,
+        sizeBytes: input.sizeBytes,
+        uploadedAt: input.uploadedAt,
+        contentRevision: { increment: 1 },
+      },
+    });
+    return updated.count === 1;
   }
 
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
@@ -154,6 +155,8 @@ export class ArtifactsRepository {
         accessType: true,
         mimeType: true,
         sizeBytes: true,
+        objectKey: true,
+        contentRevision: true,
         createdAt: true,
         updatedAt: true,
         uploadedAt: true,

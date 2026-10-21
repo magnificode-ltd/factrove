@@ -34,6 +34,6 @@ Node and pnpm pins live in `.nvmrc`, `.node-version`, and `package.json`. `pnpm-
 
 ## Rules
 
-File location is a convention. Never store the location of a file in the database. Do not add a column, field, or persisted value for an object key, storage path, or file location. The artifact storage key is `{artifactId}.html`, derived from the artifact id.
+The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html` and commit only when the stored revision still matches the revision the replace read. Older rows keep `{artifactId}.html`. Do not store a bucket name, a filesystem path, or a client-supplied location.
 
 When adding an environment variable, add that key to the committed example for the process that reads it. Application settings for the API and the web app belong in `apps/api/.env.example`. CLI settings belong in `apps/cli/.env.example`. Do not commit real secrets.

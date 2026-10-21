@@ -137,6 +137,11 @@ model Artifact {
   accessType        AccessType    @default(private) @map("access_type")
   mimeType          String        @map("mime_type")
   sizeBytes         Int           @map("size_bytes")
+  // Current HTML object. Readers use this key and sizeBytes from the same row.
+  // New writes use `{id}/{contentId}.html`. Older rows keep `{id}.html`.
+  objectKey         String        @map("object_key")
+  // Increments when a replace commits. A replace updates the row only when this value is unchanged.
+  contentRevision   Int           @default(0) @map("content_revision")
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
   uploadedAt        DateTime?     @map("uploaded_at") @db.Timestamptz(3)

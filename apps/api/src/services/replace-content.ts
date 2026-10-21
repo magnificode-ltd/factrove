@@ -1,44 +1,25 @@
-// Publishes the bytes readers see for an artifact.
-// The object stays at the derived key `{artifactId}.html`. A later change can
-// keep `previous` as a version before `write` replaces it. This does not.
+// Decides which object stays live after a replace tries to commit.
+// The new bytes are already in `newKey`. The row becomes live only when it points at that key.
+// A later version can keep `previousKey` instead of deleting it. This still deletes it.
 
-export class ArtifactRowMissing extends Error {
-  constructor() {
-    super("Artifact row was removed during content replace");
-    this.name = "ArtifactRowMissing";
+export type ContentPublishDecision = {
+  outcome: "published" | "conflict" | "missing";
+  deleteKey: string | null;
+};
+
+export function decideContentPublish(input: {
+  newKey: string;
+  previousKey: string;
+  visibleKey: string | null;
+}): ContentPublishDecision {
+  if (input.visibleKey === input.newKey) {
+    return {
+      outcome: "published",
+      deleteKey: input.previousKey === input.newKey ? null : input.previousKey,
+    };
   }
-}
-
-export class ContentRestoreFailed extends Error {
-  readonly cause: unknown;
-  readonly restoreError: unknown;
-
-  constructor(cause: unknown, restoreError: unknown) {
-    super("Could not restore artifact content");
-    this.name = "ContentRestoreFailed";
-    this.cause = cause;
-    this.restoreError = restoreError;
-  }
-}
-
-export async function publishCurrentContent(input: {
-  previous: Uint8Array | null;
-  next: Uint8Array;
-  write: (bytes: Uint8Array) => Promise<void>;
-  record: () => Promise<void>;
-}): Promise<void> {
-  await input.write(input.next);
-  try {
-    await input.record();
-  } catch (error) {
-    if (input.previous === null) {
-      throw error;
-    }
-    try {
-      await input.write(input.previous);
-    } catch (restoreError) {
-      throw new ContentRestoreFailed(error, restoreError);
-    }
-    throw error;
-  }
+  return {
+    outcome: input.visibleKey === null ? "missing" : "conflict",
+    deleteKey: input.newKey,
+  };
 }

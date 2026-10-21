@@ -16,7 +16,7 @@ From this repository the same commands run as `pnpm factrove`. pnpm prints the s
 
 `upload <file>` sends one HTML file and creates a new artifact. Plain success prints only the new id and a newline. `--json` prints the `{ artifact }` envelope on one line. `--access private|org_shared` chooses who can see a new artifact. The default is `private`.
 
-`upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. The API keeps the current access and the current share token, so an existing public link serves the new HTML. `--access` together with `--artifactId` is an error. Replacing content overwrites the current bytes. A later change can keep the previous bytes as a version before that write.
+`upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. The API keeps the current access and the current share token, so an existing public link serves the new HTML. `--access` together with `--artifactId` is an error. A replace writes a new object and points the artifact at it. Another replace of the same revision receives 409. A later change can keep the previous object as a version.
 
 `get <id>` prints the artifact's content. The default is HTML. `--format markdown` asks the API to convert the stored HTML on the way out. Markdown is not saved. `--json` prints `{ format, mediaType, content }` on one line.
 
@@ -58,7 +58,7 @@ The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profi
 
 ## Differences from aws s3
 
-Factrove stores an artifact id, access, and a share link. It does not store an object key, an etag, or caller-supplied object metadata. The storage key is `{artifactId}.html`, derived from the id.
+Factrove stores an artifact id, access, a share link, and the current HTML object key with its size. HTTP responses and the CLI omit the object key. There is no etag and no caller-supplied object metadata. New objects use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`. The public filename is `{artifactId}.html`.
 
 `aws s3` commands such as `cp`, `ls`, `rm`, `mv`, `sync`, `mb`, and `rb` are not Factrove commands. `aws s3api` commands such as `put-object` and `get-object` describe keys and metadata this library does not store, so the CLI has no `s3api` surface. The CLI uploads a local HTML file and prints or downloads one artifact. It does not copy between two remote locations, and it does not read an upload from stdin.
 

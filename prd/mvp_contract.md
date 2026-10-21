@@ -122,15 +122,21 @@ Input larger than the 10 MiB stored-HTML limit is `413 CONTENT_TOO_LARGE` with m
 - Maximum file size: 10 MiB (10,485,760 bytes). Enforce during request parsing, not after accepting an unbounded body. Bounded buffering is acceptable for this MVP.
 - accessType defaults to private; reject any other enum value. Reject org_shared when the caller has no current organization. The message is `Organization sharing requires membership in an organization.`
 - `POST /api/v1/artifacts` creates a new artifact. No idempotency or automatic upload retries; rerunning a successful create creates another artifact.
-- Write the object, then insert the artifact row with `uploaded_at` set. Return the DTO only after both succeed.
-- The upload is atomic. If the object write fails, do not insert an artifact row. A failed upload leaves no artifact in the database.
+- Write a new object at `{artifactId}/{contentId}.html`, then insert the artifact row with that `object_key`, `size_bytes`, `uploaded_at`, and `content_revision` 0. Return the DTO only after both succeed.
+- The upload is atomic. If the object write fails, or the acknowledgement is lost, delete that object when it can be removed and do not insert an artifact row. A failed upload leaves no artifact in the database.
 - This API does not watch/import files written to S3 outside Factrove.
 
 ### Replace content
 
-`PUT /api/v1/artifacts/{id}/content` replaces the stored HTML of an existing artifact and returns the same id. The caller must be the owner, with the same session or API key as the other artifact writes. A missing id and a caller who is not the owner, including an organization member who can read an `org_shared` artifact, return `404 ARTIFACT_NOT_FOUND`. A request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded. The file uses the same extension, size, and UTF-8 checks as create. `accessType` and identity fields are rejected, so replace does not change who can see the artifact. The share token is left in place, and the existing public link serves the new bytes.
+`PUT /api/v1/artifacts/{id}/content` replaces the stored HTML of an existing artifact and returns the same id. The caller must be the owner, with the same session or API key as the other artifact writes. A missing id and a caller who is not the owner, including an organization member who can read an `org_shared` artifact, return `404 ARTIFACT_NOT_FOUND`. A request with no credentials is `401 UNAUTHENTICATED` before the artifact is loaded. A content grant and a share unlock grant do not authorize this route. The file uses the same extension, size, and UTF-8 checks as create. `accessType` and identity fields are rejected, so replace does not change who can see the artifact. The share token stays in place. The existing public link, including a password-protected link, serves the new bytes.
 
-The object key stays `{artifactId}.html`. The handler writes the new object, then updates `size_bytes` and `uploaded_at`. If that row update fails, it writes the previous bytes back. If the row is gone, it deletes the new object and returns 404. If the object write fails, the previous bytes and the row stay as they were. This does not store a previous version. A later change can keep those bytes before the write.
+Each create and replace writes a new immutable object at `{artifactId}/{contentId}.html`. The artifact row stores that key in `object_key` with `size_bytes`, `uploaded_at`, and `content_revision`. A replace reads the row, writes the new object, then updates the row in one statement that matches `id` and the `content_revision` it read. The statement sets `object_key`, `size_bytes`, and `uploaded_at`, and increments `content_revision`. That compare-and-set is the concurrency rule. The handler returns 200 only when the row points at the object this request wrote. One replace of a given revision wins that commit. A replace that still holds the previous revision returns `409 CONTENT_CONFLICT` with message `Another replace finished first. Upload again to replace the current content.` and its new object is deleted. A replace that starts after a commit reads the new revision and can commit on its own. If another replace commits before this request observes its own object, this request also returns 409 and deletes that object, because it is no longer current. The stored key and `size_bytes` stay aligned: a content response takes both the key and `Content-Length` from the same row snapshot, so the body length is the length of that object.
+
+After a successful commit, the previous object is deleted. That delete is best-effort. Keeping the previous key instead of deleting it is the seam for a later version history. This API does not return or list older bytes.
+
+A failed object write leaves the row and its current object unchanged. When a write may have landed and then lost its acknowledgement, the handler deletes that new object when it can and still leaves the row unchanged. If the row update reports an error and a following read shows the new object, the replace is treated as committed and the previous object is deleted. If that read shows a different key, the new object is deleted and the original error is returned. If that read fails, no key is deleted, which can leave an unreferenced object. A missing row after the write deletes the new object and returns 404.
+
+Reads use `object_key` and `size_bytes` from that same row. A blank key means the legacy object `{artifactId}.html`. Rows created before this column existed are migrated to that legacy key. The public filename in the DTO stays `{artifactId}.html`. Responses omit the stored object key.
 
 ### Errors
 
@@ -149,8 +155,9 @@ Return the common JSON envelope without stack traces or secrets:
 | 422 | CONTENT_TOO_COMPLEX | Markdown conversion exceeded its time, memory, or output limit |
 | 415 | UNSUPPORTED_FILE_TYPE | Non-HTML extension |
 | 404 | ARTIFACT_NOT_FOUND | Unknown artifact, an artifact the caller cannot read, or a public link that is not active |
+| 409 | CONTENT_CONFLICT | Another replace committed the revision this request read |
 | 429 | RATE_LIMITED | Too many public views from one client address, or too many password attempts |
-| 503 | STORAGE_UNAVAILABLE | S3 failure. A failed create stores no artifact row. A failed replace leaves the previous bytes. |
+| 503 | STORAGE_UNAVAILABLE | S3 failure. A failed create stores no artifact row. A failed or unacknowledged replace leaves the current object and the row unchanged. |
 | 503 | CONVERSION_UNAVAILABLE | Markdown conversion pool is saturated |
 | 503 | UNLOCK_UNAVAILABLE | Password verification is busy (gate saturated or share check slots full) |
 | 500 | INTERNAL_ERROR | Unexpected persistence/service failure |
@@ -189,8 +196,8 @@ File placement follows the [canonical README backend directory structure](../REA
 
 Task 02 exports a global DatabaseModule and an injectable ArtifactsRepository. Other tasks can work against these methods:
 
-- `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, uploadedAt? })`
-- `replaceCurrentContent(id, { sizeBytes, uploadedAt })` updates those fields on the current row and leaves access, share, and `createdAt` unchanged. A missing row returns null.
+- `create({ id, creatorUserId, organizationId, accessType, mimeType, sizeBytes, objectKey?, uploadedAt? })` stores `objectKey`, or `{id}.html` when the caller omits it. New uploads pass `{id}/{contentId}.html`. `content_revision` starts at 0.
+- `commitContent({ id, expectedRevision, objectKey, sizeBytes, uploadedAt })` sets those fields and increments `content_revision` only when the row still has `expectedRevision`. It returns true when one row changed. Access, share, and `createdAt` stay unchanged.
 - `update(id, { organizationId?, accessType?, mimeType?, sizeBytes?, uploadedAt? })`
 - `delete(id)`
 - `findById(id)`
@@ -220,7 +227,7 @@ interface BlobStore {
 }
 ```
 
-No S3 SDK types escape the implementation. Flat object keys are generated by the API, not supplied by clients. The implementation reads `S3_BUCKET`, `S3_REGION`, and the standard AWS credential chain. Optional `S3_ENDPOINT` selects an S3-compatible origin. When it is set, `S3_FORCE_PATH_STYLE` defaults to `true` and may be set to `false`. Plain `http://` is accepted only for `localhost`, `127.0.0.1`, and `::1`; any other host requires `https://`. When `S3_ENDPOINT` is unset, the client calls AWS S3 in `S3_REGION` with virtual-hosted addressing, and `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_S3`, and a profile `endpoint_url` are ignored. Static `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are optional and must be set together; otherwise the SDK default chain, including `AWS_PROFILE`, is used. The API does not create the bucket. `pnpm infra:up` starts Garage, which creates the local `factrove` bucket.
+No S3 SDK types escape the implementation. Object keys are generated by the API. Clients do not send them. The current HTML object is `{artifactId}/{contentId}.html`. Rows from before `object_key` existed use `{artifactId}.html`. The public filename stays `{artifactId}.html`. The implementation reads `S3_BUCKET`, `S3_REGION`, and the standard AWS credential chain. Optional `S3_ENDPOINT` selects an S3-compatible origin. When it is set, `S3_FORCE_PATH_STYLE` defaults to `true` and may be set to `false`. Plain `http://` is accepted only for `localhost`, `127.0.0.1`, and `::1`; any other host requires `https://`. When `S3_ENDPOINT` is unset, the client calls AWS S3 in `S3_REGION` with virtual-hosted addressing, and `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_S3`, and a profile `endpoint_url` are ignored. Static `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are optional and must be set together; otherwise the SDK default chain, including `AWS_PROFILE`, is used. The API does not create the bucket. `pnpm infra:up` starts Garage, which creates the local `factrove` bucket.
 
 The caller needs `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object ARN, and `s3:ListBucket` on the bucket ARN. Without `s3:ListBucket`, S3 returns `AccessDenied` for a missing key.
 

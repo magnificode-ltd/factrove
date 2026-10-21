@@ -30,4 +30,4 @@ Unit tests cover the KDF (PHC format, salts, NFC, wrong passwords, tampered and 
 
 ## Exclusions
 
-No per-recipient passwords, no expiring links, no password recovery or hint, no email lockout notification, and no shared throttle across API processes. The object key stays `{artifactId}.html`.
+No per-recipient passwords, no expiring links, no password recovery or hint, no email lockout notification, and no shared throttle across API processes.

@@ -71,7 +71,9 @@ PostgreSQL stores metadata and identities; object storage holds file bytes. Arti
 | `organization_id` | Text, nullable FK → Organization | Organization captured at upload |
 | `access_type` | `private` or `org_shared`; default `private` | Library classification |
 | `mime_type` | Text, required | `text/html` for every MVP artifact |
-| `size_bytes` | Nonnegative integer | Actual accepted file size |
+| `size_bytes` | Nonnegative integer | Actual accepted file size of the current object |
+| `object_key` | Nonblank text | Current HTML object. New writes use `{id}/{contentId}.html`. Older rows keep `{id}.html` |
+| `content_revision` | Integer, default 0 | Increments when a replace commits. A replace updates the row only while this value is unchanged |
 | `created_at` | Timestamp with time zone | Database row creation time |
 | `updated_at` | Timestamp with time zone | Last row modification, maintained by persistence code |
 | `uploaded_at` | Nullable timestamp with time zone | Successful finalization time of the current content upload |
@@ -80,7 +82,7 @@ An artifact has one creator and optionally one associated organization. Both IDs
 
 Local uploads capture the configured organization even for private artifacts. A personal upload with no configured organization has a null organization ID. `org_shared` requires an organization ID, enforced by a database check.
 
-The storage key is `{artifactId}.html` and is not stored. The original filename is not stored.
+The current object key is stored on the artifact row. HTTP responses omit it. The public filename is `{artifactId}.html`. The original filename is not stored.
 
 ### User
 
@@ -120,25 +122,25 @@ There is no user-to-org foreign key or global uniqueness on member.userId encodi
 - The artifact row is inserted only after the object is stored. That insert sets `created_at`, `updated_at`, and `uploaded_at` together.
 - Lists and viewers return stored artifacts. A failed upload has no row.
 - Future metadata-only edits would change `updated_at` without changing `uploaded_at`.
-- Replacing content keeps the artifact id and `created_at`, updates `size_bytes`, `uploaded_at`, and `updated_at`, and writes the new bytes to the same object key. Older bytes are not retained. Version history remains later work.
+- Replacing content keeps the artifact id and `created_at`. It writes a new object, then updates `object_key`, `size_bytes`, `uploaded_at`, `updated_at`, and `content_revision` together when the revision still matches. A concurrent replace of that same revision receives 409. The previous object is deleted after the commit. Version history remains later work. `content_revision` is a counter on the artifact row, not a separate version table.
 
 There are no separate Factrove content, revision, sharing, personal-token, upload-operation, or usage models in this build. Better Auth owns identity schema now; its live authentication flows and API-key plugin are deferred. Schema generation is a development step, followed by reviewed and committed Prisma SQL migrations, not a separate migration system or a running auth server. See [Better Auth's Prisma schema workflow](https://better-auth.com/docs/adapters/prisma#schema-generation--migration).
 
 ## Storage and upload behavior
 
-Each installation dedicates one bucket to Factrove. MVP objects are flat:
+Each installation dedicates one bucket to Factrove. The current object for an artifact is:
 
 ```text
-<artifact UUID>.html
+<artifact UUID>/<content UUID>.html
 ```
 
-The original upload may end in `.htm`; the stored key always uses `.html`. Group prefixes and artifact versions are future work.
+Rows written before `object_key` existed keep `<artifact UUID>.html`. The original upload may end in `.htm`; stored keys use `.html`. The public filename is `<artifact UUID>.html`. Older objects are removed after a replace commits. Keeping them is later version-history work.
 
 The backend-local storage module has one S3 implementation. It uses the configured bucket and region. `S3_ENDPOINT` points it at an S3-compatible service; when that variable is unset, it uses AWS S3 in that region. This small provider interface prepares for Azure/GCP later. Database persistence remains PostgreSQL-only, without a database-provider abstraction.
 
-Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`. It writes the object, then inserts the artifact row, and returns the artifact only after both succeed.
+Upload size is limited to 10 MiB. The API validates the input and assigns `text/html`. It writes a new object, then inserts or updates the artifact row, and returns the artifact only after that pointer is stored.
 
-The upload is atomic. If the object write fails, the database insert does not happen. A failed upload leaves no artifact in the database.
+The upload is atomic. If the object write fails, the database insert does not happen. A failed upload leaves no artifact in the database. A failed replace leaves the current row and its object unchanged.
 
 The upload endpoint is the ingestion path. Files placed into the bucket independently are not automatically imported.
 

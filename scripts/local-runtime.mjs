@@ -1,5 +1,4 @@
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -184,41 +183,6 @@ export function launcherWantsJson(argv) {
     }
   }
   return json;
-}
-
-const defaultE2eArtifactsDir = "/opt/cursor/artifacts";
-
-export function e2eSessionDirectory(env, options = {}) {
-  const requested = typeof env.FACTROVE_E2E_ARTIFACTS_DIR === "string" ? env.FACTROVE_E2E_ARTIFACTS_DIR.trim() : "";
-  if (requested.length > 0 && ensureWritableDirectory(requested)) {
-    return requested;
-  }
-  const existingDir = options.existingDir ?? defaultE2eArtifactsDir;
-  if (isWritableDirectory(existingDir)) {
-    return existingDir;
-  }
-  return options.fallbackDir ?? tmpdir();
-}
-
-function ensureWritableDirectory(directory) {
-  try {
-    mkdirSync(directory, { recursive: true });
-  } catch {
-    return false;
-  }
-  return isWritableDirectory(directory);
-}
-
-function isWritableDirectory(directory) {
-  try {
-    if (!statSync(directory).isDirectory()) {
-      return false;
-    }
-    accessSync(directory, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function legacyRootEnvWarning(rootEnvPath) {

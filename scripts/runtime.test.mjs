@@ -12,7 +12,6 @@ import {
   composeArgs,
   composeFile,
   e2eComposeArgs,
-  e2eSessionDirectory,
   e2eProjectName,
   infraFailureHint,
   launcherSkipsEnvFile,
@@ -140,27 +139,6 @@ describe("local runtime", () => {
     assert.equal(blocked.ok, false);
     assert.match(blocked.message, /Could not read the CLI environment file/);
     await rm(directory, { recursive: true, force: true });
-  });
-
-  it("keeps the e2e transcript directory from aborting the checks", async () => {
-    const root = await mkdtemp(join(tmpdir(), "factrove-e2e-artifacts-"));
-    try {
-      const envDir = join(root, "from-env");
-      const existingDir = join(root, "existing");
-      const fallbackDir = join(root, "fallback");
-      const notADirectory = join(root, "not-a-dir");
-      await mkdir(existingDir);
-      await mkdir(fallbackDir);
-      writeFileSync(notADirectory, "x");
-      assert.equal(e2eSessionDirectory({ FACTROVE_E2E_ARTIFACTS_DIR: envDir }, { existingDir, fallbackDir }), envDir);
-      assert.equal(existsSync(envDir), true);
-      assert.equal(e2eSessionDirectory({ FACTROVE_E2E_ARTIFACTS_DIR: "  " }, { existingDir, fallbackDir }), existingDir);
-      assert.equal(e2eSessionDirectory({ FACTROVE_E2E_ARTIFACTS_DIR: notADirectory }, { existingDir, fallbackDir }), existingDir);
-      assert.equal(e2eSessionDirectory({}, { existingDir: join(root, "missing"), fallbackDir }), fallbackDir);
-      assert.equal(e2eSessionDirectory({}, { existingDir: notADirectory, fallbackDir }), fallbackDir);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
   });
 
   it("gives the web app the public API origin and withholds database and storage settings", () => {

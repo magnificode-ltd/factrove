@@ -21,7 +21,7 @@ import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js"
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
-import { artifactObjectKey, rejectHtmlUpload } from "../rendering/html-policy.js";
+import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
 import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
 import { browserOrigins } from "../sharing/public-origin.js";
@@ -46,7 +46,7 @@ import {
 } from "../sharing/share-link.js";
 import { hashSharePassword, sharePasswordFingerprint, verifySharePassword } from "../sharing/share-password.js";
 import { decryptShareToken, deriveShareTokenKey, encryptShareToken } from "../sharing/share-token-cipher.js";
-import { ArtifactRowMissing, ContentRestoreFailed, publishCurrentContent } from "./replace-content.js";
+import { decideContentPublish } from "./replace-content.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
@@ -99,12 +99,17 @@ export class ArtifactsService {
     }
 
     const id = randomUUID();
-    const objectKey = artifactObjectKey(id);
-    await this.blobs.put({
-      objectKey,
-      body: upload.bytes,
-      contentType: "text/html",
-    });
+    const objectKey = immutableContentKey(id, randomUUID());
+    try {
+      await this.blobs.put({
+        objectKey,
+        body: upload.bytes,
+        contentType: "text/html",
+      });
+    } catch (error) {
+      await this.deleteStoredQuietly(objectKey);
+      throw error;
+    }
 
     try {
       const record = await this.artifacts.create({
@@ -114,6 +119,7 @@ export class ArtifactsService {
         accessType,
         mimeType: "text/html",
         sizeBytes: upload.bytes.byteLength,
+        objectKey,
         uploadedAt: new Date(),
       });
       return this.toDto(record, false);
@@ -139,7 +145,7 @@ export class ArtifactsService {
       throw new ApiErrorException(violation.status, violation.code, violation.message);
     }
 
-    const replaced = await this.publishReplacement(record.id, upload.bytes);
+    const replaced = await this.publishReplacement(record, upload.bytes);
     return this.toDto(replaced, false);
   }
 
@@ -265,16 +271,17 @@ export class ArtifactsService {
         throw passwordRequired();
       }
     }
+    const pointer = this.contentPointer(record);
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
-      stored = await this.blobs.get(artifactObjectKey(record.id));
+      stored = await this.blobs.get(pointer.objectKey);
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
         throw artifactNotFound();
       }
       throw error;
     }
-    return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+    return { format: "html", sizeBytes: pointer.sizeBytes, body: stored.body };
   }
 
   // Invalid bodies are rejected before any bucket is touched. The client failure budget is
@@ -378,9 +385,10 @@ export class ArtifactsService {
 
   async openContent(request: HeaderSource, id: string, format: ContentFormat, accessToken: unknown): Promise<OpenedArtifactContent> {
     const record = await this.requireReadable(request, id, accessToken, format);
+    const pointer = this.contentPointer(record);
     let stored: { body: AsyncIterable<Uint8Array> };
     try {
-      stored = await this.blobs.get(artifactObjectKey(record.id));
+      stored = await this.blobs.get(pointer.objectKey);
     } catch (error) {
       if (error instanceof BlobNotFoundError) {
         throw artifactNotFound();
@@ -388,7 +396,7 @@ export class ArtifactsService {
       throw error;
     }
     if (format === "html") {
-      return { format: "html", sizeBytes: record.sizeBytes, body: stored.body };
+      return { format: "html", sizeBytes: pointer.sizeBytes, body: stored.body };
     }
 
     try {
@@ -547,7 +555,7 @@ export class ArtifactsService {
       creatorUserId: record.creatorUserId,
       organizationId: record.organizationId,
       accessType: record.accessType,
-      // Original upload names are not stored. The DTO filename is the derived object name.
+      // Original upload names are not stored. The public filename stays `{id}.html`.
       filename: artifactObjectKey(record.id),
       mimeType: "text/html",
       sizeBytes: record.sizeBytes,
@@ -567,68 +575,83 @@ export class ArtifactsService {
     return { shared, passwordProtected: shared && record.sharePasswordHash !== null };
   }
 
-  private async publishReplacement(id: string, bytes: Uint8Array): Promise<ArtifactRecord> {
-    const objectKey = artifactObjectKey(id);
-    const previous = await this.readStoredBytes(objectKey);
+  // Writes a new object, then points the row at it only if the revision is unchanged.
+  // A lost storage acknowledgement deletes that object when it can and leaves the row alone.
+  // One replace wins a revision. The others get 409 and their objects are removed.
+  private async publishReplacement(record: ArtifactRecord, bytes: Uint8Array): Promise<ArtifactRecord> {
+    const previousKey = storedObjectKey(record.id, record.objectKey);
+    const newKey = immutableContentKey(record.id, randomUUID());
     const uploadedAt = new Date();
-    let saved: ArtifactRecord | undefined;
     try {
-      await publishCurrentContent({
-        previous,
-        next: bytes,
-        write: (body) => this.blobs.put({ objectKey, body, contentType: "text/html" }),
-        record: async () => {
-          const row = await this.artifacts.replaceCurrentContent(id, {
-            sizeBytes: bytes.byteLength,
-            uploadedAt,
-          });
-          if (!row) {
-            throw new ArtifactRowMissing();
-          }
-          saved = row;
-        },
+      await this.blobs.put({
+        objectKey: newKey,
+        body: bytes,
+        contentType: "text/html",
       });
     } catch (error) {
-      if (error instanceof ArtifactRowMissing) {
-        await this.deleteStoredQuietly(objectKey);
-        throw artifactNotFound();
+      await this.deleteStoredQuietly(newKey);
+      throw error;
+    }
+
+    try {
+      await this.artifacts.commitContent({
+        id: record.id,
+        expectedRevision: record.contentRevision,
+        objectKey: newKey,
+        sizeBytes: bytes.byteLength,
+        uploadedAt,
+      });
+    } catch (error) {
+      const visible = await this.visibleObjectKey(record.id);
+      if (visible === newKey) {
+        await this.deleteStoredQuietly(previousKey);
+        const landed = await this.artifacts.findById(record.id);
+        if (landed?.objectKey === newKey) {
+          return landed;
+        }
       }
-      if (error instanceof ContentRestoreFailed) {
-        this.logger.error("Could not restore artifact content after a failed replace");
-        this.logger.error(error.restoreError instanceof Error ? error.restoreError.message : "Unknown restore error");
-        throw error.cause;
+      if (visible !== undefined && visible !== newKey) {
+        await this.deleteStoredQuietly(newKey);
       }
       throw error;
     }
-    if (!saved) {
-      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+
+    const current = await this.artifacts.findById(record.id);
+    const decision = decideContentPublish({
+      newKey,
+      previousKey,
+      visibleKey: current?.objectKey ?? null,
+    });
+    if (decision.deleteKey) {
+      await this.deleteStoredQuietly(decision.deleteKey);
     }
-    return saved;
+    if (decision.outcome === "published" && current?.objectKey === newKey) {
+      return current;
+    }
+    if (!current) {
+      throw artifactNotFound();
+    }
+    throw contentConflict();
   }
 
-  private async readStoredBytes(objectKey: string): Promise<Uint8Array | null> {
-    let stored: { body: AsyncIterable<Uint8Array> };
+  private contentPointer(record: ArtifactRecord): { objectKey: string; sizeBytes: number } {
+    const objectKey = storedObjectKey(record.id, record.objectKey);
+    const legacy = artifactObjectKey(record.id);
+    if (objectKey !== legacy && !objectKey.startsWith(`${record.id}/`)) {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    return { objectKey, sizeBytes: record.sizeBytes };
+  }
+
+  private async visibleObjectKey(id: string): Promise<string | null | undefined> {
     try {
-      stored = await this.blobs.get(objectKey);
+      const row = await this.artifacts.findById(id);
+      return row?.objectKey ?? null;
     } catch (error) {
-      if (error instanceof BlobNotFoundError) {
-        return null;
-      }
-      throw error;
+      this.logger.error("Could not read an artifact after a content replace");
+      this.logger.error(error instanceof Error ? error.message : "Unknown error");
+      return undefined;
     }
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    for await (const chunk of stored.body) {
-      chunks.push(chunk);
-      length += chunk.byteLength;
-    }
-    const bytes = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return bytes;
   }
 
   private async deleteStoredQuietly(objectKey: string): Promise<void> {
@@ -667,6 +690,14 @@ export type OpenedArtifactContent =
 
 function artifactNotFound(): ApiErrorException {
   return new ApiErrorException(404, "ARTIFACT_NOT_FOUND", "Artifact was not found.");
+}
+
+function contentConflict(): ApiErrorException {
+  return new ApiErrorException(
+    409,
+    "CONTENT_CONFLICT",
+    "Another replace finished first. Upload again to replace the current content.",
+  );
 }
 
 function passwordRequired(): ApiErrorException {
