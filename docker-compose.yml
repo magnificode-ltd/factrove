@@ -1,0 +1,135 @@
+# Self-host stack: PostgreSQL, Garage, migrations, the API, and the web app.
+# compose.yaml is only the local infrastructure for pnpm dev. This file does not replace it.
+# docker compose up without -f still selects compose.yaml.
+#
+#   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker -f docker-compose.yml up --build
+#
+# The migrate service runs prisma migrate deploy and exits. The API does not migrate
+# unless FACTROVE_MIGRATE=1. Garage creates the bucket named by S3_BUCKET on startup.
+# Published ports bind to 127.0.0.1. Change the mapping to publish them more widely.
+
+name: factrove-selfhost
+
+services:
+  postgres:
+    image: postgres:17.11@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    environment:
+      POSTGRES_USER: factrove
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+      POSTGRES_DB: factrove
+    volumes:
+      - factrove-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factrove -d factrove"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  garage:
+    image: dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?Set GARAGE_RPC_SECRET to 64 hex characters in .env.docker}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env.docker}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env.docker}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET:-factrove}
+    volumes:
+      - ./infra/garage.toml:/etc/garage.toml:ro
+      - factrove-garage-meta:/var/lib/garage/meta
+      - factrove-garage-data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    image: factrove-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgresql://factrove:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/factrove
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: factrove-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      DATABASE_URL: postgresql://factrove:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/factrove
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      API_PUBLIC_ORIGIN: ${API_PUBLIC_ORIGIN:-http://localhost:3001}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env.docker}
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+      SHARE_TOKEN_KEY: ${SHARE_TOKEN_KEY:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      S3_BUCKET: ${S3_BUCKET:-factrove}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ENDPOINT: http://garage:3900
+      S3_FORCE_PATH_STYLE: "true"
+      S3_ALLOW_INSECURE_HTTP: "true"
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env.docker}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env.docker}
+      MARKDOWN_CONVERSION_CONCURRENCY: ${MARKDOWN_CONVERSION_CONCURRENCY:-2}
+      MARKDOWN_CONVERSION_QUEUE: ${MARKDOWN_CONVERSION_QUEUE:-2}
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  web:
+    image: factrove-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      BROWSER_API_URL: ${BROWSER_API_URL:-http://localhost:3001}
+      INTERNAL_API_URL: http://api:3001
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  factrove-postgres:
+  factrove-garage-meta:
+  factrove-garage-data:

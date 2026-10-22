@@ -167,10 +167,21 @@ function readEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   if (url.pathname !== "/" || url.search.length > 0 || url.hash.length > 0) {
     throw new BlobStoreUnavailableError("S3_ENDPOINT must be an origin without a path, query, or hash");
   }
-  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname) && !allowInsecureHttp(env)) {
     throw new BlobStoreUnavailableError("S3_ENDPOINT must use https, or http on a loopback host");
   }
   return url.origin;
+}
+
+function allowInsecureHttp(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.S3_ALLOW_INSECURE_HTTP?.trim() ?? "";
+  if (raw.length === 0 || raw === "false") {
+    return false;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  throw new BlobStoreUnavailableError("S3_ALLOW_INSECURE_HTTP must be true or false");
 }
 
 function isLoopbackHost(hostname: string): boolean {

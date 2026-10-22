@@ -2,6 +2,7 @@
 
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { createAuthClient } from "better-auth/react";
+import { browserApiUrl } from "@/public-config";
 
 type AuthError = { message?: string; status?: number } | null;
 
@@ -33,10 +34,30 @@ export type FactroveAuthClient = {
   };
 };
 
-export const authClient: FactroveAuthClient = createAuthClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001",
-  plugins: [apiKeyClient()],
-  fetchOptions: {
-    credentials: "include",
+let cached: FactroveAuthClient | undefined;
+
+function client(): FactroveAuthClient {
+  cached ??= createAuthClient({
+    baseURL: browserApiUrl(),
+    plugins: [apiKeyClient()],
+    fetchOptions: {
+      credentials: "include",
+    },
+  }) as unknown as FactroveAuthClient;
+  return cached;
+}
+
+export const authClient: FactroveAuthClient = {
+  signIn: {
+    email: (input) => client().signIn.email(input),
   },
-}) as unknown as FactroveAuthClient;
+  signUp: {
+    email: (input) => client().signUp.email(input),
+  },
+  signOut: () => client().signOut(),
+  apiKey: {
+    list: () => client().apiKey.list(),
+    create: (input) => client().apiKey.create(input),
+    delete: (input) => client().apiKey.delete(input),
+  },
+};
