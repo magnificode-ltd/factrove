@@ -14,6 +14,8 @@ import {
   contextEnvelopeSchema,
   createShareRequestSchema,
   healthEnvelopeSchema,
+  SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  shareWithOrganizationRequestSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   publicUnlockRequestSchema,
@@ -202,6 +204,7 @@ export const namedSchemas: Record<string, z.ZodType> = {
   HealthEnvelope: healthEnvelopeSchema,
   ShareEnvelope: shareEnvelopeSchema,
   CreateShareRequest: createShareRequestSchema,
+  ShareWithOrganizationRequest: shareWithOrganizationRequestSchema,
   PublicArtifactEnvelope: publicArtifactEnvelopeSchema,
   PublicUnlockRequest: publicUnlockRequestSchema,
   PublicUnlockEnvelope: publicUnlockEnvelopeSchema,
@@ -240,7 +243,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Return the caller and current organization",
     description:
-      "Reads the session cookie or `Authorization: Bearer` API key. An API key has no active organization, so the organization is the caller's only membership, or null when they have none or more than one. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership, or null when they have none or more than one. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
     security: "sessionOrApiKey",
     responses: {
       "200": {
@@ -470,6 +473,53 @@ export const httpOperations: HttpOperation[] = [
         description: "Object storage failed before the row was updated. Code `STORAGE_UNAVAILABLE`.",
         schemaName: "ApiError"
       }
+    }
+  },
+  {
+    operationId: "shareArtifactWithOrganization",
+    method: "patch",
+    path: "/api/v1/artifacts/{id}",
+    tags: ["Artifacts"],
+    summary: "Share a private artifact with the confirmed organization",
+    description:
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. The only explicit row lock is the artifact. The organization foreign-key check takes an implicit KEY SHARE lock on the organization row. The update does not lock the user, the session, or membership rows. It re-checks membership and, for a session, that the session is still present and unexpired, in the conditional UPDATE. That statement is the linearization point. A different current organization at that snapshot is `409 ORGANIZATION_CHANGED` and does not write. A membership removal, organization deletion, active-organization change, or session revocation that commits before the statement reads its rows returns 409, 400, or `401 UNAUTHENTICATED` with no write. An authorization change that commits after that snapshot can land before the transaction commits and does not cancel the share. A deadlock, serialization failure, or lock timeout retries once and then returns `409 ORGANIZATION_CHANGED` with no write. About 16 seconds is the budget for those two attempts, not a deadline for this endpoint. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+    security: "owner",
+    pathParameters: [artifactIdParam],
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: "Share the artifact with the organization the caller confirmed. That id must be the current membership.",
+      schema: shareWithOrganizationRequestSchema,
+      schemaName: "ShareWithOrganizationRequest"
+    },
+    responses: {
+      "200": {
+        description: "The artifact is org_shared. A repeat request for an artifact that is already org_shared returns it without writing, for any confirmed organizationId.",
+        schema: artifactEnvelopeSchema,
+        schemaName: "ArtifactEnvelope"
+      },
+      "400": {
+        description: `This route shares a private artifact with the confirmed organization. A JSON array, and a JSON object with any other shape, including accessType private or a missing organizationId, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` Malformed JSON, null, and JSON primitives are \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
+        schemaName: "ApiError"
+      },
+      "401": {
+        description: "Missing credentials, or a session that was revoked or expired before the conditional update read it. Code `UNAUTHENTICATED`. The artifact is not written. A revocation that commits after that snapshot does not cancel a share the statement already accepted.",
+        schemaName: "ApiError"
+      },
+      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": {
+        description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "The artifact is still private and organizationId is not the caller's current membership when the conditional update reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. Code `ORGANIZATION_CHANGED`. The artifact is not written. An authorization change that commits after that snapshot does not produce this response and does not undo the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline.",
+        schemaName: "ApiError"
+      },
+      "413": {
+        description: "The JSON body is larger than 102,400 bytes. Code `FILE_TOO_LARGE` with message `The request is too large.`",
+        schemaName: "ApiError"
+      },
+      "500": apiErrorResponse
     }
   },
   {

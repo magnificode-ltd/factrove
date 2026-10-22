@@ -103,6 +103,21 @@ export const createShareRequestSchema = z
   })
   .strict();
 
+// The only accepted change is private -> org_shared. org_shared -> private is not this request.
+// organizationId is the organization the caller confirmed, and it must be the current membership.
+export const SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE =
+  'Send { "accessType": "org_shared", "organizationId": "<current organization id>" }. This shares a private artifact with that organization.';
+
+export const ORGANIZATION_CHANGED_MESSAGE =
+  "The current organization changed. Confirm the organization and try again.";
+
+export const shareWithOrganizationRequestSchema = z
+  .object({
+    accessType: z.literal("org_shared"),
+    organizationId: z.string().min(1)
+  })
+  .strict();
+
 export const publicArtifactSchema = z.object({
   id: z.string().uuid(),
   filename: z.string(),
@@ -156,6 +171,7 @@ export type ArtifactDto = z.infer<typeof artifactDtoSchema>;
 export type ShareState = z.infer<typeof shareStateSchema>;
 export type ShareEnvelope = z.infer<typeof shareEnvelopeSchema>;
 export type CreateShareRequest = z.infer<typeof createShareRequestSchema>;
+export type ShareWithOrganizationRequest = z.infer<typeof shareWithOrganizationRequestSchema>;
 export type PublicArtifact = z.infer<typeof publicArtifactSchema>;
 export type PublicArtifactEnvelope = z.infer<typeof publicArtifactEnvelopeSchema>;
 export type PublicUnlockRequest = z.infer<typeof publicUnlockRequestSchema>;

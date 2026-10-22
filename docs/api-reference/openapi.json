@@ -72,7 +72,7 @@
           "Auth"
         ],
         "summary": "Return the caller and current organization",
-        "description": "Reads the session cookie or `Authorization: Bearer` API key. An API key has no active organization, so the organization is the caller's only membership, or null when they have none or more than one. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+        "description": "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership, or null when they have none or more than one. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
         "security": [
           {
             "bearerAuth": []
@@ -1070,6 +1070,193 @@
       }
     },
     "/api/v1/artifacts/{id}": {
+      "patch": {
+        "operationId": "shareArtifactWithOrganization",
+        "tags": [
+          "Artifacts"
+        ],
+        "summary": "Share a private artifact with the confirmed organization",
+        "description": "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. The only explicit row lock is the artifact. The organization foreign-key check takes an implicit KEY SHARE lock on the organization row. The update does not lock the user, the session, or membership rows. It re-checks membership and, for a session, that the session is still present and unexpired, in the conditional UPDATE. That statement is the linearization point. A different current organization at that snapshot is `409 ORGANIZATION_CHANGED` and does not write. A membership removal, organization deletion, active-organization change, or session revocation that commits before the statement reads its rows returns 409, 400, or `401 UNAUTHENTICATED` with no write. An authorization change that commits after that snapshot can land before the transaction commits and does not cancel the share. A deadlock, serialization failure, or lock timeout retries once and then returns `409 ORGANIZATION_CHANGED` with no write. About 16 seconds is the budget for those two attempts, not a deadline for this endpoint. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Artifact UUID.",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Share the artifact with the organization the caller confirmed. That id must be the current membership.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareWithOrganizationRequest"
+              },
+              "example": {
+                "accessType": "org_shared",
+                "organizationId": "org_example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The artifact is org_shared. A repeat request for an artifact that is already org_shared returns it without writing, for any confirmed organizationId.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactEnvelope"
+                },
+                "example": {
+                  "artifact": {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "creatorUserId": "user_example",
+                    "organizationId": "org_example",
+                    "accessType": "org_shared",
+                    "filename": "11111111-1111-4111-8111-111111111111.html",
+                    "name": "hello",
+                    "mimeType": "text/html",
+                    "sizeBytes": 527,
+                    "createdAt": "2026-10-21T12:00:00.000Z",
+                    "updatedAt": "2026-10-21T12:00:00.000Z",
+                    "uploadedAt": "2026-10-21T12:00:00.000Z",
+                    "viewerUrl": "http://localhost:3000/artifacts/11111111-1111-4111-8111-111111111111",
+                    "contentUrl": "http://localhost:3001/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+                    "shared": false,
+                    "passwordProtected": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "This route shares a private artifact with the confirmed organization. A JSON array, and a JSON object with any other shape, including accessType private or a missing organizationId, is `400 INVALID_REQUEST` with message `Send { \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }. This shares a private artifact with that organization.` Malformed JSON, null, and JSON primitives are `400 INVALID_REQUEST` with message `The request is invalid.` A body whose media type is not application/json is `400 INVALID_REQUEST` with message `Send JSON with Content-Type application/json.` A private artifact and no current organization is `400 ORGANIZATION_REQUIRED` and the row stays private. An id that is not a UUID is also `400 INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials, or a session that was revoked or expired before the conditional update read it. Code `UNAUTHENTICATED`. The artifact is not written. A revocation that commits after that snapshot does not cancel a share the statement already accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ARTIFACT_NOT_FOUND",
+                    "message": "Artifact was not found."
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The artifact is still private and organizationId is not the caller's current membership when the conditional update reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. Code `ORGANIZATION_CHANGED`. The artifact is not written. An authorization change that commits after that snapshot does not produce this response and does not undo the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "ORGANIZATION_CHANGED",
+                    "message": "The current organization changed. Confirm the organization and try again."
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The JSON body is larger than 102,400 bytes. Code `FILE_TOO_LARGE` with message `The request is too large.`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FILE_TOO_LARGE",
+                    "message": "The request is too large."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "JSON error envelope `{ error: { code, message } }`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "operationId": "getArtifact",
         "tags": [
@@ -2115,6 +2302,7 @@
                 "enum": [
                   "INVALID_REQUEST",
                   "ORGANIZATION_REQUIRED",
+                  "ORGANIZATION_CHANGED",
                   "UNAUTHENTICATED",
                   "PASSWORD_REQUIRED",
                   "PASSWORD_INCORRECT",
@@ -2131,7 +2319,7 @@
                   "CONVERSION_UNAVAILABLE",
                   "UNLOCK_UNAVAILABLE"
                 ],
-                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked for org_shared access but has no current organization membership. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code. 409 ORGANIZATION_CHANGED: PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
               },
               "message": {
                 "type": "string"
@@ -2150,6 +2338,7 @@
         "enum": [
           "INVALID_REQUEST",
           "ORGANIZATION_REQUIRED",
+          "ORGANIZATION_CHANGED",
           "UNAUTHENTICATED",
           "PASSWORD_REQUIRED",
           "PASSWORD_INCORRECT",
@@ -2525,6 +2714,24 @@
             "maxLength": 128
           }
         },
+        "additionalProperties": false
+      },
+      "ShareWithOrganizationRequest": {
+        "type": "object",
+        "properties": {
+          "accessType": {
+            "type": "string",
+            "const": "org_shared"
+          },
+          "organizationId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "accessType",
+          "organizationId"
+        ],
         "additionalProperties": false
       },
       "PublicArtifactEnvelope": {

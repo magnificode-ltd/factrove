@@ -68,6 +68,31 @@ describe("Factrove API client", () => {
     expect(await uploadedFile.text()).toBe("<p>next</p>");
   });
 
+  it("patches accessType org_shared on the artifact route", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const shared = { ...artifact, accessType: "org_shared", organizationId: "local-org" };
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrl = String(input);
+      capturedInit = init;
+      return jsonResponse({ artifact: shared });
+    });
+    const client = createFactroveClient({
+      baseUrl: "http://localhost:3001",
+      apiKey: "ftrv_test",
+      fetch: fetchStub as typeof fetch
+    });
+
+    await expect(client.shareArtifactWithOrganization(artifact.id, "local-org")).resolves.toEqual({ artifact: shared });
+
+    expect(capturedUrl).toBe(`http://localhost:3001/api/v1/artifacts/${artifact.id}`);
+    expect(capturedInit?.method).toBe("PATCH");
+    const headers = new Headers(capturedInit?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("authorization")).toBe("Bearer ftrv_test");
+    expect(capturedInit?.body).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "local-org" }));
+  });
+
   it("appends /api/v1 once when the origin already includes the prefix", async () => {
     const fetchStub = vi.fn(async () => jsonResponse({ items: [artifact] }));
     const client = createFactroveClient({ baseUrl: "http://localhost:3001/api/v1/", fetch: fetchStub as typeof fetch });

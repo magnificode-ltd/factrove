@@ -13,7 +13,7 @@ type HeaderResponse = {
   setHeader(name: string, value: string): void;
 };
 
-const CREDENTIALED_METHODS = "GET,HEAD,POST,PUT,DELETE,OPTIONS";
+const CREDENTIALED_METHODS = "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS";
 const PUBLIC_METHODS = "GET,HEAD,OPTIONS";
 // Only the password unlock route under /api/v1/public accepts a write, still without credentials.
 const PUBLIC_UNLOCK_METHODS = "POST,OPTIONS";

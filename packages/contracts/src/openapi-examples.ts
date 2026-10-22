@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ORGANIZATION_CHANGED_MESSAGE, SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE } from "./index.js";
 
 const ARTIFACT_ID = "11111111-1111-4111-8111-111111111111";
 const SHARE_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -89,6 +90,10 @@ const ERROR_BODIES: Record<string, { code: string; message: string }> = {
     code: "ORGANIZATION_REQUIRED",
     message: "Organization sharing requires membership in an organization.",
   },
+  ORGANIZATION_CHANGED: {
+    code: "ORGANIZATION_CHANGED",
+    message: ORGANIZATION_CHANGED_MESSAGE,
+  },
 };
 
 const REQUEST_EXAMPLES: Record<string, unknown> = {
@@ -104,6 +109,7 @@ const REQUEST_EXAMPLES: Record<string, unknown> = {
     password: "replace-this-password",
   },
   CreateShareRequest: { password: "example-link-password" },
+  ShareWithOrganizationRequest: { accessType: "org_shared", organizationId: "org_example" },
   PublicUnlockRequest: { password: "example-link-password" },
 };
 
@@ -158,6 +164,15 @@ export function responseExampleFor(
 
 function successExample(operationId: string, schemaName: string | undefined): unknown | undefined {
   if (schemaName === "ArtifactEnvelope") {
+    if (operationId === "shareArtifactWithOrganization") {
+      return {
+        artifact: {
+          ...artifact,
+          organizationId: "org_example",
+          accessType: "org_shared",
+        },
+      };
+    }
     return { artifact };
   }
   if (schemaName === "ArtifactListEnvelope") {
@@ -227,10 +242,16 @@ function errorBody(code: string, description: string): { code: string; message: 
   if (code === "INVALID_REQUEST") {
     return { code, message: invalidRequestMessage(description) };
   }
+  if (code === "FILE_TOO_LARGE" && /102,400/.test(description)) {
+    return { code, message: "The request is too large." };
+  }
   return ERROR_BODIES[code];
 }
 
 function invalidRequestMessage(description: string): string {
+  if (/shares a private artifact/i.test(description)) {
+    return SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE;
+  }
   if (/not a UUID/i.test(description)) {
     return "Artifact id must be a UUID.";
   }

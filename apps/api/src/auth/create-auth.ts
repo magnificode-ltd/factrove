@@ -19,7 +19,7 @@ export type FactroveAuth = {
   api: {
     getSession: (input: { headers: Headers }) => Promise<{
       user: { id: string; name: string };
-      session: unknown;
+      session: { id: string; activeOrganizationId?: string | null };
     } | null>;
     verifyApiKey: (input: { body: { key: string } }) => Promise<{
       valid: boolean;
@@ -36,6 +36,18 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     database: prismaAdapter(input.prisma, {
       provider: "postgresql",
     }),
+    // Organization HTTP routes stay unmounted. This is the same session column the
+    // organization plugin writes. input: false keeps it server-controlled. Membership
+    // is checked when the session is read; a stored id the user does not belong to is ignored.
+    session: {
+      additionalFields: {
+        activeOrganizationId: {
+          type: "string",
+          required: false,
+          input: false,
+        },
+      },
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,

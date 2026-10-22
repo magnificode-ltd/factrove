@@ -7,6 +7,9 @@ import {
   ARTIFACT_NAME_MESSAGE,
   createShareRequestSchema,
   normalizeArtifactName,
+  ORGANIZATION_CHANGED_MESSAGE,
+  SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  shareWithOrganizationRequestSchema,
   publicArtifactSchema,
   publicUnlockRequestSchema,
   shareStateSchema,
@@ -154,6 +157,46 @@ export class ArtifactsService {
 
     const replaced = await this.publishReplacement(record, upload.bytes, name);
     return this.toDto(replaced, false);
+  }
+
+  // Owner only. private -> org_shared in the organization the caller confirmed.
+  // Already org_shared is a 200 with no write, before the current organization is compared.
+  // A private row re-checks membership and the session in the update statement. A session that
+  // was revoked or expired before that write is 401 and does not write.
+  async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
+    const actor = await this.actors.requireActor(request);
+    const record = await this.artifacts.findById(id);
+    if (!record || actor.user.id !== record.creatorUserId) {
+      throw artifactNotFound();
+    }
+    const confirmed = readShareWithOrganizationBody(readBody());
+    const includeGrant = !this.actors.hasCredentialHeader(request);
+    if (record.accessType === "org_shared") {
+      return this.toDto(record, includeGrant);
+    }
+    const outcome = await this.artifacts.shareWithOrganization({
+      id: record.id,
+      creatorUserId: actor.user.id,
+      organizationId: confirmed.organizationId,
+      sessionId: actor.sessionId,
+    });
+    if (outcome.outcome === "not-found") {
+      throw artifactNotFound();
+    }
+    if (outcome.outcome === "unauthenticated") {
+      throw new ApiErrorException(401, "UNAUTHENTICATED", "Sign in to continue.");
+    }
+    if (outcome.outcome === "organization-required") {
+      throw new ApiErrorException(
+        400,
+        "ORGANIZATION_REQUIRED",
+        "Organization sharing requires membership in an organization.",
+      );
+    }
+    if (outcome.outcome === "organization-changed") {
+      throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
+    }
+    return this.toDto(outcome.record, includeGrant);
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -740,6 +783,14 @@ function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
 
 function unlockBusy(): ApiErrorException {
   return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
+}
+
+function readShareWithOrganizationBody(body: unknown): { accessType: "org_shared"; organizationId: string } {
+  const parsed = shareWithOrganizationRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE);
+  }
+  return parsed.data;
 }
 
 function readCreateShareInput(body: unknown): CreateShareRequest {

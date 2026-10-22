@@ -8,12 +8,20 @@ export const apiErrorCatalog = [
   {
     status: 400,
     code: "ORGANIZATION_REQUIRED",
-    description: "The caller asked for org_shared access but has no current organization membership."
+    description:
+      "The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code."
+  },
+  {
+    status: 409,
+    code: "ORGANIZATION_CHANGED",
+    description:
+      "PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead."
   },
   {
     status: 401,
     code: "UNAUTHENTICATED",
-    description: "The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted."
+    description:
+      "The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share."
   },
   {
     status: 401,
@@ -43,7 +51,8 @@ export const apiErrorCatalog = [
   {
     status: 413,
     code: "FILE_TOO_LARGE",
-    description: "The upload is larger than the 10 MiB HTML limit."
+    description:
+      "The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large."
   },
   {
     status: 413,

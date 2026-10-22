@@ -84,6 +84,8 @@ describe("library requests", () => {
     expect(mineHtml).not.toContain(`${otherId}.html`);
     expect(mineHtml).toContain("Private");
     expect(mineHtml).toContain("Organization shared");
+    expect(mineHtml).toContain("Share with Local Organization");
+    expect(orgHtml).not.toContain("Share with Local Organization");
     expect(mineHtml).not.toContain("list only");
     expect(mineHtml).toContain("Private artifacts are visible only to you.");
     expect(orgHtml).toContain(`${otherId}.html`);
@@ -178,6 +180,12 @@ describe("viewer", () => {
     const state = await loadArtifact(client, mineId);
     const html = renderToStaticMarkup(<ViewerScreen state={state} />);
 
+    expect(state).toMatchObject({
+      status: "ready",
+      owner: true,
+      organization: { id: "local-org", name: "Local Organization" }
+    });
+    expect(html).toContain("Share with Local Organization");
     expect(html).toContain("Checking artifact content…");
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("allow-same-origin");
@@ -188,6 +196,32 @@ describe("viewer", () => {
     expect(html).not.toContain("Hello from Factrove");
     expect(html).not.toContain("<script");
     expect(html).not.toContain("dangerouslySetInnerHTML");
+  });
+
+  it("hides organization sharing unless the owner has a private artifact and an organization", () => {
+    const item = artifact(mineId, "private");
+    const organization = { id: "local-org", name: "Local Organization" };
+    const owner = renderToStaticMarkup(
+      <ViewerScreen state={{ status: "ready", artifact: item, organization, owner: true, share: null }} />
+    );
+    const shared = renderToStaticMarkup(
+      <ViewerScreen
+        state={{ status: "ready", artifact: { ...item, accessType: "org_shared" }, organization, owner: true, share: null }}
+      />
+    );
+    const reader = renderToStaticMarkup(
+      <ViewerScreen state={{ status: "ready", artifact: item, organization, owner: false, share: null }} />
+    );
+    const noOrg = renderToStaticMarkup(
+      <ViewerScreen state={{ status: "ready", artifact: item, organization: null, owner: true, share: null }} />
+    );
+    expect(owner).toContain("Share with Local Organization");
+    expect(owner).toContain('aria-haspopup="dialog"');
+    expect(shared).not.toContain("Share with Local Organization");
+    expect(shared).toContain("Organization shared");
+    expect(reader).not.toContain("Share with Local Organization");
+    expect(noOrg).not.toContain("Share with Local Organization");
+    expect(noOrg).toContain("Private");
   });
 
   it("shows a missing artifact without an iframe", async () => {

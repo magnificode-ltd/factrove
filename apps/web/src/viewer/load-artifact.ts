@@ -1,10 +1,16 @@
 import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
-import type { ArtifactDto, ShareState } from "@factrove/contracts";
+import type { ArtifactDto, ContextEnvelope, ShareState } from "@factrove/contracts";
 import { unavailableMessage } from "@/api/errors";
 import { artifactReturnPath } from "@/auth/return-path";
 
 export type ViewerModel =
-  | { status: "ready"; artifact: ArtifactDto; share?: ShareState | null }
+  | {
+      status: "ready";
+      artifact: ArtifactDto;
+      share?: ShareState | null;
+      organization?: ContextEnvelope["organization"];
+      owner?: boolean;
+    }
   | { status: "missing"; message: string }
   | { status: "signed-out"; message: string; returnTo: string }
   | { status: "unavailable"; message: string };
@@ -15,16 +21,17 @@ export async function loadArtifact(client: FactroveClient, id: string): Promise<
 
   if (artifactResult.status === "fulfilled") {
     const artifact = artifactResult.value.artifact;
-    const owner =
-      contextResult.status === "fulfilled" && contextResult.value.user.id === artifact.creatorUserId;
+    const context = contextResult.status === "fulfilled" ? contextResult.value : null;
+    const owner = context !== null && context.user.id === artifact.creatorUserId;
+    const organization = context?.organization ?? null;
     if (!owner) {
-      return { status: "ready", artifact, share: null };
+      return { status: "ready", artifact, share: null, organization, owner: false };
     }
     try {
       const share = await client.getArtifactShare(artifact.id);
-      return { status: "ready", artifact, share: share.share };
+      return { status: "ready", artifact, share: share.share, organization, owner: true };
     } catch {
-      return { status: "ready", artifact, share: null };
+      return { status: "ready", artifact, share: null, organization, owner: true };
     }
   }
   if (isUnauthenticated(contextResult) || isUnauthenticated(artifactResult)) {

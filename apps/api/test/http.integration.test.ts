@@ -8,7 +8,7 @@ import { connect as openTcp, type Socket } from "node:net";
 import { getActiveResourcesInfo } from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   apiErrorSchema,
   artifactEnvelopeSchema,
@@ -49,7 +49,7 @@ import { browserOrigins } from "../src/sharing/public-origin.js";
 import { SHARE_TICKET_MAX_USES } from "../src/sharing/share-grant.js";
 import { createShareToken, hashShareToken } from "../src/sharing/share-link.js";
 import { deriveShareTokenKey, encryptShareToken } from "../src/sharing/share-token-cipher.js";
-import { addMembership, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
+import { addMembership, createUserWithApiKey, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
@@ -2166,6 +2166,943 @@ describe("HTTP API", () => {
     }
   });
 
+  it("shares a private artifact with the current organization and hides it from everyone else", async () => {
+    const bytes = new TextEncoder().encode("<p>share-org</p>");
+    const artifact = await upload(baseUrl, "share-org.html", bytes, { name: "Share org" });
+    expect(artifact.accessType).toBe("private");
+    expect(artifact.organizationId).toBe(localOrganizationFixture.id);
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+
+    const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "example-link-password" }),
+    })).json());
+    const shareUrl = created.share.shareUrl;
+    expect(shareUrl).toBeTruthy();
+    const protectedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(protectedRow.shareTokenHash).not.toBeNull();
+    expect(protectedRow.sharePasswordHash).not.toBeNull();
+
+    const stranger = await createUserWithApiKey(prisma, {
+      email: "org-share-stranger@example.invalid",
+      name: "Stranger",
+      keyName: "org-share-stranger",
+    });
+    const reader = await createUserWithApiKey(prisma, {
+      email: "org-share-reader@example.invalid",
+      name: "Reader",
+      keyName: "org-share-reader",
+    });
+    await addMembership(prisma, reader.userId, localOrganizationFixture.id);
+    const missingId = "00000000-0000-4000-8000-000000000077";
+    const missing = await patchAccess(baseUrl, missingId, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    const strangerDenied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: stranger.apiKey });
+    const readerDenied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: reader.apiKey });
+    expect(missing.status).toBe(404);
+    expect(strangerDenied.status).toBe(404);
+    expect(readerDenied.status).toBe(404);
+    const missingError = await errorOf(missing);
+    expect(await errorOf(strangerDenied)).toEqual(missingError);
+    expect(await errorOf(readerDenied)).toEqual(missingError);
+    const readerDetail = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    expect(readerDetail.status).toBe(404);
+    expect(await errorOf(readerDetail)).toEqual(missingError);
+
+    const anonymous = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" });
+    expect(anonymous.status).toBe(401);
+    expect(await errorOf(anonymous)).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
+    });
+
+    const privateBody = await patchAccess(baseUrl, artifact.id, { accessType: "private" }, { apiKey: owner.apiKey });
+    expect(privateBody.status).toBe(400);
+    expect(await errorOf(privateBody)).toEqual({
+      code: "INVALID_REQUEST",
+      message: 'Send { "accessType": "org_shared", "organizationId": "<current organization id>" }. This shares a private artifact with that organization.',
+    });
+    const extra = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: localOrganizationFixture.id, note: 1 },
+      { apiKey: owner.apiKey },
+    );
+    expect(extra.status).toBe(400);
+    expect((await errorOf(extra)).code).toBe("INVALID_REQUEST");
+    const staleAudience = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: "org-share-other" },
+      { apiKey: owner.apiKey },
+    );
+    expect(staleAudience.status).toBe(409);
+    expect(await errorOf(staleAudience)).toEqual({
+      code: "ORGANIZATION_CHANGED",
+      message: "The current organization changed. Confirm the organization and try again.",
+    });
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).accessType).toBe("private");
+    const primitive = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "application/json" },
+      body: "true",
+    });
+    expect(primitive.status).toBe(400);
+    expect(await errorOf(primitive)).toEqual({ code: "INVALID_REQUEST", message: "The request is invalid." });
+    const nullJson = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "application/json" },
+      body: "null",
+    });
+    expect(nullJson.status).toBe(400);
+    expect(await errorOf(nullJson)).toEqual({ code: "INVALID_REQUEST", message: "The request is invalid." });
+    const schemaMessage =
+      'Send { "accessType": "org_shared", "organizationId": "<current organization id>" }. This shares a private artifact with that organization.';
+    for (const body of ["[]", "[1]"]) {
+      const arrayJson = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "application/json" },
+        body,
+      });
+      expect(arrayJson.status).toBe(400);
+      expect(await errorOf(arrayJson)).toEqual({ code: "INVALID_REQUEST", message: schemaMessage });
+    }
+    const tooLarge = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "application/json" },
+      body: "x".repeat(102_401),
+    });
+    expect(tooLarge.status).toBe(413);
+    expect(await errorOf(tooLarge)).toEqual({ code: "FILE_TOO_LARGE", message: "The request is too large." });
+    const textBody = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "text/plain" },
+      body: "org_shared",
+    });
+    expect(textBody.status).toBe(400);
+
+    const unchanged = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(unchanged.accessType).toBe("private");
+    expect(unchanged.organizationId).toBe(localOrganizationFixture.id);
+    expect(unchanged.shareTokenHash).toBe(protectedRow.shareTokenHash);
+    expect(unchanged.sharePasswordHash).toBe(protectedRow.sharePasswordHash);
+    expect(unchanged.objectKey).toBe(before.objectKey);
+    expect(unchanged.contentRevision).toBe(before.contentRevision);
+
+    const otherOrgId = "org-share-other";
+    await prisma.organization.create({
+      data: { id: otherOrgId, name: "Other Organization", slug: "org-share-other", createdAt: new Date() },
+    });
+    try {
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { organizationId: null } });
+
+    const shared = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(shared.status).toBe(200);
+    const body = artifactEnvelopeSchema.parse(await shared.json());
+    expect(body.artifact.id).toBe(artifact.id);
+    expect(body.artifact.accessType).toBe("org_shared");
+    expect(body.artifact.organizationId).toBe(localOrganizationFixture.id);
+    expect(body.artifact.shared).toBe(true);
+    expect(body.artifact.passwordProtected).toBe(true);
+    expect(body.artifact.name).toBe("Share org");
+    expectPlainContentUrl(body.artifact.contentUrl, artifact.id);
+
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.accessType).toBe("org_shared");
+    expect(row.organizationId).toBe(localOrganizationFixture.id);
+    expect(row.objectKey).toBe(before.objectKey);
+    expect(row.contentRevision).toBe(before.contentRevision);
+    expect(row.sizeBytes).toBe(before.sizeBytes);
+    expect(row.shareToken).toBeTruthy();
+    expect(row.shareTokenHash).not.toBeNull();
+    expect(row.sharePasswordHash).not.toBeNull();
+    const share = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+    expect(share.share.shareUrl).toBe(shareUrl);
+    expect(share.share.passwordProtected).toBe(true);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
+
+    const again = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(again.status).toBe(200);
+    const repeated = artifactEnvelopeSchema.parse(await again.json());
+    expect(repeated.artifact.accessType).toBe("org_shared");
+    expect(repeated.artifact.organizationId).toBe(localOrganizationFixture.id);
+    expect(repeated.artifact.updatedAt).toBe(body.artifact.updatedAt);
+    const afterRepeat = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(afterRepeat.updatedAt.toISOString()).toBe(row.updatedAt.toISOString());
+    expect(afterRepeat.shareTokenHash).toBe(row.shareTokenHash);
+    expect(afterRepeat.sharePasswordHash).toBe(row.sharePasswordHash);
+    const mismatchRepeat = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: "org-share-other" },
+      { apiKey: owner.apiKey },
+    );
+    expect(mismatchRepeat.status).toBe(200);
+    const mismatched = artifactEnvelopeSchema.parse(await mismatchRepeat.json());
+    expect(mismatched.artifact.accessType).toBe("org_shared");
+    expect(mismatched.artifact.organizationId).toBe(localOrganizationFixture.id);
+    expect(mismatched.artifact.updatedAt).toBe(body.artifact.updatedAt);
+    const afterMismatch = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(afterMismatch.updatedAt.toISOString()).toBe(row.updatedAt.toISOString());
+    expect(afterMismatch.organizationId).toBe(localOrganizationFixture.id);
+    expect(afterMismatch.shareTokenHash).toBe(row.shareTokenHash);
+
+    const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    expect(readable.status).toBe(200);
+    const readerWrite = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: reader.apiKey });
+    expect(readerWrite.status).toBe(404);
+    expect(await errorOf(readerWrite)).toEqual(missingError);
+    const orgList = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts?view=org`, {
+        headers: { authorization: `Bearer ${reader.apiKey}` },
+      })).json(),
+    );
+    expect(orgList.items.map((item) => item.id)).toContain(artifact.id);
+
+    const back = await patchAccess(baseUrl, artifact.id, { accessType: "private" }, { apiKey: owner.apiKey });
+    expect(back.status).toBe(400);
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).accessType).toBe("org_shared");
+
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { organizationId: otherOrgId } });
+    const parked = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const stay = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(stay.status).toBe(200);
+    const stayed = artifactEnvelopeSchema.parse(await stay.json());
+    expect(stayed.artifact.accessType).toBe("org_shared");
+    expect(stayed.artifact.organizationId).toBe(otherOrgId);
+    const parkedAfter = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(parkedAfter.updatedAt.toISOString()).toBe(parked.updatedAt.toISOString());
+    expect(parkedAfter.shareTokenHash).toBe(row.shareTokenHash);
+    expect(parkedAfter.sharePasswordHash).toBe(row.sharePasswordHash);
+    const confirmStored = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: otherOrgId },
+      { apiKey: owner.apiKey },
+    );
+    expect(confirmStored.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await confirmStored.json()).artifact.organizationId).toBe(otherOrgId);
+    const confirmNeither = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: "org-share-neither" },
+      { apiKey: owner.apiKey },
+    );
+    expect(confirmNeither.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await confirmNeither.json()).artifact.organizationId).toBe(otherOrgId);
+    const parkedStill = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(parkedStill.updatedAt.toISOString()).toBe(parked.updatedAt.toISOString());
+    expect(parkedStill.organizationId).toBe(otherOrgId);
+    expect(parkedStill.shareTokenHash).toBe(row.shareTokenHash);
+    } finally {
+      await prisma.artifact.updateMany({
+        where: { organizationId: otherOrgId },
+        data: { organizationId: localOrganizationFixture.id },
+      });
+      await prisma.organization.deleteMany({ where: { id: otherOrgId } });
+    }
+  });
+
+  it("refuses to share a private artifact when the caller has no current organization", async () => {
+    const isolated = new MemoryBlobStore();
+    const noOrg = await createApp(config, isolated);
+    try {
+      await noOrg.listen(0, "127.0.0.1");
+      const url = await noOrg.getUrl();
+      const solo = await createUserWithApiKey(noOrg.get(PrismaService), {
+        email: "no-org-share@example.invalid",
+        name: "Solo",
+        keyName: "solo",
+      });
+      const created = await upload(url, "solo.html", new TextEncoder().encode("<p>solo</p>"), {}, solo.apiKey);
+      expect(created.organizationId).toBeNull();
+      const rejected = await patchAccess(url, created.id, { accessType: "org_shared" }, { apiKey: solo.apiKey });
+      expect(rejected.status).toBe(400);
+      expect(await errorOf(rejected)).toEqual({
+        code: "ORGANIZATION_REQUIRED",
+        message: "Organization sharing requires membership in an organization.",
+      });
+      const db = noOrg.get(PrismaService);
+      const row = await db.artifact.findUniqueOrThrow({ where: { id: created.id } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+
+      const storedOrg = "solo-shared-org";
+      await db.organization.create({
+        data: { id: storedOrg, name: "Solo Shared", slug: storedOrg, createdAt: new Date() },
+      });
+      try {
+        await db.artifact.update({
+          where: { id: created.id },
+          data: { accessType: "org_shared", organizationId: storedOrg },
+        });
+        const sharedRow = await db.artifact.findUniqueOrThrow({ where: { id: created.id } });
+        for (const organizationId of [storedOrg, "solo-other-org"]) {
+          const repeat = await patchAccess(
+            url,
+            created.id,
+            { accessType: "org_shared", organizationId },
+            { apiKey: solo.apiKey },
+          );
+          expect(repeat.status).toBe(200);
+          expect(artifactEnvelopeSchema.parse(await repeat.json()).artifact.organizationId).toBe(storedOrg);
+        }
+        const afterRepeat = await db.artifact.findUniqueOrThrow({ where: { id: created.id } });
+        expect(afterRepeat.accessType).toBe("org_shared");
+        expect(afterRepeat.organizationId).toBe(storedOrg);
+        expect(afterRepeat.updatedAt.toISOString()).toBe(sharedRow.updatedAt.toISOString());
+      } finally {
+        await db.artifact.update({
+          where: { id: created.id },
+          data: { organizationId: null, accessType: "private" },
+        });
+        await db.organization.deleteMany({ where: { id: storedOrg } });
+      }
+    } finally {
+      await noOrg.close();
+    }
+  });
+
+  it("accepts an owner cookie share and rejects a cross-site cookie write", async () => {
+    const artifact = await upload(baseUrl, "cookie-share.html", new TextEncoder().encode("<p>cookie</p>"));
+    const denied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { origin: "https://evil.example" },
+    });
+    expect(denied.status).toBe(403);
+    expect((await errorOf(denied)).code).toBe("FORBIDDEN");
+    const missingOrigin = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { cookie: owner.cookie });
+    expect(missingOrigin.status).toBe(403);
+    const referer = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { referer: "http://localhost:3000/artifacts" },
+    });
+    expect(referer.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await referer.json()).artifact.accessType).toBe("org_shared");
+
+    const second = await upload(baseUrl, "cookie-origin.html", new TextEncoder().encode("<p>origin</p>"));
+    const allowed = await patchAccess(baseUrl, second.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { origin: "http://localhost:3000" },
+    });
+    expect(allowed.status).toBe(200);
+    const keyWithoutOrigin = await upload(baseUrl, "key-share.html", new TextEncoder().encode("<p>key</p>"));
+    const keyed = await patchAccess(baseUrl, keyWithoutOrigin.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(keyed.status).toBe(200);
+
+    const preflight = await ownerFetch(`${baseUrl}/api/v1/artifacts/${second.id}`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-methods")).toContain("PATCH");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBe("true");
+  });
+
+  it("keeps one organization-shared row when two shares run together", async () => {
+    const artifact = await upload(baseUrl, "race.html", new TextEncoder().encode("<p>race</p>"));
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const [first, second] = await Promise.all([
+        patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+        patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+      ]);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const left = artifactEnvelopeSchema.parse(await first.json()).artifact;
+      const right = artifactEnvelopeSchema.parse(await second.json()).artifact;
+      expect(left.accessType).toBe("org_shared");
+      expect(right.accessType).toBe("org_shared");
+      expect(left.organizationId).toBe(localOrganizationFixture.id);
+      expect(right.organizationId).toBe(localOrganizationFixture.id);
+      const rows = await prisma.artifact.findMany({ where: { id: artifact.id } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.accessType).toBe("org_shared");
+      expect(rows[0]?.organizationId).toBe(localOrganizationFixture.id);
+      expect(rows[0]?.shareTokenHash).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifact.id)).toBe(1);
+    } finally {
+      await removeArtifactUpdateAudit(prisma);
+    }
+  });
+
+  it("keeps content and a public password when they race with organization sharing", async () => {
+    const original = new TextEncoder().encode("<p>before</p>");
+    const artifact = await upload(baseUrl, "race-content.html", original);
+    const next = new TextEncoder().encode("<p>during-share</p>");
+    const [patched, replaced] = await Promise.all([
+      patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+      putContent(baseUrl, artifact.id, "during-share.html", next),
+    ]);
+    expect(patched.status).toBe(200);
+    expect(replaced.status).toBe(200);
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.accessType).toBe("org_shared");
+    expect(row.organizationId).toBe(localOrganizationFixture.id);
+    expect(row.shareTokenHash).toBeNull();
+    expect(row.sizeBytes).toBe(next.byteLength);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(next));
+
+    const protectedArtifact = await upload(baseUrl, "race-password.html", new TextEncoder().encode("<p>secret</p>"));
+    const [sharedAccess, password] = await Promise.all([
+      patchAccess(baseUrl, protectedArtifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+      ownerFetch(`${baseUrl}/api/v1/artifacts/${protectedArtifact.id}/share`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "example-link-password" }),
+      }),
+    ]);
+    expect(sharedAccess.status).toBe(200);
+    expect(password.status).toBe(200);
+    const protectedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: protectedArtifact.id } });
+    expect(protectedRow.accessType).toBe("org_shared");
+    expect(protectedRow.organizationId).toBe(localOrganizationFixture.id);
+    expect(protectedRow.shareTokenHash).not.toBeNull();
+    expect(protectedRow.sharePasswordHash).not.toBeNull();
+    const share = shareEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${protectedArtifact.id}/share`)).json(),
+    );
+    expect(share.share.passwordProtected).toBe(true);
+    expect(share.share.shared).toBe(true);
+  });
+
+  it("uses the session active organization when the caller belongs to more than one", async () => {
+    const orgA = "org-active-a";
+    const orgB = "org-active-b";
+    await prisma.organization.createMany({
+      data: [
+        { id: orgA, name: "Organization A", slug: "org-active-a", createdAt: new Date() },
+        { id: orgB, name: "Organization B", slug: "org-active-b", createdAt: new Date() },
+      ],
+    });
+    try {
+      await prisma.member.deleteMany({ where: { userId: owner.userId } });
+      await addMembership(prisma, owner.userId, orgA);
+      await addMembership(prisma, owner.userId, orgB);
+      const sessions = await prisma.session.updateMany({
+        where: { userId: owner.userId },
+        data: { activeOrganizationId: orgB },
+      });
+      expect(sessions.count).toBeGreaterThan(0);
+
+      const context = contextEnvelopeSchema.parse(await (await globalThis.fetch(`${baseUrl}/api/v1/context`, {
+        headers: { cookie: owner.cookie },
+      })).json());
+      expect(context.organization).toEqual({ id: orgB, name: "Organization B" });
+      const keyed = contextEnvelopeSchema.parse(await (await globalThis.fetch(`${baseUrl}/api/v1/context`, {
+        headers: { authorization: `Bearer ${owner.apiKey}` },
+      })).json());
+      expect(keyed.organization).toBeNull();
+
+      const artifact = await upload(baseUrl, "active-org.html", new TextEncoder().encode("<p>active</p>"));
+      expect(artifact.organizationId).toBeNull();
+      const stale = await patchAccess(
+        baseUrl,
+        artifact.id,
+        { accessType: "org_shared", organizationId: orgA },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      expect(stale.status).toBe(409);
+      expect((await errorOf(stale)).code).toBe("ORGANIZATION_CHANGED");
+      expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).accessType).toBe("private");
+      const shared = await patchAccess(
+        baseUrl,
+        artifact.id,
+        { accessType: "org_shared", organizationId: orgB },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      expect(shared.status).toBe(200);
+      expect(artifactEnvelopeSchema.parse(await shared.json()).artifact.organizationId).toBe(orgB);
+    } finally {
+      await prisma.session.updateMany({
+        where: { userId: owner.userId },
+        data: { activeOrganizationId: null },
+      });
+      await prisma.member.deleteMany({ where: { userId: owner.userId } });
+      await addMembership(prisma, owner.userId, localOrganizationFixture.id);
+      await prisma.artifact.updateMany({
+        where: { organizationId: { in: [orgA, orgB] } },
+        data: { organizationId: localOrganizationFixture.id },
+      });
+      await prisma.organization.deleteMany({ where: { id: { in: [orgA, orgB] } } });
+    }
+  });
+
+  it("returns the same 404 envelope when organizationId is current, mismatched, or invalid", async () => {
+    const artifact = await upload(baseUrl, "hidden-share.html", new TextEncoder().encode("<p>hidden</p>"));
+    const shared = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(shared.status).toBe(200);
+    const stranger = await createUserWithApiKey(prisma, {
+      email: "org-share-envelope-stranger@example.invalid",
+      name: "Envelope Stranger",
+      keyName: "envelope-stranger",
+    });
+    const reader = await createUserWithApiKey(prisma, {
+      email: "org-share-envelope-reader@example.invalid",
+      name: "Envelope Reader",
+      keyName: "envelope-reader",
+    });
+    await addMembership(prisma, reader.userId, localOrganizationFixture.id);
+    const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    expect(readable.status).toBe(200);
+
+    const missingId = "00000000-0000-4000-8000-000000000088";
+    const bodies = [
+      { accessType: "org_shared", organizationId: localOrganizationFixture.id },
+      { accessType: "org_shared", organizationId: "org-share-other" },
+      { accessType: "org_shared", organizationId: "" },
+    ];
+    const callers = [
+      { id: artifact.id, apiKey: stranger.apiKey },
+      { id: artifact.id, apiKey: reader.apiKey },
+      { id: missingId, apiKey: owner.apiKey },
+      { id: missingId, apiKey: reader.apiKey },
+    ];
+    const envelopes = [];
+    for (const body of bodies) {
+      for (const caller of callers) {
+        const response = await patchAccess(baseUrl, caller.id, body, { apiKey: caller.apiKey });
+        envelopes.push(await errorEnvelope(response));
+      }
+    }
+    expect(envelopes).toHaveLength(12);
+    for (const envelope of envelopes) {
+      expect(envelope).toEqual(envelopes[0]);
+    }
+    expect(envelopes[0]).toEqual({
+      status: 404,
+      contentType: "application/json; charset=utf-8",
+      cacheControl: "no-store",
+      nosniff: "nosniff",
+      retryAfter: null,
+      body: { error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } },
+    });
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.accessType).toBe("org_shared");
+    expect(row.organizationId).toBe(localOrganizationFixture.id);
+  });
+
+  it("does not share when membership is removed while the update is blocked", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-member");
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.member.deleteMany({ where: { userId: owner.userId, organizationId: orgB } });
+      });
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share when the active organization changes while the update is blocked", async () => {
+    const { orgA, orgB, artifactId } = await prepareLockedShare("lock-active");
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.session.updateMany({
+          where: { userId: owner.userId },
+          data: { activeOrganizationId: orgA },
+        });
+      });
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share when the organization is deleted while the update is blocked", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-org");
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.organization.delete({ where: { id: orgB } });
+      });
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+      expect(await prisma.organization.findUnique({ where: { id: orgB } })).toBeNull();
+    } finally {
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share an orphaned owner row when the creator foreign key is dropped", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-user");
+    const snapshot = await snapshotOwnerIdentity();
+    await installArtifactUpdateAudit(prisma);
+    // Defensive coverage only. Dropping the restrict constraint lets the owner row disappear
+    // while this artifact still points at it. With the constraint present, that delete waits
+    // on the artifact row instead of removing the user.
+    await prisma.$executeRawUnsafe(`ALTER TABLE "artifact" DROP CONSTRAINT "artifact_creator_user_id_fkey"`);
+    let constraintDropped = true;
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('lock_timeout', '2000', true)`;
+          await tx.user.delete({ where: { id: owner.userId } });
+        });
+      });
+      expect(await prisma.user.findUnique({ where: { id: owner.userId } })).toBeNull();
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(row.creatorUserId).toBe(owner.userId);
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      await restoreOwnerIdentity(snapshot);
+      if (constraintDropped) {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "artifact" ADD CONSTRAINT "artifact_creator_user_id_fkey" FOREIGN KEY ("creator_user_id") REFERENCES "user"("id") ON DELETE RESTRICT ON UPDATE CASCADE`,
+        );
+        constraintDropped = false;
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("returns 409 without writing when the share lock timeout runs out while owner deletion waits", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-user-fk");
+    const snapshot = await snapshotOwnerIdentity();
+    await installArtifactUpdateAudit(prisma);
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked = (): void => {};
+    const acquired = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    // Longer than the share's two attempts. Releasing early lets the delete and the share deadlock.
+    const lock = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${artifactId}::uuid FOR UPDATE`;
+      locked();
+      await held;
+    }, { timeout: 45_000 });
+    let deleting: Promise<OwnerDeleteResult> = Promise.resolve({
+      deleted: false,
+      error: new Error("owner delete did not start"),
+    });
+    try {
+      await acquired;
+      const pending = patchAccess(
+        baseUrl,
+        artifactId,
+        { accessType: "org_shared", organizationId: orgB },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      await waitForArtifactRowLockWaiter(prisma);
+      deleting = prisma.$transaction(async (tx) => {
+        // Outlives the share's two attempts, then fails the restrict check once this test releases the artifact.
+        await tx.$executeRaw`SELECT set_config('lock_timeout', '30000', true)`;
+        await tx.$executeRaw`DELETE FROM "user" WHERE id = ${owner.userId}`;
+      }, { timeout: 40_000 }).then(
+        () => ({ deleted: true as const }),
+        (error: unknown) => ({ deleted: false as const, error }),
+      );
+      await waitForOwnerDeleteWaitingOnArtifact(prisma);
+      const response = await promiseWithDeadline(
+        pending,
+        20_000,
+        "share did not finish within the lock-timeout budget",
+      );
+      // The delete is still waiting on artifact_creator_user_id_fkey and has not committed.
+      // 409 is the share exhausting its lock timeout (one retry, then ORGANIZATION_CHANGED) with no write.
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(row.creatorUserId).toBe(owner.userId);
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+      release();
+      const deleteResult = await promiseWithDeadline(
+        deleting,
+        10_000,
+        "owner delete did not finish after the artifact lock was released",
+      );
+      expect(deleteResult.deleted).toBe(false);
+      if (!deleteResult.deleted) {
+        expect(errorText(deleteResult.error)).toContain("artifact_creator_user_id_fkey");
+      }
+      expect(await prisma.user.findUnique({ where: { id: owner.userId } })).not.toBeNull();
+    } finally {
+      release();
+      await lock.catch(() => undefined);
+      const deleteResult = await deleting;
+      if (deleteResult.deleted || (await prisma.user.findUnique({ where: { id: owner.userId } })) === null) {
+        await restoreOwnerIdentity(snapshot);
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  }, 50_000);
+
+  it("does not share when the session is revoked while the update is blocked", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-session");
+    const sessions = await prisma.session.findMany({ where: { userId: owner.userId } });
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.session.deleteMany({ where: { userId: owner.userId } });
+      });
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      if ((await prisma.session.count({ where: { userId: owner.userId } })) === 0) {
+        await prisma.session.createMany({ data: sessions });
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share when the session expires while the update is blocked", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-session-expiry");
+    const sessions = await prisma.session.findMany({ where: { userId: owner.userId } });
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.session.updateMany({
+          where: { userId: owner.userId },
+          data: { expiresAt: new Date(Date.now() - 60_000) },
+        });
+      });
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      for (const session of sessions) {
+        await prisma.session.updateMany({
+          where: { id: session.id },
+          data: { expiresAt: session.expiresAt },
+        });
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share when the session expires after the transaction starts and before the write", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-session-clock");
+    const sessions = await prisma.session.findMany({ where: { userId: owner.userId } });
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        // The share transaction has already started. This expiry is after that start and
+        // before the UPDATE, which is the window CURRENT_TIMESTAMP would still treat as valid.
+        await prisma.$executeRaw`
+          UPDATE "session"
+          SET "expiresAt" = clock_timestamp() + interval '250 milliseconds'
+          WHERE "userId" = ${owner.userId}
+        `;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      });
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      for (const session of sessions) {
+        await prisma.session.updateMany({
+          where: { id: session.id },
+          data: { expiresAt: session.expiresAt },
+        });
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("returns 409 when the confirmed organization disappears before the foreign-key check", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-org-fk");
+    await installArtifactUpdateAudit(prisma);
+    // The trigger deletes the organization after the UPDATE's membership check and before the
+    // foreign-key check. Deleting it earlier makes actor lookup fail, so this is the deterministic
+    // way to hit artifact_organization_id_fkey.
+    await prisma.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION factrove_delete_org_on_share() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.organization_id = 'org-lock-b' THEN
+          DELETE FROM organization WHERE id = NEW.organization_id;
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER factrove_delete_org_on_share
+      BEFORE UPDATE ON artifact
+      FOR EACH ROW EXECUTE FUNCTION factrove_delete_org_on_share()
+    `);
+    try {
+      const response = await patchAccess(
+        baseUrl,
+        artifactId,
+        { accessType: "org_shared", organizationId: orgB },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+      expect(await prisma.organization.findUnique({ where: { id: orgB } })).not.toBeNull();
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS factrove_delete_org_on_share ON artifact`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS factrove_delete_org_on_share()`);
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not deadlock when a membership delete and a share race in either lock order", async () => {
+    const first = await prepareLockedShare("lock-order-artifact");
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const artifactFirst = await shareWhileArtifactLocked(first.artifactId, first.orgB, async () => {
+        await prisma.member.deleteMany({ where: { userId: owner.userId, organizationId: first.orgB } });
+      });
+      expect(artifactFirst.status).not.toBe(500);
+      expect(artifactFirst.status).toBe(409);
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: first.artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(await artifactUpdateCount(prisma, first.artifactId)).toBe(0);
+    } finally {
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+
+    const second = await prepareLockedShare("lock-order-member");
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = (): void => {};
+    const memberHeld = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+    const memberLock = prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        DELETE FROM "member"
+        WHERE "userId" = ${owner.userId} AND "organizationId" = ${second.orgB}
+      `;
+      holding();
+      await held;
+    }, { timeout: 15_000 });
+    await Promise.race([
+      memberHeld,
+      memberLock.then(() => {
+        throw new Error("membership lock ended before the share started");
+      }),
+    ]);
+    let memberFirst: Response | null = null;
+    const pending = patchAccess(
+      baseUrl,
+      second.artifactId,
+      { accessType: "org_shared", organizationId: second.orgB },
+      { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+    );
+    try {
+      const started = Date.now();
+      memberFirst = await Promise.race([
+        pending,
+        new Promise<Response>((_, reject) => {
+          setTimeout(() => reject(new Error("share deadlocked with the membership delete")), 2_500);
+        }),
+      ]);
+      expect(Date.now() - started).toBeLessThan(2_500);
+      expect(memberFirst.status).not.toBe(500);
+      expect(memberFirst.status).toBe(200);
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: second.artifactId } });
+      expect(row.accessType).toBe("org_shared");
+      expect(row.organizationId).toBe(second.orgB);
+    } finally {
+      release();
+      await memberLock.catch(() => undefined);
+      if (!memberFirst) {
+        await pending.catch(() => undefined);
+      }
+      await restoreLockedShare();
+    }
+  });
+
   it("keeps API keys hashed, revocable, and session-only to manage", async () => {
     const listed = await globalThis.fetch(`${baseUrl}/api/auth/api-key/list`, { headers: { cookie: owner.cookie } });
     expect(listed.status).toBe(200);
@@ -2573,6 +3510,116 @@ describe("HTTP API", () => {
       config.publicBaseUrl = "http://localhost:3000";
     }
   });
+
+  async function prepareLockedShare(label: string): Promise<{ orgA: string; orgB: string; artifactId: string }> {
+    const orgA = "org-lock-a";
+    const orgB = "org-lock-b";
+    await prisma.organization.createMany({
+      data: [
+        { id: orgA, name: "Organization A", slug: "org-lock-a", createdAt: new Date() },
+        { id: orgB, name: "Organization B", slug: "org-lock-b", createdAt: new Date() },
+      ],
+    });
+    await prisma.member.deleteMany({ where: { userId: owner.userId } });
+    await addMembership(prisma, owner.userId, orgA);
+    await addMembership(prisma, owner.userId, orgB);
+    const sessions = await prisma.session.updateMany({
+      where: { userId: owner.userId },
+      data: { activeOrganizationId: orgB },
+    });
+    expect(sessions.count).toBeGreaterThan(0);
+    const artifact = await upload(baseUrl, `${label}.html`, new TextEncoder().encode("<p>lock</p>"));
+    expect(artifact.accessType).toBe("private");
+    expect(artifact.organizationId).toBeNull();
+    return { orgA, orgB, artifactId: artifact.id };
+  }
+
+  async function restoreLockedShare(): Promise<void> {
+    await prisma.session.updateMany({
+      where: { userId: owner.userId },
+      data: { activeOrganizationId: null },
+    });
+    await prisma.member.deleteMany({ where: { userId: owner.userId } });
+    await addMembership(prisma, owner.userId, localOrganizationFixture.id);
+    await prisma.artifact.updateMany({
+      where: { organizationId: { in: ["org-lock-a", "org-lock-b"] } },
+      data: { organizationId: localOrganizationFixture.id, accessType: "private" },
+    });
+    await prisma.organization.deleteMany({ where: { id: { in: ["org-lock-a", "org-lock-b"] } } });
+  }
+
+  async function shareWhileArtifactLocked(
+    artifactId: string,
+    organizationId: string,
+    mutate: () => Promise<void>,
+  ): Promise<Response> {
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const lock = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${artifactId}::uuid FOR UPDATE`;
+      await held;
+    }, { timeout: 20_000 });
+    try {
+      const pending = patchAccess(
+        baseUrl,
+        artifactId,
+        { accessType: "org_shared", organizationId },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      await waitForArtifactRowLockWaiter(prisma);
+      await mutate();
+      release();
+      return await pending;
+    } finally {
+      release();
+      await lock;
+    }
+  }
+
+  async function snapshotOwnerIdentity(): Promise<{
+    user: Awaited<ReturnType<typeof prisma.user.findUniqueOrThrow>>;
+    sessions: Awaited<ReturnType<typeof prisma.session.findMany>>;
+    accounts: Awaited<ReturnType<typeof prisma.account.findMany>>;
+    members: Awaited<ReturnType<typeof prisma.member.findMany>>;
+    invitations: Awaited<ReturnType<typeof prisma.invitation.findMany>>;
+  }> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: owner.userId } });
+    const [sessions, accounts, members, invitations] = await Promise.all([
+      prisma.session.findMany({ where: { userId: owner.userId } }),
+      prisma.account.findMany({ where: { userId: owner.userId } }),
+      prisma.member.findMany({ where: { userId: owner.userId } }),
+      prisma.invitation.findMany({ where: { inviterId: owner.userId } }),
+    ]);
+    return { user, sessions, accounts, members, invitations };
+  }
+
+  async function restoreOwnerIdentity(snapshot: {
+    user: Awaited<ReturnType<typeof prisma.user.findUniqueOrThrow>>;
+    sessions: Awaited<ReturnType<typeof prisma.session.findMany>>;
+    accounts: Awaited<ReturnType<typeof prisma.account.findMany>>;
+    members: Awaited<ReturnType<typeof prisma.member.findMany>>;
+    invitations: Awaited<ReturnType<typeof prisma.invitation.findMany>>;
+  }): Promise<void> {
+    const existing = await prisma.user.findUnique({ where: { id: snapshot.user.id } });
+    if (existing) {
+      return;
+    }
+    await prisma.user.create({ data: snapshot.user });
+    if (snapshot.accounts.length > 0) {
+      await prisma.account.createMany({ data: snapshot.accounts });
+    }
+    if (snapshot.sessions.length > 0) {
+      await prisma.session.createMany({ data: snapshot.sessions });
+    }
+    if (snapshot.members.length > 0) {
+      await prisma.member.createMany({ data: snapshot.members });
+    }
+    if (snapshot.invitations.length > 0) {
+      await prisma.invitation.createMany({ data: snapshot.invitations });
+    }
+  }
 
   describe("password-protected links", () => {
     const previousProxies = config.trustedProxies;
@@ -3931,6 +4978,120 @@ function expectRetryAfter(response: Response): number {
   return value;
 }
 
+type OwnerDeleteResult = { deleted: true } | { deleted: false; error: unknown };
+
+function promiseWithDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+function errorText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if ("message" in current && typeof current.message === "string") {
+      parts.push(current.message);
+    }
+    if ("code" in current && typeof current.code === "string") {
+      parts.push(current.code);
+    }
+    if ("meta" in current && typeof current.meta === "object" && current.meta !== null) {
+      parts.push(JSON.stringify(current.meta));
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return parts.join("\n");
+}
+
+async function waitForArtifactRowLockWaiter(client: PrismaService): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 8_000) {
+    const rows = await client.$queryRaw<Array<{ waiting: number }>>(Prisma.sql`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity
+      WHERE pid <> pg_backend_pid()
+        AND state = 'active'
+        AND wait_event_type = 'Lock'
+        AND query ILIKE '%FOR UPDATE%'
+        AND query ILIKE '%artifact%'
+    `);
+    if (Number(rows[0]?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("organization share did not block on the artifact row");
+}
+
+async function waitForOwnerDeleteWaitingOnArtifact(client: PrismaService): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 8_000) {
+    const rows = await client.$queryRaw<Array<{ waiting: number }>>(Prisma.sql`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS waiter
+      JOIN pg_locks AS wanted ON wanted.pid = waiter.pid AND NOT wanted.granted
+      WHERE waiter.pid <> pg_backend_pid()
+        AND waiter.state = 'active'
+        AND waiter.wait_event_type = 'Lock'
+        AND waiter.query ILIKE '%DELETE%'
+        AND waiter.query ILIKE '%"user"%'
+        AND (
+          (
+            wanted.locktype = 'tuple'
+            AND wanted.relation = 'artifact'::regclass
+          )
+          OR (
+            wanted.locktype = 'transactionid'
+            AND EXISTS (
+              SELECT 1
+              FROM pg_locks AS holder_txn
+              JOIN pg_locks AS artifact_lock
+                ON artifact_lock.pid = holder_txn.pid
+               AND artifact_lock.granted
+               AND artifact_lock.relation = 'artifact'::regclass
+              WHERE holder_txn.granted
+                AND holder_txn.locktype = 'transactionid'
+                AND holder_txn.transactionid = wanted.transactionid
+                AND holder_txn.pid <> waiter.pid
+            )
+          )
+        )
+    `);
+    if (Number(rows[0]?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("owner delete did not wait on the artifact row");
+}
+
+async function errorEnvelope(response: Response): Promise<{
+  status: number;
+  contentType: string | null;
+  cacheControl: string | null;
+  nosniff: string | null;
+  retryAfter: string | null;
+  body: unknown;
+}> {
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    cacheControl: response.headers.get("cache-control"),
+    nosniff: response.headers.get("x-content-type-options"),
+    retryAfter: response.headers.get("retry-after"),
+    body: await response.json(),
+  };
+}
+
 async function errorOf(response: Response): Promise<{ code: string; message: string }> {
   expect(response.headers.get("content-type")).toContain("application/json");
   expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -4043,6 +5204,81 @@ function settledWithin<T>(work: Promise<T>, milliseconds: number): Promise<T> {
 async function readContent(url: string): Promise<Uint8Array> {
   const response = await ownerFetch(url);
   return new Uint8Array(await response.arrayBuffer());
+}
+
+async function installArtifactUpdateAudit(client: PrismaService): Promise<void> {
+  await client.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS factrove_artifact_update_audit (
+      artifact_id text PRIMARY KEY,
+      updates integer NOT NULL
+    )
+  `);
+  await client.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION factrove_count_artifact_update() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+    BEGIN
+      INSERT INTO factrove_artifact_update_audit (artifact_id, updates)
+      VALUES (NEW.id::text, 1)
+      ON CONFLICT (artifact_id) DO UPDATE
+        SET updates = factrove_artifact_update_audit.updates + 1;
+      RETURN NEW;
+    END;
+    $$
+  `);
+  await client.$executeRawUnsafe("DROP TRIGGER IF EXISTS factrove_count_artifact_update ON artifact");
+  await client.$executeRawUnsafe(`
+    CREATE TRIGGER factrove_count_artifact_update
+    AFTER UPDATE ON artifact
+    FOR EACH ROW EXECUTE FUNCTION factrove_count_artifact_update()
+  `);
+}
+
+async function artifactUpdateCount(client: PrismaService, id: string): Promise<number> {
+  const rows = await client.$queryRaw<Array<{ updates: number }>>(
+    Prisma.sql`SELECT updates FROM factrove_artifact_update_audit WHERE artifact_id = ${id}`,
+  );
+  return Number(rows[0]?.updates ?? 0);
+}
+
+async function removeArtifactUpdateAudit(client: PrismaService): Promise<void> {
+  await client.$executeRawUnsafe("DROP TRIGGER IF EXISTS factrove_count_artifact_update ON artifact");
+  await client.$executeRawUnsafe("DROP FUNCTION IF EXISTS factrove_count_artifact_update()");
+  await client.$executeRawUnsafe("DROP TABLE IF EXISTS factrove_artifact_update_audit");
+}
+
+function patchAccess(
+  url: string,
+  id: string,
+  body: unknown,
+  init: { apiKey?: string | null; cookie?: string; headers?: Record<string, string> } = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (init.apiKey) {
+    headers.set("authorization", `Bearer ${init.apiKey}`);
+  }
+  if (init.cookie) {
+    headers.set("cookie", init.cookie);
+  }
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  const payload = confirmedOrganizationBody(body);
+  return globalThis.fetch(`${url}/api/v1/artifacts/${id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(payload),
+  });
+}
+
+function confirmedOrganizationBody(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return body;
+  }
+  const record = body as { accessType?: unknown; organizationId?: unknown };
+  if (record.accessType !== "org_shared" || "organizationId" in record) {
+    return body;
+  }
+  return { ...record, organizationId: localOrganizationFixture.id };
 }
 
 function postCookieFile(

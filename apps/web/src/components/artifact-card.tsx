@@ -1,8 +1,9 @@
 "use client";
 
-import type { PointerEvent } from "react";
-import type { ArtifactDto } from "@factrove/contracts";
+import { useEffect, useState, type PointerEvent } from "react";
+import type { AccessType, ArtifactDto, ContextEnvelope } from "@factrove/contracts";
 import { CopyButton } from "@/components/copy-button";
+import { OrgShareControl } from "@/components/org-share-control";
 import { ShareControl } from "@/components/share-control";
 import { Badge } from "@/components/ui/badge";
 import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUploadedAt } from "@/format";
@@ -10,12 +11,19 @@ import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUplo
 export function ArtifactCard({
   artifact,
   now,
-  canShare = false
+  canShare = false,
+  organization = null
 }: {
   artifact: ArtifactDto;
   now: number;
   canShare?: boolean;
+  organization?: ContextEnvelope["organization"];
 }) {
+  const [accessType, setAccessType] = useState<AccessType>(artifact.accessType);
+  const [audience, setAudience] = useState(organization);
+  useEffect(() => {
+    setAudience(organization);
+  }, [organization]);
   const uploaded = formatUploadedAt(artifact.uploadedAt);
 
   function onMove(event: PointerEvent<HTMLLIElement>) {
@@ -53,6 +61,18 @@ export function ArtifactCard({
               />
             </span>
           ) : null}
+          {canShare && accessType === "private" && audience ? (
+            <span className="pointer-events-auto relative z-10 max-w-full min-w-0">
+              <OrgShareControl
+                artifactId={artifact.id}
+                organizationId={audience.id}
+                organizationName={audience.name}
+                compact
+                onShared={(next) => setAccessType(next.accessType)}
+                onAudienceChange={setAudience}
+              />
+            </span>
+          ) : null}
           <span className="pointer-events-auto">
             <CopyButton
               className="h-8"
@@ -62,8 +82,16 @@ export function ArtifactCard({
               value={artifact.id}
             />
           </span>
-          <Badge variant={artifact.accessType === "private" ? "secondary" : "default"} className="h-6">
-            {accessLabel(artifact.accessType)}
+          <Badge
+            id={`artifact-access-${artifact.id}`}
+            tabIndex={-1}
+            data-testid="artifact-access"
+            data-access={accessType}
+            aria-live="polite"
+            variant={accessType === "private" ? "secondary" : "default"}
+            className="h-6 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+          >
+            {accessLabel(accessType)}
           </Badge>
           <time dateTime={artifact.uploadedAt} title={uploaded}>
             <span className="sr-only">{uploaded}</span>
