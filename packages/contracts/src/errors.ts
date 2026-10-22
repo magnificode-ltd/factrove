@@ -9,7 +9,13 @@ export const apiErrorCatalog = [
     status: 400,
     code: "ORGANIZATION_REQUIRED",
     description:
-      "The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} both use this code."
+      "The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code."
+  },
+  {
+    status: 409,
+    code: "ORGANIZATION_CHANGED",
+    description:
+      "PATCH /api/v1/artifacts/{id} named an organizationId that is not the caller's current membership. The artifact is not written."
   },
   {
     status: 401,
@@ -44,7 +50,8 @@ export const apiErrorCatalog = [
   {
     status: 413,
     code: "FILE_TOO_LARGE",
-    description: "The upload is larger than the 10 MiB HTML limit."
+    description:
+      "The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large."
   },
   {
     status: 413,

@@ -83,14 +83,14 @@ describe("Factrove API client", () => {
       fetch: fetchStub as typeof fetch
     });
 
-    await expect(client.shareArtifactWithOrganization(artifact.id)).resolves.toEqual({ artifact: shared });
+    await expect(client.shareArtifactWithOrganization(artifact.id, "local-org")).resolves.toEqual({ artifact: shared });
 
     expect(capturedUrl).toBe(`http://localhost:3001/api/v1/artifacts/${artifact.id}`);
     expect(capturedInit?.method).toBe("PATCH");
     const headers = new Headers(capturedInit?.headers);
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("authorization")).toBe("Bearer ftrv_test");
-    expect(capturedInit?.body).toBe(JSON.stringify({ accessType: "org_shared" }));
+    expect(capturedInit?.body).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "local-org" }));
   });
 
   it("appends /api/v1 once when the origin already includes the prefix", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type PointerEvent } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import type { AccessType, ArtifactDto, ContextEnvelope } from "@factrove/contracts";
 import { CopyButton } from "@/components/copy-button";
 import { OrgShareControl } from "@/components/org-share-control";
@@ -20,6 +20,10 @@ export function ArtifactCard({
   organization?: ContextEnvelope["organization"];
 }) {
   const [accessType, setAccessType] = useState<AccessType>(artifact.accessType);
+  const [audience, setAudience] = useState(organization);
+  useEffect(() => {
+    setAudience(organization);
+  }, [organization]);
   const uploaded = formatUploadedAt(artifact.uploadedAt);
 
   function onMove(event: PointerEvent<HTMLLIElement>) {
@@ -57,13 +61,15 @@ export function ArtifactCard({
               />
             </span>
           ) : null}
-          {canShare && accessType === "private" && organization ? (
-            <span className="pointer-events-auto relative z-10">
+          {canShare && accessType === "private" && audience ? (
+            <span className="pointer-events-auto relative z-10 max-w-full min-w-0">
               <OrgShareControl
                 artifactId={artifact.id}
-                organizationName={organization.name}
+                organizationId={audience.id}
+                organizationName={audience.name}
                 compact
                 onShared={(next) => setAccessType(next.accessType)}
+                onAudienceChange={setAudience}
               />
             </span>
           ) : null}

@@ -7,6 +7,7 @@ import {
   ARTIFACT_NAME_MESSAGE,
   createShareRequestSchema,
   normalizeArtifactName,
+  ORGANIZATION_CHANGED_MESSAGE,
   SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
   shareWithOrganizationRequestSchema,
   publicArtifactSchema,
@@ -158,39 +159,47 @@ export class ArtifactsService {
     return this.toDto(replaced, false);
   }
 
-  // Owner only. private -> org_shared in the caller's current organization.
-  // Already org_shared is a 200 with no write, so a repeat does not move the organization
-  // or touch the share token. The conditional update lets concurrent requests both succeed.
+  // Owner only. private -> org_shared in the organization the caller confirmed.
+  // That id must be the current membership. Already org_shared is a 200 with no write
+  // when the confirmed id is current, or when the caller has no current organization.
+  // The conditional update lets concurrent requests both succeed.
   async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
     const actor = await this.actors.requireActor(request);
     const record = await this.artifacts.findById(id);
     if (!record || actor.user.id !== record.creatorUserId) {
       throw artifactNotFound();
     }
-    readShareWithOrganizationBody(readBody());
-    if (record.accessType === "org_shared") {
+    const confirmed = readShareWithOrganizationBody(readBody());
+    const current = actor.organization;
+    if (record.accessType === "org_shared" && current === null) {
       return this.toDto(record, !this.actors.hasCredentialHeader(request));
     }
-    if (actor.organization === null) {
+    if (current === null) {
       throw new ApiErrorException(
         400,
         "ORGANIZATION_REQUIRED",
         "Organization sharing requires membership in an organization.",
       );
     }
+    if (confirmed.organizationId !== current.id) {
+      throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
+    }
+    if (record.accessType === "org_shared") {
+      return this.toDto(record, !this.actors.hasCredentialHeader(request));
+    }
     await this.artifacts.shareWithOrganization({
       id: record.id,
       creatorUserId: actor.user.id,
-      organizationId: actor.organization.id,
+      organizationId: current.id,
     });
-    const current = await this.artifacts.findById(record.id);
-    if (!current || current.creatorUserId !== actor.user.id) {
+    const saved = await this.artifacts.findById(record.id);
+    if (!saved || saved.creatorUserId !== actor.user.id) {
       throw artifactNotFound();
     }
-    if (current.accessType !== "org_shared") {
+    if (saved.accessType !== "org_shared") {
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
-    return this.toDto(current, !this.actors.hasCredentialHeader(request));
+    return this.toDto(saved, !this.actors.hasCredentialHeader(request));
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -779,11 +788,12 @@ function unlockBusy(): ApiErrorException {
   return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
 }
 
-function readShareWithOrganizationBody(body: unknown): void {
+function readShareWithOrganizationBody(body: unknown): { accessType: "org_shared"; organizationId: string } {
   const parsed = shareWithOrganizationRequestSchema.safeParse(body);
   if (!parsed.success) {
     throw new ApiErrorException(400, "INVALID_REQUEST", SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE);
   }
+  return parsed.data;
 }
 
 function readCreateShareInput(body: unknown): CreateShareRequest {

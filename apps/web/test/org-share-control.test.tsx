@@ -64,7 +64,12 @@ async function renderControl(onShared = vi.fn()) {
         <span id={`artifact-access-${id}`} tabIndex={-1}>
           Private
         </span>
-        <OrgShareControl artifactId={id} organizationName="Local Organization" onShared={onShared} />
+        <OrgShareControl
+          artifactId={id}
+          organizationId="local-org"
+          organizationName="Local Organization"
+          onShared={onShared}
+        />
       </>
     );
   });
@@ -75,12 +80,19 @@ describe("organization share control", () => {
   it("confirms, then patches org_shared and reports the returned artifact", async () => {
     const calls: Array<{ url: string; method: string; body: string | null; credentials: RequestCredentials | undefined }> = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
       calls.push({
-        url: String(input),
+        url,
         method: init?.method ?? "GET",
         body: typeof init?.body === "string" ? init.body : null,
         credentials: init?.credentials
       });
+      if (url.endsWith("/context")) {
+        return new Response(JSON.stringify({
+          user: { id: "local-user", name: "Local User" },
+          organization: { id: "local-org", name: "Local Organization" }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response(JSON.stringify({ artifact }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -94,6 +106,7 @@ describe("organization share control", () => {
     });
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.getAttribute("aria-modal")).toBe("true");
+    expect(dialog?.querySelector("bdi")?.textContent).toBe("Local Organization");
     expect(dialog?.textContent).toContain(
       "Members of Local Organization will be able to view this artifact. This can't be undone from the UI yet."
     );
@@ -118,16 +131,14 @@ describe("organization share control", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(calls).toEqual([
-      {
-        url: `http://localhost:3001/api/v1/artifacts/${id}`,
-        method: "PATCH",
-        body: JSON.stringify({ accessType: "org_shared" }),
-        credentials: "include"
-      }
-    ]);
+    expect(calls[0]).toEqual({
+      url: `http://localhost:3001/api/v1/artifacts/${id}`,
+      method: "PATCH",
+      body: JSON.stringify({ accessType: "org_shared", organizationId: "local-org" }),
+      credentials: "include"
+    });
     expect(onShared).toHaveBeenCalledWith(artifact);
-    expect(toast.success).toHaveBeenCalledWith("Shared with Local Organization");
+    expect(toast.success).toHaveBeenCalledWith("Shared with \u2068Local Organization\u2069");
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
@@ -156,5 +167,99 @@ describe("organization share control", () => {
     );
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(onShared).not.toHaveBeenCalled();
+  });
+
+  it("keeps the confirmation button focusable while the share is pending", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/context")) {
+        return new Response(JSON.stringify({
+          user: { id: "local-user", name: "Local User" },
+          organization: { id: "local-org", name: "Local Organization" }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      await gate;
+      return new Response(JSON.stringify({ artifact }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    await renderControl();
+    await act(async () => {
+      buttonNamed("Share with Local Organization").click();
+    });
+    const confirm = [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
+      candidate.textContent?.includes("Share with Local Organization")
+    );
+    await act(async () => {
+      confirm?.click();
+    });
+    expect(confirm?.hasAttribute("disabled")).toBe(false);
+    expect(confirm?.getAttribute("aria-busy")).toBe("true");
+    expect(confirm?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(confirm);
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+    release();
+    await act(async () => {
+      await gate;
+    });
+  });
+
+  it("asks again with the organization returned after a stale confirmation", async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/context")) {
+        return new Response(JSON.stringify({
+          user: { id: "local-user", name: "Local User" },
+          organization: { id: "org-b", name: "Organization B" }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const body = typeof init?.body === "string" ? init.body : "";
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "ORGANIZATION_CHANGED",
+            message: "The current organization changed. Confirm the organization and try again."
+          }
+        }), { status: 409, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        artifact: { ...artifact, organizationId: "org-b" }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const onShared = await renderControl();
+    await act(async () => {
+      buttonNamed("Share with Local Organization").click();
+    });
+    await act(async () => {
+      [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
+        candidate.textContent?.includes("Share with Local Organization")
+      )?.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("Organization B");
+    expect(dialog?.querySelector("bdi")?.textContent).toBe("Organization B");
+    expect(dialog?.textContent).toContain("The current organization changed. Confirm the organization and try again.");
+    expect(onShared).not.toHaveBeenCalled();
+    await act(async () => {
+      [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
+        candidate.textContent?.includes("Share with Organization B")
+      )?.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(bodies[0]).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "local-org" }));
+    expect(bodies[1]).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "org-b" }));
+    expect(toast.success).toHaveBeenCalledWith("Shared with \u2068Organization B\u2069");
   });
 });

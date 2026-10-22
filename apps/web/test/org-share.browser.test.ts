@@ -82,7 +82,9 @@ describe("organization share control", () => {
       expect(await header.getByTestId("artifact-access").innerText()).toBe("Organization shared");
       expect(await header.getByTestId("artifact-access").evaluate((element) => element === document.activeElement)).toBe(true);
       expect(await header.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
-      await page.getByText("Shared with Local Organization").waitFor();
+      await page.waitForFunction(
+        () => document.body.textContent?.includes("Shared with \u2068Local Organization\u2069") ?? false
+      );
       await saveShot(page, "org-share-after.png");
 
       const rowTrigger = library.getByRole("button", { name: "Share with Local Organization" });
@@ -91,6 +93,71 @@ describe("organization share control", () => {
       await page.getByRole("dialog").waitFor({ state: "hidden" });
       expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
       expect(await library.getByTestId("artifact-access").first().innerText()).toBe("Organization shared");
+    } finally {
+      await page.close();
+    }
+  }, 45_000);
+
+  it("keeps focus inside the dialog while the share is pending", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await page.goto(`${pageOrigin}/org-share.html`);
+      await page.evaluate(() => {
+        (window as Window & { __holdOrgShare?: boolean }).__holdOrgShare = true;
+      });
+      const trigger = page.locator("header").getByRole("button", { name: "Share with Local Organization" });
+      await trigger.click();
+      const dialog = page.getByRole("dialog");
+      await dialog.waitFor();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => document.body.dataset.patchPending === "1");
+      const confirm = dialog.getByRole("button", { name: "Sharing…" });
+      expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
+      expect(await confirm.evaluate((element) => element.hasAttribute("disabled"))).toBe(false);
+      for (let step = 0; step < 8; step += 1) {
+        await page.keyboard.press("Tab");
+        expect(await page.evaluate(() => document.querySelector("[data-testid='org-share-dialog']")?.contains(document.activeElement))).toBe(true);
+      }
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("org-share-trigger");
+      await page.evaluate(() => {
+        (window as Window & { __releaseOrgShare?: () => void }).__releaseOrgShare?.();
+      });
+    } finally {
+      await page.close();
+    }
+  }, 45_000);
+
+  it("keeps a long organization name inside a 390px viewport", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await page.goto(`${pageOrigin}/org-share.html?long=1`);
+      const name = "Share with Magnificode Software Development Organization";
+      const trigger = page.locator("header").getByRole("button", { name });
+      await trigger.waitFor({ timeout: 10_000 });
+      const triggerBox = await trigger.boundingBox();
+      expect(triggerBox).toBeTruthy();
+      expect(triggerBox!.x).toBeGreaterThanOrEqual(0);
+      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(390);
+      expect(await trigger.evaluate((element) => element.textContent ?? "")).toContain(
+        "Magnificode Software Development Organization"
+      );
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name });
+      await dialog.waitFor();
+      const confirm = dialog.getByRole("button", { name });
+      const confirmBox = await confirm.boundingBox();
+      expect(confirmBox).toBeTruthy();
+      expect(confirmBox!.x).toBeGreaterThanOrEqual(0);
+      expect(confirmBox!.x + confirmBox!.width).toBeLessThanOrEqual(390);
+      expect(await dialog.innerText()).toContain(
+        "Members of Magnificode Software Development Organization will be able to view this artifact."
+      );
+      await saveShot(page, "org-share-long-name-390.png");
     } finally {
       await page.close();
     }

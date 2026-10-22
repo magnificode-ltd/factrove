@@ -10,7 +10,17 @@ const libraryId = "123e4567-e89b-42d3-a456-426614174011";
 const sharedId = "123e4567-e89b-42d3-a456-426614174012";
 const otherId = "123e4567-e89b-42d3-a456-426614174013";
 const noOrgId = "123e4567-e89b-42d3-a456-426614174014";
-const organization = { id: "local-org", name: "Local Organization" };
+const longName = new URLSearchParams(window.location.search).has("long");
+const organization = longName
+  ? { id: "long-org", name: "Magnificode Software Development Organization" }
+  : { id: "local-org", name: "Local Organization" };
+
+declare global {
+  interface Window {
+    __holdOrgShare?: boolean;
+    __releaseOrgShare?: () => void;
+  }
+}
 const contentUrl = new URL("./hello.html", window.location.href).href;
 
 document.documentElement.style.setProperty("--font-inter", "Inter, ui-sans-serif, system-ui, sans-serif");
@@ -43,17 +53,37 @@ window.fetch = async (input, init) => {
     const url = String(input);
     const id = decodeURIComponent(url.split("/").pop() ?? "");
     const current = artifact(id, "private");
+    let organizationId = organization.id;
+    if (typeof init?.body === "string") {
+      const parsed = JSON.parse(init.body) as { organizationId?: unknown };
+      if (typeof parsed.organizationId === "string") {
+        organizationId = parsed.organizationId;
+      }
+    }
+    if (window.__holdOrgShare) {
+      document.body.dataset.patchPending = "1";
+      await new Promise<void>((resolve) => {
+        window.__releaseOrgShare = resolve;
+      });
+      delete document.body.dataset.patchPending;
+    }
     return new Response(
       JSON.stringify({
         artifact: {
           ...current,
           accessType: "org_shared",
-          organizationId: organization.id,
+          organizationId,
           updatedAt: "2026-10-22T12:05:00.000Z"
         }
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
+  }
+  if (String(input).endsWith("/context")) {
+    return new Response(JSON.stringify({
+      user: { id: "local-user", name: "Local User" },
+      organization
+    }), { status: 200, headers: { "content-type": "application/json" } });
   }
   return realFetch(input, init);
 };

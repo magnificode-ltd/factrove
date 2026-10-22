@@ -104,12 +104,17 @@ export const createShareRequestSchema = z
   .strict();
 
 // The only accepted change is private -> org_shared. org_shared -> private is not this request.
+// organizationId is the organization the caller confirmed, and it must be the current membership.
 export const SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE =
-  'Send { "accessType": "org_shared" }. This shares a private artifact with the current organization.';
+  'Send { "accessType": "org_shared", "organizationId": "<current organization id>" }. This shares a private artifact with that organization.';
+
+export const ORGANIZATION_CHANGED_MESSAGE =
+  "The current organization changed. Confirm the organization and try again.";
 
 export const shareWithOrganizationRequestSchema = z
   .object({
-    accessType: z.literal("org_shared")
+    accessType: z.literal("org_shared"),
+    organizationId: z.string().min(1)
   })
   .strict();
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { AccessType } from "@factrove/contracts";
+import type { AccessType, ContextEnvelope } from "@factrove/contracts";
 import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
@@ -15,6 +15,9 @@ import type { ViewerModel } from "@/viewer/load-artifact";
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const initialAccess = state.status === "ready" ? state.artifact.accessType : "private";
   const [accessType, setAccessType] = useState<AccessType>(initialAccess);
+  const [organization, setOrganization] = useState<ContextEnvelope["organization"]>(
+    state.status === "ready" ? state.organization ?? null : null
+  );
   const title =
     state.status === "ready"
       ? artifactLabel(state.artifact)
@@ -33,7 +36,9 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
             <ViewerTools
               state={state}
               accessType={accessType}
+              organization={organization}
               onShared={(next) => setAccessType(next)}
+              onAudienceChange={setOrganization}
             />
           ) : null
         }
@@ -79,23 +84,28 @@ function ViewerFacts({
 function ViewerTools({
   state,
   accessType,
-  onShared
+  organization,
+  onShared,
+  onAudienceChange
 }: {
   state: Extract<ViewerModel, { status: "ready" }>;
   accessType: AccessType;
+  organization: ContextEnvelope["organization"];
   onShared: (accessType: AccessType) => void;
+  onAudienceChange: (organization: ContextEnvelope["organization"]) => void;
 }) {
   const { artifact } = state;
   const share = state.share ?? null;
-  const organization = state.organization ?? null;
   const showOrgShare = state.owner === true && accessType === "private" && organization !== null;
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
       {showOrgShare ? (
         <OrgShareControl
           artifactId={artifact.id}
+          organizationId={organization.id}
           organizationName={organization.name}
           onShared={(next) => onShared(next.accessType)}
+          onAudienceChange={onAudienceChange}
         />
       ) : null}
       {share ? (

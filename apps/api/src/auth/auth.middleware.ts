@@ -4,6 +4,8 @@ import { json, urlencoded } from "express";
 
 type NextFunction = (error?: unknown) => void;
 
+const JSON_BODY_MAX_BYTES = 102_400;
+
 @Injectable()
 export class BetterAuthMiddleware implements NestMiddleware {
   use(request: IncomingMessage, response: ServerResponse, next: NextFunction): void {
@@ -13,7 +15,7 @@ export class BetterAuthMiddleware implements NestMiddleware {
       next();
       return;
     }
-    json()(request, response, (error?: unknown) => {
+    json({ limit: JSON_BODY_MAX_BYTES })(request, response, (error?: unknown) => {
       if (error) {
         writeParseError(response, error);
         return;

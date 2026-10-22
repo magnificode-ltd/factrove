@@ -243,7 +243,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Return the caller and current organization",
     description:
-      "Reads the session cookie or `Authorization: Bearer` API key. An API key has no active organization, so the organization is the caller's only membership, or null when they have none or more than one. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership, or null when they have none or more than one. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
     security: "sessionOrApiKey",
     responses: {
       "200": {
@@ -480,32 +480,40 @@ export const httpOperations: HttpOperation[] = [
     method: "patch",
     path: "/api/v1/artifacts/{id}",
     tags: ["Artifacts"],
-    summary: "Share a private artifact with the current organization",
+    summary: "Share a private artifact with the confirmed organization",
     description:
-      "Owner only. JSON body `{ \"accessType\": \"org_shared\" }` switches a private artifact to `org_shared` and sets `organizationId` to the caller's current organization. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password when `organizationId` is current, and also when the caller has no current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
       contentType: "application/json",
       required: true,
-      description: "Share the artifact with the caller's current organization.",
+      description: "Share the artifact with the organization the caller confirmed. That id must be the current membership.",
       schema: shareWithOrganizationRequestSchema,
       schemaName: "ShareWithOrganizationRequest"
     },
     responses: {
       "200": {
-        description: "The artifact is org_shared. A repeat request returns the current artifact without writing.",
+        description: "The artifact is org_shared. A repeat request returns the current artifact without writing when the confirmed organization is current.",
         schema: artifactEnvelopeSchema,
         schemaName: "ArtifactEnvelope"
       },
       "400": {
-        description: `This route shares a private artifact with the current organization. Any other body, including accessType private, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
+        description: `This route shares a private artifact with the confirmed organization. A JSON object with any other shape, including accessType private or a missing organizationId, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` Malformed JSON, and a JSON value that is not an object, is \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
       "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "organizationId is not the caller's current membership. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
+        schemaName: "ApiError"
+      },
+      "413": {
+        description: "The JSON body is larger than 102,400 bytes. Code `FILE_TOO_LARGE` with message `The request is too large.`",
         schemaName: "ApiError"
       },
       "500": apiErrorResponse
