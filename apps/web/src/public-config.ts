@@ -1,5 +1,11 @@
 const DEFAULT_PUBLIC_API_URL = "http://localhost:3001";
 
+type RuntimeEnv = {
+  BROWSER_API_URL?: string;
+  INTERNAL_API_URL?: string;
+  NEXT_PUBLIC_API_URL?: string;
+};
+
 export function readPublicApiOrigin(value: string | undefined): string | undefined {
   const raw = value?.trim() ?? "";
   if (raw.length === 0) {
@@ -25,16 +31,21 @@ export function readPublicApiOrigin(value: string | undefined): string | undefin
 
 // Origin the Next.js server uses for its own fetches. INTERNAL_API_URL and BROWSER_API_URL
 // are ordinary environment variables, so they stay out of the client bundle.
-export function serverApiUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const internal = readPublicApiOrigin(env.INTERNAL_API_URL);
-  if (env.INTERNAL_API_URL?.trim() && !internal) {
+function runtimeEnv(env?: RuntimeEnv): RuntimeEnv {
+  return env ?? (process.env as RuntimeEnv);
+}
+
+export function serverApiUrl(env?: RuntimeEnv): string {
+  const source = runtimeEnv(env);
+  const internal = readPublicApiOrigin(source.INTERNAL_API_URL);
+  if (source.INTERNAL_API_URL?.trim() && !internal) {
     warnInvalid("INTERNAL_API_URL");
   }
   if (internal) {
     return internal;
   }
-  const browser = readPublicApiOrigin(env.BROWSER_API_URL);
-  if (env.BROWSER_API_URL?.trim() && !browser) {
+  const browser = readPublicApiOrigin(source.BROWSER_API_URL);
+  if (source.BROWSER_API_URL?.trim() && !browser) {
     warnInvalid("BROWSER_API_URL");
   }
   if (browser) {
@@ -55,9 +66,10 @@ export function browserApiUrl(): string {
 }
 
 // Inline script for the root layout. When BROWSER_API_URL is unset the baked origin stays in place.
-export function publicConfigScript(env: NodeJS.ProcessEnv = process.env): string {
-  const override = readPublicApiOrigin(env.BROWSER_API_URL);
-  if (env.BROWSER_API_URL?.trim() && !override) {
+export function publicConfigScript(env?: RuntimeEnv): string {
+  const source = runtimeEnv(env);
+  const override = readPublicApiOrigin(source.BROWSER_API_URL);
+  if (source.BROWSER_API_URL?.trim() && !override) {
     warnInvalid("BROWSER_API_URL");
   }
   if (!override) {
