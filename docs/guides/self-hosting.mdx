@@ -1,193 +1,447 @@
 ---
-title: Self-hosting and local development
-description: Local infrastructure, production startup, origins, object storage, backups, and rollback.
+title: Self-hosting
+description: Run Factrove with Docker Compose, or from source, including storage, HTTPS, the CLI, upgrades, and backups.
+keywords:
+  - self-hosting
+  - docker
+  - compose
+  - postgresql
+  - garage
+  - s3
 ---
 
-Factrove is meant to be run as your own install. `compose.yaml` starts PostgreSQL and Garage for local development with `pnpm dev`. It does not start the API or the web app. `docker-compose.yml` starts PostgreSQL, Garage, a migration container, the API, and the web app. The commands are in the repository README under Self-host with Docker Compose.
+Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. Images are built from this repository. This repository does not publish them to a registry.
 
-## Applications
+`compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](/quickstart) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
 
-| Process | Default bind | How it starts |
+## Prerequisites
+
+For the Compose stack:
+
+- Docker Engine and the Compose plugin. The command is `docker compose` (Compose v2). The file uses health checks, `service_completed_successfully`, and required `${VAR:?}` substitution.
+- A clone of this repository, so Compose can build the images.
+- Enough disk for the build and for the PostgreSQL and Garage volumes.
+
+The stack pulls two pinned images and builds the other two:
+
+| Image | Role |
+| --- | --- |
+| `postgres:17.11` | Metadata. Official multi-arch index |
+| `dxflrs/garage:v2.3.0` | S3-compatible bytes for the bundled bucket. Official multi-arch index |
+| `factrove-api:local` | API, built here with `docker build --target api` |
+| `factrove-web:local` | Web app, built here with `docker build --target web` |
+
+The API image uses Node.js 24.16.0 and pnpm 11.25.0, the same pins as `.nvmrc` and `packageManager` in `package.json`. You do not install Node on the host unless you also run the CLI or the [from-source](#run-from-source) path.
+
+Garage creates the bucket named by `S3_BUCKET` because its command includes `--default-bucket`. The API does not create a bucket.
+
+## Get the code
+
+```bash
+git clone https://github.com/magnificode-ltd/factrove.git
+cd factrove
+```
+
+There is no image name to pull for the API or the web app. `docker compose up --build` builds `factrove-api:local` and `factrove-web:local` from the `Dockerfile`. The same Dockerfile is what CI builds, tagged `factrove-api:ci` and `factrove-web:ci`, without pushing.
+
+## Configure
+
+Copy the example and replace every placeholder before the first start. `.env.docker` is gitignored. The values in the example are placeholders.
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+Generate a secret with:
+
+```bash
+openssl rand -hex 32
+```
+
+Run that once for each value. The output is 64 hex characters. Use it as-is.
+
+- `POSTGRES_PASSWORD` is inserted into `DATABASE_URL` without encoding. `@`, `:`, `/`, and `#` break that URL. The hex output avoids those characters.
+- `BETTER_AUTH_SECRET` must be at least 32 characters. The hex output qualifies. It signs session cookies.
+- `GARAGE_RPC_SECRET` must be 64 hex characters, which is the hex output above. The example text `replace-with-64-hex-characters-from-openssl-rand-hex-32` is not a valid Garage secret. Replace it or Garage exits.
+- `S3_SECRET_ACCESS_KEY` is the Garage secret key. Use another hex output. `S3_ACCESS_KEY_ID` is the Garage access key id you choose. This pair is not an AWS key. Compose maps it to `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` on the API.
+
+Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A variable in that file reaches a container when `docker-compose.yml` interpolates it. `DATABASE_URL`, `S3_ENDPOINT`, and `INTERNAL_API_URL` are set in the compose file, so putting those names in `.env.docker` does not change them.
+
+### Variables in `.env.docker`
+
+| Variable | Required | Role |
 | --- | --- | --- |
-| Web app | `0.0.0.0:3000` from `next start` | `pnpm --filter @factrove/web start` |
-| API | `127.0.0.1:3001` unless `HOST` and `PORT` say otherwise | `pnpm --filter @factrove/api start` |
-| CLI | no listener | `pnpm factrove` or `node apps/cli/dist/main.js` |
+| `POSTGRES_PASSWORD` | yes | Password for the database user `factrove`, database `factrove`, on the `postgres` service |
+| `BETTER_AUTH_SECRET` | yes | Session signing secret, at least 32 characters |
+| `GARAGE_RPC_SECRET` | yes with bundled Garage | 64 hex characters. Garage stores it with the meta volume |
+| `S3_ACCESS_KEY_ID` | yes with bundled Garage | Garage access key id, passed to the API as `AWS_ACCESS_KEY_ID` |
+| `S3_SECRET_ACCESS_KEY` | yes with bundled Garage | Garage secret key, passed to the API as `AWS_SECRET_ACCESS_KEY` |
+| `S3_BUCKET` | no | Bucket name. Default `factrove`. Garage creates it on startup |
+| `S3_REGION` | no | Region string. Default `us-east-1`, which matches `s3_region` in `infra/garage.toml` |
+| `WEB_ORIGIN` | no | Browser origin of the web app. Default `http://localhost:3000` |
+| `API_PUBLIC_ORIGIN` | no | Origin the API writes into absolute API URLs, and the Better Auth base URL. Default `http://localhost:3001` |
+| `PUBLIC_BASE_URL` | no | Origin for viewer URLs and public share links. Default `http://localhost:3000`. When empty, the API uses `WEB_ORIGIN` |
+| `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
+| `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
+| `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
+| `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
+| `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
+| `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
+| `MARKDOWN_CONVERSION_CONCURRENCY` | no | Markdown workers at once. Default `2`, clamped to 1–4. A non-integer uses the default |
+| `MARKDOWN_CONVERSION_QUEUE` | no | Conversions that may wait. Default `2`, clamped to 0–8. A full queue is `503 CONVERSION_UNAVAILABLE` |
 
-The web app calls `NEXT_PUBLIC_API_URL`. The API writes absolute API URLs from `API_PUBLIC_ORIGIN`. Those two values are independent.
+`PUBLIC_BASE_URL`, `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, and `BROWSER_API_URL` are absolute `http` or `https` origins. No userinfo, path, query, or hash. A trailing slash is dropped. Setting `PUBLIC_BASE_URL` does not start a server or publish the app.
 
-Copy the committed examples. Do not commit real secrets.
+`localhost` and `127.0.0.1` are different hosts. A cookie domain cannot cover either. Keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same host when either one is localhost or an IP address. When those hosts differ and both are domain names, set `AUTH_COOKIE_DOMAIN` to the narrowest parent of `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, and `PUBLIC_BASE_URL`. The API refuses to start when that domain is an IP, a public suffix, or a name that does not cover all three.
 
-```bash
-cp apps/api/.env.example apps/api/.env
-cp apps/cli/.env.example apps/cli/.env
+Rotating `SHARE_TOKEN_KEY`, or `BETTER_AUTH_SECRET` when `SHARE_TOKEN_KEY` is empty, makes existing public links return 404. Share the artifact again afterward.
+
+On the published localhost ports the example is already aligned:
+
+```text
+WEB_ORIGIN=http://localhost:3000
+PUBLIC_BASE_URL=http://localhost:3000
+API_PUBLIC_ORIGIN=http://localhost:3001
+BROWSER_API_URL=http://localhost:3001
 ```
 
-Set `BETTER_AUTH_SECRET` in `apps/api/.env` to at least 32 characters before the API starts. The example value is a local placeholder.
+If you change `WEB_PORT` or `API_PORT`, change those origins to the same host ports.
 
-## Local development
+### Values the compose file sets
 
-Compose is local infrastructure. `pnpm dev` is the development server. It runs Next's dev server bound to `127.0.0.1:3000` and the API on `127.0.0.1:3001`. It is not the production start path.
+These are not in `.env.docker`. They are the bundled-stack defaults on the API and web services:
 
-```bash
-pnpm infra:up
-pnpm db:migrate
-pnpm db:seed
-pnpm dev
-```
+| Variable | Value on the bundled stack |
+| --- | --- |
+| `DATABASE_URL` | `postgresql://factrove:<POSTGRES_PASSWORD>@postgres:5432/factrove` on `api` and `migrate` |
+| `HOST` / `PORT` | API listens on `0.0.0.0:3001` inside the container |
+| `S3_ENDPOINT` | `http://garage:3900` |
+| `S3_FORCE_PATH_STYLE` | `true` |
+| `S3_ALLOW_INSECURE_HTTP` | `true`, so the API accepts cleartext HTTP to the Garage hostname. The access key is sent in cleartext. Use this only on a private network |
+| `INTERNAL_API_URL` | `http://api:3001`, the origin the Next.js server uses for its own requests |
+| `HOSTNAME` / `PORT` | Web server listens on `0.0.0.0:3000` inside the container |
 
-`pnpm infra:up` starts PostgreSQL (`127.0.0.1:5432`) and Garage (`127.0.0.1:3900`) and creates the `factrove` bucket. `pnpm infra:down` stops them and keeps the volumes. `pnpm infra:reset` deletes those volumes after you confirm. Neither command deletes objects in a remote bucket or the CLI files under `~/.factrove`.
+`FACTROVE_MIGRATE` is unset. See [Migrations](#migrations).
 
-The API example file already matches that Compose database and Garage credentials.
+The web image reads `BROWSER_API_URL` when it renders a page, so changing that origin does not require a rebuild. Recreate the web container after you edit `.env.docker`. `INTERNAL_API_URL` stays `http://api:3001` on this network. `pnpm build` on the host still bakes `NEXT_PUBLIC_API_URL` for a process you start with `next start`. See [Run from source](#run-from-source).
 
-## Production
+## Build and run
 
-One supported topology is a TLS reverse proxy in front of the two Node processes, with PostgreSQL and S3-compatible storage reachable from the API. Run the commands below from the repository root.
-
-1. Install dependencies: `pnpm install --frozen-lockfile`.
-2. Write production settings in `apps/api/.env`, including `NEXT_PUBLIC_API_URL`, before the web build.
-3. Apply migrations: `pnpm db:migrate`. Startup does not migrate.
-4. Build: `pnpm build`.
-5. Start the API and the web app as two processes.
+From the repository root:
 
 ```bash
-pnpm --filter @factrove/api start
-pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
+docker compose --env-file .env.docker -f docker-compose.yml up --build -d
 ```
 
-`pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. The process listens on `HOST` (default `127.0.0.1`) and `PORT` (default `3001`) and loads `apps/api/.env`. `next start` listens on `0.0.0.0:3000` unless you pass `--hostname` and `--port`. pnpm appends those flags to `next start`. An extra `--` before them makes Next.js treat `--hostname` as a directory and the process exits. Bind both to loopback when the proxy runs on the same machine. If the proxy is on another machine, set `HOST` to the interface that machine can reach.
+`--build` builds `factrove-api:local` and `factrove-web:local`. `-d` leaves the stack in the background. Omit `-d` to attach the terminal to the logs. The same images, built without Compose:
 
-Run each start command under a process supervisor that restarts it when it exits. A supervisor's working directory can be the repository root. The API reads `apps/api/.env` itself. `next start` cannot change `NEXT_PUBLIC_API_URL` after the build.
+```bash
+docker build --target api --tag factrove-api:local .
+docker build --target web --tag factrove-web:local .
+```
 
-Terminate TLS at the proxy. Route the web origin, such as `https://library.example.com`, to the web process, and the API origin, such as `https://api.example.com`, to the API process. Forward `X-Forwarded-For`. Set `TRUSTED_PROXIES` to that proxy, for example `127.0.0.1` when the proxy connects from loopback. Leave `TRUSTED_PROXIES` unset when clients connect to the API directly. Do not log `access` or `ticket` query strings on content URLs.
+Compose will not start until `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `GARAGE_RPC_SECRET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are set. The `:?` markers in `docker-compose.yml` are what print that requirement.
 
-Health check, with no credentials:
+| Service | Listens | Published on the host |
+| --- | --- | --- |
+| `web` | `0.0.0.0:3000` in the container | `127.0.0.1:${WEB_PORT:-3000}` |
+| `api` | `0.0.0.0:3001` in the container | `127.0.0.1:${API_PORT:-3001}` |
+| `postgres` | `5432` on the Compose network | not published |
+| `garage` | `3900` on the Compose network | not published |
+| `migrate` | no listener | runs `prisma migrate deploy` and exits |
+
+The project name is `factrove-selfhost`. Its volumes are separate from the dev project in `compose.yaml`, whose name is `factrove`.
+
+Open the library at `http://localhost:3000` when `WEB_PORT` is `3000`. The API health check, with no credentials:
 
 ```bash
 curl -fsS http://127.0.0.1:3001/api/v1/health
 ```
 
-A ready API returns `{"status":"ok"}`.
+A ready API returns `{"status":"ok"}`. The API image and the `api` service use that URL as their health check. The web service requests `http://127.0.0.1:3000/`.
 
-<Warning>
-Set `NEXT_PUBLIC_API_URL` before `pnpm build` or `next build`. Next.js fixes that origin in the client bundle. Changing it requires a rebuild. `next start` cannot change it. The Docker web image reads `BROWSER_API_URL` when it renders a page, so that origin can change without a rebuild. `INTERNAL_API_URL` is the origin the Next.js server uses to reach the API. Leave both unset outside that image.
-</Warning>
-
-## Object storage
-
-For the local Garage service, keep the example values: `S3_ENDPOINT=http://127.0.0.1:3900`, `S3_FORCE_PATH_STYLE=true`, and the Garage access key pair. The API does not create an AWS bucket. `pnpm infra:up` creates the local `factrove` bucket.
-
-The storage client calls `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object keys it generates. `S3_ENDPOINT` is the only custom endpoint it reads. With that variable unset, `AWS_ENDPOINT_URL` is ignored.
-
-### AWS
-
-For an existing AWS bucket:
-
-- Set `S3_BUCKET` and `S3_REGION`.
-- Remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`. The client then calls AWS in `S3_REGION`.
-- Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or remove both. The storage client uses that pair whenever both are set, so the Garage values `factrove-local` and `factrove-local-secret` keep an instance role or `AWS_PROFILE` from being selected.
-- When the key is temporary, set `AWS_SESSION_TOKEN` as well. The API sends the token only together with the access key and secret. With both keys removed, the AWS SDK default chain reads the environment, including a profile or a task role.
-
-### Other S3-compatible storage
-
-A provider other than AWS keeps its own `S3_ENDPOINT`. Removing that variable sends the client to AWS.
-
-- Set `S3_BUCKET`, `S3_REGION`, and `S3_ENDPOINT`.
-- Use `https` for any host other than `localhost`, `127.0.0.1`, or `::1`. `http` is accepted only for those loopback names, unless `S3_ALLOW_INSECURE_HTTP=true`. That flag allows cleartext HTTP to another host. Use it only on a private network, such as Garage in `docker-compose.yml`. The access key is sent in cleartext.
-- Set `S3_FORCE_PATH_STYLE` to match the provider. Path-style addressing is `true`. Virtual-hosted buckets use `false`. When the variable is unset and `S3_ENDPOINT` is set, the client uses path style.
-- Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with that provider's credentials. A session token is sent only together with both keys.
-
-## Origins that build links
-
-| Variable | Role |
-| --- | --- |
-| `WEB_ORIGIN` | Browser origin of the web app |
-| `API_PUBLIC_ORIGIN` | Origin the API uses when it writes absolute API URLs |
-| `PUBLIC_BASE_URL` | Origin for viewer URLs and public share links. Defaults to `WEB_ORIGIN` |
-| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API. Read at web build time for `pnpm build` and `next start` |
-| `BROWSER_API_URL` | Optional runtime override of that origin. The Docker web image reads it when rendering a page |
-| `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
-| `AUTH_COOKIE_DOMAIN` | Parent cookie domain when the web app and API use different hosts |
-
-`PUBLIC_BASE_URL` must be an absolute `http` or `https` origin with no path, query, or hash. A trailing slash is dropped. Setting it does not publish the app.
-
-Local:
-
-```text
-PUBLIC_BASE_URL=http://localhost:3000
-NEXT_PUBLIC_API_URL=http://localhost:3001
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml ps
+docker compose --env-file .env.docker -f docker-compose.yml logs migrate api web
 ```
 
-A placeholder you operate. Set `NEXT_PUBLIC_API_URL` before building the web app. Changing it requires a rebuild.
+`api` waits until `migrate` has exited successfully and until PostgreSQL and Garage are healthy. Garage creates the bucket during its start.
+
+## Migrations
+
+Startup of the API process does not migrate. The `migrate` service runs `prisma migrate deploy` from the migrations baked into `factrove-api:local`, then exits.
+
+`docker compose up` creates that container and runs it. A container that already exited successfully is left as it is on the next `up`. After you pull new migrations, run them yourself:
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
+```
+
+`FACTROVE_MIGRATE=1` is an opt-in on the API container: the entrypoint migrates, then serves. Any other value, including empty, serves without migrating. The committed compose file does not set it. Adding the name to `.env.docker` has no effect until the `api` service environment contains `FACTROVE_MIGRATE`. The `migrate` service is the path this file already runs.
+
+There is no down migration. `pnpm db:seed` is a host command for local fixture identities. The Compose stack does not seed a user. Sign up in the web app.
+
+## HTTPS and a reverse proxy
+
+Published ports bind to `127.0.0.1`. A reverse proxy on the same machine is the way to serve HTTPS. Terminate TLS at the proxy. The containers speak HTTP.
+
+Route the web origin to the web port and the API origin to the API port:
 
 ```text
-PUBLIC_BASE_URL=https://library.example.com
+https://library.example.com  ->  127.0.0.1:3000
+https://api.example.com      ->  127.0.0.1:3001
+```
+
+Set the public origins to those URLs. The host ports stay on loopback and do not appear in the public URLs.
+
+```text
 WEB_ORIGIN=https://library.example.com
+PUBLIC_BASE_URL=https://library.example.com
 API_PUBLIC_ORIGIN=https://api.example.com
-NEXT_PUBLIC_API_URL=https://api.example.com
+BROWSER_API_URL=https://api.example.com
 AUTH_COOKIE_DOMAIN=example.com
 ```
 
-When those hosts differ, `AUTH_COOKIE_DOMAIN` must cover them. `localhost` and `127.0.0.1` are different hosts, and a cookie domain cannot cover either, so keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same one.
+`BROWSER_API_URL` and `API_PUBLIC_ORIGIN` are the origin the browser uses for the API. `WEB_ORIGIN` and `PUBLIC_BASE_URL` are the origin the browser uses for the library, the viewer, and share links. `INTERNAL_API_URL` stays `http://api:3001` so the Next.js server reaches the API on the Compose network.
 
-Copying `apps/api/.env.example` and changing only `API_PUBLIC_ORIGIN` leaves `NEXT_PUBLIC_API_URL=http://localhost:3001`. The browser then calls the visitor's own machine.
+Use the narrowest parent that still covers all three hosts as `AUTH_COOKIE_DOMAIN`. For `library.factrove.example.com` and `api.factrove.example.com`, that parent is `factrove.example.com`. The browser sends the session cookie to every subdomain of the value. On an `https` API origin the cookie is named `__Secure-better-auth.session_token`. On `http` it is `better-auth.session_token`.
 
-## Auth and share keys
-
-- `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies.
-- `SHARE_TOKEN_KEY` is optional. When unset, share-token encryption is derived from `BETTER_AUTH_SECRET`. Rotating the value that supplies that key revokes existing public links.
-- `TRUSTED_PROXIES` is a comma-separated list of proxy IPs or CIDRs. Set it behind a reverse proxy so the public view limit and sign-in limit see the visitor from `X-Forwarded-For`. Leave it unset when clients connect directly.
-
-## CLI configuration
-
-Resolution is listed in [CLI](/guides/cli). In short: `--api-url` or `--endpoint-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the profile `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
-
-An explicit `--profile` uses that profile's `factrove_api_key` and ignores `FACTROVE_API_KEY`. `factrove configure` writes the profile files mode 0600. Create the key with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session) or in the web app at `/account/api-keys`.
-
-## Checks
+Forward `X-Forwarded-For` from the proxy. The API trusts that header only when the TCP peer is listed in `TRUSTED_PROXIES`. Inside the container, a connection that arrived through the published port comes from the Compose bridge gateway, not from `127.0.0.1`. Read that gateway after the stack is up:
 
 ```bash
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test
+docker network inspect factrove-selfhost_default --format '{{(index .IPAM.Config 0).Gateway}}'
 ```
 
-`pnpm e2e` starts a separate Compose project and needs Playwright Chromium. These checks are for development. They do not start the production processes.
+Set `TRUSTED_PROXIES` to that address (or a CIDR that contains it). Leave `TRUSTED_PROXIES` empty when no proxy sends `X-Forwarded-For`. An empty value counts every visitor as the socket peer, so behind a proxy every visitor shares one rate-limit bucket. Sign-in and public views use that address. The limits are in memory, on each API process.
 
-## Backup and restore
+To publish a port beyond loopback, change the mapping in `docker-compose.yml` from `127.0.0.1:${API_PORT:-3001}:3001` to a wider bind. Keep TLS in front of any interface that is not loopback.
+
+Do not log the `access` or `ticket` query on content URLs. `access` is the signed-in viewer grant. `ticket` is the grant for a password-protected public link. The viewer loads HTML from `API_PUBLIC_ORIGIN` in an iframe with `sandbox="allow-scripts"` and without `allow-same-origin`. There is no separate content hostname. `frame-ancestors` allows `PUBLIC_BASE_URL` and `WEB_ORIGIN`, so those origins must be the ones that frame the API response.
+
+Recreate the containers after origin changes:
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml up -d
+```
+
+## Object storage
+
+The storage client calls `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on keys the API generates. New objects use `{artifactId}/{contentId}.html`. Older rows may still use `{artifactId}.html`. The public filename stays `{artifactId}.html`. HTTP responses and the CLI omit the key.
+
+`S3_ENDPOINT` is the only custom endpoint the client reads. With that variable unset, `AWS_ENDPOINT_URL` is ignored. Plain `http` is accepted for `localhost`, `127.0.0.1`, and `::1`. Any other host needs `https`, unless `S3_ALLOW_INSECURE_HTTP=true`. That flag must be the string `true` or `false`.
+
+The committed `docker-compose.yml` always starts Garage and points the API at `http://garage:3900`. A different bucket is a change to the `api` service environment. `.env.docker` cannot override `S3_ENDPOINT` while the compose file sets it.
+
+### Bundled Garage
+
+Keep the compose file's endpoint, path style, and `S3_ALLOW_INSECURE_HTTP=true`. Set `S3_BUCKET`, `S3_REGION`, and the Garage key pair as in [Configure](#configure). Garage creates `S3_BUCKET` on startup. The S3 port is not published on the host. Clients on the Compose network use `http://garage:3900`.
+
+### AWS S3
+
+The API does not create an AWS bucket. Create the bucket first, in `S3_REGION`.
+
+On the `api` service:
+
+- Set `S3_BUCKET` and `S3_REGION`.
+- Remove `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, and `S3_ALLOW_INSECURE_HTTP`. The client then calls AWS in `S3_REGION`.
+- Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the IAM key, or remove both. The client uses that pair whenever both are set, which is what the committed file does with the Garage key. Removing both lets the AWS SDK default chain run inside the container (environment, `AWS_PROFILE`, or a task role).
+- When the key is temporary, set `AWS_SESSION_TOKEN` as well. The API sends the token only together with the access key and secret. The committed file does not pass a session token, so add it on the `api` service.
+
+If you are not starting Garage, remove the `garage` service and the `garage` entry under `api.depends_on`. While that service remains, Compose still requires `GARAGE_RPC_SECRET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`.
+
+### MinIO and other S3-compatible stores
+
+MinIO and any other S3-compatible store use the same client. The API does not create the bucket.
+
+On the `api` service:
+
+- Set `S3_BUCKET`, `S3_REGION`, and `S3_ENDPOINT` to that store's origin. No path, query, hash, or credentials in the URL.
+- Set `S3_FORCE_PATH_STYLE` to `true` for path-style buckets (MinIO's usual mode). Virtual-hosted buckets use `false`. When the endpoint is set and this variable is unset, the client uses path style.
+- Use `https` for a host other than loopback. `S3_ALLOW_INSECURE_HTTP=true` allows `http` to a private-network hostname. The access key is sent in cleartext.
+- Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to that store's key pair.
+
+Remove the bundled `garage` service the same way as for AWS when you are not using it.
+
+## External PostgreSQL
+
+The committed file always starts `postgres:17.11` and sets `DATABASE_URL` on `migrate` and `api` to `postgresql://factrove:<POSTGRES_PASSWORD>@postgres:5432/factrove`. An external database is a change to those two `DATABASE_URL` values. A `DATABASE_URL` line in `.env.docker` does not replace them.
+
+Point both services at the external URL. Encode reserved characters in the password. Remove the `postgres` service and the `postgres` entries under `depends_on`, or Compose will keep starting the bundled database. The migrations are the committed SQL in `apps/api/prisma/migrations/`, applied by the `migrate` service. The database user needs permission to create tables and indexes. This repository runs those migrations on PostgreSQL 17.
+
+## Point the CLI at this install
+
+There is no published CLI package. Build it from this checkout. Node.js must be at least 24.7.0 and below 25 (24.16.0 is pinned). pnpm is 11.25.0.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @factrove/cli... build
+pnpm factrove configure --api-url http://localhost:3001
+```
+
+`--api-url` is the API origin this machine can reach. With the default publish, that is `http://localhost:3001` or `http://127.0.0.1:3001`. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+
+`factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and stores the origin as `api_url`. It does not print the key. Later commands use that profile. Precedence is in [CLI](/guides/cli). `pnpm factrove` can also read `FACTROVE_API_URL` from `apps/cli/.env` when the process environment and the profile have no URL. `node apps/cli/dist/main.js` does not read that file.
+
+An explicit `--profile` uses that profile's key and ignores `FACTROVE_API_KEY`.
+
+## Check that it works
+
+With the stack up and the origins left on localhost:
+
+<Steps>
+  <Step title="Health">
+    ```bash
+    curl -fsS http://127.0.0.1:3001/api/v1/health
+    ```
+
+    The body is `{"status":"ok"}`.
+  </Step>
+  <Step title="Sign up">
+    Open `http://localhost:3000/signup` and create an account. Passwords are 8 to 128 characters. Sign-up also signs you in.
+  </Step>
+  <Step title="API key and the CLI">
+    Create a key at `http://localhost:3000/account/api-keys`, then from the repository root:
+
+    ```bash
+    pnpm factrove configure --api-url http://localhost:3001
+    artifact_id=$(pnpm factrove upload ./fixtures/hello.html)
+    printf '%s\n' "$artifact_id"
+    ```
+
+    Plain upload prints only the artifact id. pnpm writes the script line it runs to stderr, so the substitution above is the id.
+  </Step>
+  <Step title="Library and viewer">
+    Open `http://localhost:3000`, choose **My artifacts**, and use Refresh if the new row is not listed yet. The viewer is `http://localhost:3000/artifacts/{id}`.
+  </Step>
+  <Step title="Share link">
+    ```bash
+    pnpm factrove share "$artifact_id"
+    ```
+
+    The command prints a URL on `PUBLIC_BASE_URL`, shaped `http://localhost:3000/share/{id}/{token}`. Open that URL without an account. It serves the stored HTML until you revoke it.
+  </Step>
+</Steps>
+
+Upload failures are in [Troubleshooting](/guides/troubleshooting). A wrong API origin is `NETWORK_ERROR`. A storage mismatch is `STORAGE_UNAVAILABLE`, and that failed upload leaves no artifact row.
+
+## Upgrade
+
+From the repository root, with the same `.env.docker`:
+
+```bash
+git pull
+docker compose --env-file .env.docker -f docker-compose.yml build
+docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
+docker compose --env-file .env.docker -f docker-compose.yml up -d
+```
+
+`build` refreshes `factrove-api:local` and `factrove-web:local`. `run --rm migrate` applies committed migrations that are not yet in the database. `up -d` recreates the API and the web app on those images. `prisma migrate deploy` is safe to repeat. Keep `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` stable across the upgrade, or existing sessions and share links stop resolving.
+
+Stop writers before a migration that rewrites `artifact` if you are crossing `20261021170000_add_artifact_object_key` from an older build. That migration locks `artifact`. An API process from before it cannot insert or replace content once `object_key` is required. There is no down migration. Rolling back that cutover means stopping the API, copying each current object to `{artifactId}.html` in the same bucket, and restoring the previous schema and application. The previous application reads `{artifactId}.html`.
+
+## Backups
 
 Take the database, the object bytes, and the key material together. A successful replacement deletes the previous object after the new one is published, so a later database row no longer names the bytes you replaced.
 
-1. Stop API writers so a replacement cannot delete an object while you copy it.
-2. Dump PostgreSQL, including `artifact.object_key` and `artifact.size_bytes`.
-3. Copy every object named by the current `object_key` values.
-4. Store `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` with that backup, outside the dump. Sessions and share tokens cannot be read without the same material. When `SHARE_TOKEN_KEY` is unset, the share key is derived from `BETTER_AUTH_SECRET`.
+Stop the API and the web app so a replacement cannot delete an object during the copy:
 
-Restoring a historical backup means restoring that dump and the object copies taken with it, then starting the app with the same secrets. It does not recreate objects a later replacement deleted, and it does not include rows written after the dump.
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml stop api web
+```
 
-Preserving the content that is live now is a different operation. Export the mapping before you remove the schema that records it:
+Dump PostgreSQL from the bundled service. Inside that container, local peer authentication accepts user `factrove`:
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml exec -T postgres \
+  pg_dump -U factrove --no-owner --no-acl factrove > factrove.sql
+```
+
+The named volume for that data is `factrove-postgres` on project `factrove-selfhost` (Docker stores it as `factrove-selfhost_factrove-postgres`). A volume copy is a second copy of the same data. Stop `postgres` before you archive the volume, so PostgreSQL is not writing it. `pg_dump` is the copy you can restore into a new database.
+
+For the bundled bucket, stop Garage and archive both of its volumes. Metadata is SQLite, so a copy taken while Garage is running can tear.
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml stop garage
+```
+
+The volume names in the compose file are `factrove-garage-meta` and `factrove-garage-data`. Docker stores them as `factrove-selfhost_factrove-garage-meta` and `factrove-selfhost_factrove-garage-data`. List them with:
+
+```bash
+docker volume ls --filter label=com.docker.compose.project=factrove-selfhost
+```
+
+On AWS or MinIO, copy the bucket with that store's tools. Include every object named by the current rows:
 
 ```sql
 select id, object_key, size_bytes from artifact order by id;
 ```
 
-## Object-key migration
+Store `BETTER_AUTH_SECRET`, any `SHARE_TOKEN_KEY`, `GARAGE_RPC_SECRET`, and the S3 key pair with the backup, outside the dump. Sessions and share tokens cannot be read without the same auth material. When `SHARE_TOKEN_KEY` is unset, the share key is derived from `BETTER_AUTH_SECRET`. Garage will not open an existing meta volume with a different RPC secret.
 
-Stop writers before applying `20261021170000_add_artifact_object_key`. The migration locks `artifact`, and an API process from before this change cannot insert or replace content once `object_key` is required. There is no down migration.
+Restore by loading that dump and those object bytes, then starting the stack with the same secrets. The dump does not include rows written after it, and it does not recreate objects a later replacement deleted.
 
-Rolling back that cutover while keeping the bytes that are live now:
+Start the stack again with `docker compose --env-file .env.docker -f docker-compose.yml up -d`.
 
-1. Stop every API process.
-2. Export the current mapping with the query above.
-3. Copy each current object to the legacy key `{id}.html` in the same bucket and verify the copy before you change the schema.
-4. Restore the previous schema and application. The previous application reads `{artifactId}.html`.
+## Run from source
 
-New objects live at `{artifactId}/{contentId}.html`. Older rows may still use `{artifactId}.html`. The public filename stays `{artifactId}.html`. HTTP responses and the CLI omit the object key.
+Use this path when you run the Node processes yourself. PostgreSQL 17 and an S3-compatible bucket still have to be reachable from the API. Node.js must satisfy `>=24.7.0 <25` (24.16.0 is pinned). That floor is the first release with `crypto.argon2`, which share passwords use. pnpm must satisfy `>=11.25.0 <12` (11.25.0 is pinned). `engineStrict` in `pnpm-workspace.yaml` enforces both ranges.
+
+`pnpm infra:up` can start the dev PostgreSQL and Garage from `compose.yaml` (host ports `127.0.0.1:5432` and `127.0.0.1:3900`, bucket `factrove`, local key `factrove-local`). A database and bucket you already run are configured only through `apps/api/.env`.
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/cli/.env.example apps/cli/.env
+pnpm install --frozen-lockfile
+```
+
+Edit `apps/api/.env`. The API loads that file on startup and keeps variables that are already set in the environment. The example matches `compose.yaml`.
+
+| Variable | Role |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL URL. The example is `postgresql://factrove:factrove@127.0.0.1:5432/factrove` |
+| `HOST` / `PORT` | API bind. Default `127.0.0.1` and `3001`. Use `0.0.0.0` when a proxy on another machine must connect |
+| `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, `PUBLIC_BASE_URL` | Same origin rules as the Compose stack |
+| `NEXT_PUBLIC_API_URL` | Origin baked into the web client at `pnpm build`. Default `http://localhost:3001` |
+| `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
+| `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
+| `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
+| `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
+| `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
+| `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `S3_ALLOW_INSECURE_HTTP` | Garage on the host is `http://127.0.0.1:3900` with path style. Leave the insecure-HTTP flag unset for loopback and for AWS |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Set both, or neither. The Garage example pair is `factrove-local` / `factrove-local-secret` |
+| `AWS_SESSION_TOKEN` | Sent only together with both keys |
+| `AWS_PROFILE` | Used by the AWS SDK default chain when both keys are unset |
+| `MARKDOWN_CONVERSION_CONCURRENCY`, `MARKDOWN_CONVERSION_QUEUE` | Same clamps as the Compose table |
+
+`BASE_URL` is read by `pnpm db:seed` and by auth schema generation. The API process uses `API_PUBLIC_ORIGIN` instead.
+
+`pnpm dev` does not copy `BROWSER_API_URL` or `INTERNAL_API_URL` out of `apps/api/.env`. For a production web process, export them in the environment or set `NEXT_PUBLIC_API_URL` before the build.
+
+<Warning>
+`pnpm build` and `next build` fix `NEXT_PUBLIC_API_URL` into the client bundle. `next start` cannot change that baked origin. `BROWSER_API_URL` on the web process replaces it for pages rendered after you set the variable.
+</Warning>
+
+Apply migrations, build, and start. Startup does not migrate. Run each start command under a process supervisor. The working directory can be the repository root. The API reads `apps/api/.env` itself.
+
+```bash
+pnpm db:migrate
+pnpm build
+pnpm --filter @factrove/api start
+pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
+```
+
+`pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. pnpm appends `--hostname` and `--port` to `next start`. An extra `--` before them makes Next.js treat `--hostname` as a directory and the process exits. Bind both to loopback when the proxy is on the same machine. Behind that proxy, `TRUSTED_PROXIES=127.0.0.1` matches a proxy that connects to the host loopback. That value is for this host process. The container path in [HTTPS and a reverse proxy](#https-and-a-reverse-proxy) sees the bridge gateway instead.
+
+`pnpm db:seed` upserts the fixture user `local-user` and organization `local-org`. That user has no password. It is optional and it does not wipe artifacts. A real install signs up in the web app.
+
+Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#point-the-cli-at-this-install). Health, library, and share checks are the same, against the host ports.
 
 ## Removing an install
 
-Stopping the API and web processes leaves PostgreSQL and object storage in place. `pnpm infra:down` stops the local Compose services and keeps their volumes. `pnpm infra:reset` deletes the local PostgreSQL and Garage volumes after confirmation. Objects in a remote bucket stay. CLI credentials in `~/.factrove` stay until you delete those files.
+`docker compose --env-file .env.docker -f docker-compose.yml down` stops the self-host containers and keeps the volumes. `down -v` also deletes `factrove-postgres`, `factrove-garage-meta`, and `factrove-garage-data` for this project. Objects in a remote bucket stay.
 
-There is no artifact-delete command and no route that changes access after upload. See [Current limits](/concepts#current-limits).
+`pnpm infra:down` stops the dev PostgreSQL and Garage from `compose.yaml` and keeps their volumes. `pnpm infra:reset` deletes those dev volumes after you confirm. Neither command touches project `factrove-selfhost`.
+
+CLI credentials in `~/.factrove` stay until you delete those files. There is no artifact-delete command and no route that changes access after upload. See [Current limits](/concepts#current-limits).
 
 Failures during startup are collected in [Troubleshooting](/guides/troubleshooting).
