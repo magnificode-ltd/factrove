@@ -54,6 +54,16 @@ function buttonNamed(name: string): HTMLButtonElement {
   return found;
 }
 
+function dialogButton(name: string): HTMLButtonElement {
+  const found = [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
+    candidate.textContent?.includes(name)
+  );
+  if (!(found instanceof HTMLButtonElement)) {
+    throw new Error(`dialog button ${name} missing`);
+  }
+  return found;
+}
+
 async function renderControl(onShared = vi.fn()) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -191,11 +201,9 @@ describe("organization share control", () => {
     await act(async () => {
       buttonNamed("Share with Local Organization").click();
     });
-    const confirm = [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
-      candidate.textContent?.includes("Share with Local Organization")
-    );
+    const confirm = dialogButton("Share with Local Organization");
     await act(async () => {
-      confirm?.click();
+      confirm.click();
     });
     expect(confirm?.hasAttribute("disabled")).toBe(false);
     expect(confirm?.getAttribute("aria-busy")).toBe("true");
@@ -238,9 +246,7 @@ describe("organization share control", () => {
       buttonNamed("Share with Local Organization").click();
     });
     await act(async () => {
-      [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
-        candidate.textContent?.includes("Share with Local Organization")
-      )?.click();
+      dialogButton("Share with Local Organization").click();
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -251,9 +257,7 @@ describe("organization share control", () => {
     expect(dialog?.textContent).toContain("The current organization changed. Confirm the organization and try again.");
     expect(onShared).not.toHaveBeenCalled();
     await act(async () => {
-      [...document.querySelectorAll('[role="dialog"] button')].find((candidate) =>
-        candidate.textContent?.includes("Share with Organization B")
-      )?.click();
+      dialogButton("Share with Organization B").click();
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
