@@ -49,11 +49,13 @@ export interface UploadArtifactInput {
   file: Blob;
   filename: string;
   accessType?: AccessType;
+  name?: string;
 }
 
 export interface ReplaceArtifactContentInput {
   file: Blob;
   filename: string;
+  name?: string;
 }
 
 export interface ArtifactContent {
@@ -206,15 +208,17 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
 
   return {
     getContext: () => request("/context", { method: "GET" }, contextEnvelopeSchema),
-    uploadArtifact: ({ file, filename, accessType }) => {
+    uploadArtifact: ({ file, filename, accessType, name }) => {
       const form = new FormData();
       form.append("file", file, filename);
       if (accessType !== undefined) form.append("accessType", accessType);
+      if (name !== undefined) form.append("name", name);
       return request("/artifacts", { method: "POST", body: form }, artifactEnvelopeSchema);
     },
-    replaceArtifactContent: (id, { file, filename }) => {
+    replaceArtifactContent: (id, { file, filename, name }) => {
       const form = new FormData();
       form.append("file", file, filename);
+      if (name !== undefined) form.append("name", name);
       return request(`/artifacts/${encodeURIComponent(id)}/content`, { method: "PUT", body: form }, artifactEnvelopeSchema);
     },
     listArtifacts: ({ view = "mine" } = {}) => {

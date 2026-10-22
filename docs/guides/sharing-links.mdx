@@ -112,4 +112,4 @@ pnpm factrove share "$artifact_id" --password
 
 ## What visitors see
 
-The public JSON is the filename, size, upload time, content URL, and `passwordProtected`. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Inline scripts and styles run. Network requests, external scripts and styles, forms, and nested frames do not. See [Prepare an artifact](/concepts#prepare-an-artifact). Markdown is not offered on the public route.
+The public JSON is the filename, name, size, upload time, content URL, and `passwordProtected`. `name` is null when the artifact has no library name. It omits the creator, organization, access type, and share URL. HTML uses the same sandboxed iframe policy as a signed-in viewer. Inline scripts and styles run. Network requests, external scripts and styles, forms, and nested frames do not. See [Prepare an artifact](/concepts#prepare-an-artifact). Markdown is not offered on the public route.

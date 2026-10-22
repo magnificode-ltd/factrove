@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ARTIFACT_NAME_MESSAGE, artifactNameValueSchema } from "./artifact-name.js";
 import {
   API_KEY_NAME_MAX_LENGTH,
   API_KEY_NAME_MIN_LENGTH,
@@ -150,13 +151,19 @@ const retryAfterHeader: ResponseHeaderSpec = {
   description: "Seconds to wait before retrying. Set when retryAfterSeconds is present on the thrown API error."
 };
 
+const artifactNameField = artifactNameValueSchema().describe(
+  `Library name. Normalized to NFC, then trimmed. One line of 1 to 120 Unicode code points. U+0000–U+001F, U+007F–U+009F, U+2028, and U+2029 are rejected before trimming, so a trailing break is not removed. An invalid value is \`400 INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\``,
+);
+
 const uploadFormSchema = z.object({
   file: z.string().describe("One non-empty .html or .htm file, at most 10 MiB."),
-  accessType: accessTypeSchema.optional()
+  accessType: accessTypeSchema.optional(),
+  name: artifactNameField.optional()
 });
 
 const replaceFormSchema = z.object({
-  file: z.string().describe("One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted.")
+  file: z.string().describe("One non-empty .html or .htm file, at most 10 MiB. accessType is not accepted."),
+  name: artifactNameField.optional()
 });
 
 const apiErrorResponse: ResponseSpec = {
@@ -386,12 +393,12 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Upload an HTML file",
     description:
-      "Accepts one non-empty `.html` or `.htm` file as multipart field `file`, optional `accessType` (`private` default, or `org_shared`). The backend assigns `text/html`. Maximum size is 10 MiB. Each request creates a new artifact. The object is written first, then the row. A storage failure leaves no row. Cookie-authenticated writes also require Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+      "Accepts one non-empty `.html` or `.htm` file as multipart field `file`, optional `accessType` (`private` default, or `org_shared`), and optional `name`. `name` is one line of 1 to 120 characters. When `name` is omitted, the stored name is the file name without `.html` or `.htm` when that stem is one line of 1 to 120 characters. An empty stem, a stem longer than 120 characters, or a stem that is not one line stores null, and the upload still succeeds. An invalid submitted `name` is `400 INVALID_REQUEST` and stores no row. The backend assigns `text/html`. Maximum size is 10 MiB. Each request creates a new artifact. The object is written first, then the row. A storage failure leaves no row. Cookie-authenticated writes also require Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
     security: "sessionOrApiKey",
     requestBody: {
       contentType: "multipart/form-data",
       required: true,
-      description: "One file and an optional access type.",
+      description: "One file, an optional access type, and an optional library name.",
       schema: uploadFormSchema,
       schemaName: "UploadForm"
     },
@@ -402,7 +409,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ArtifactEnvelope"
       },
       "400": {
-        description: "Invalid multipart body, access type, or UTF-8. Codes `INVALID_REQUEST` or `ORGANIZATION_REQUIRED`.",
+        description: `Invalid multipart body, access type, name, or UTF-8. An invalid name is NFC-normalized, then rejected when it contains U+0000–U+001F, U+007F–U+009F, U+2028, or U+2029 before trimming, or when the trimmed value is not 1 to 120 Unicode code points. That response is \`400 INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\` Other failures use \`INVALID_REQUEST\` or \`ORGANIZATION_REQUIRED\`.`,
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
@@ -422,24 +429,24 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Replace an artifact's stored HTML",
     description:
-      "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT`. A commit that throws after the object is written can still land; if the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
+      "Owner only. Multipart field `file` is the same HTML validation as create: one non-empty `.html` or `.htm` file, at most 10 MiB, UTF-8. Optional `name` is set in the same conditional update as the new object and the revision check. Omit `name` and that update does not change the column, so the current name stays. An invalid `name` is `400 INVALID_REQUEST` and leaves the current HTML in place. `accessType` is rejected. The id, current access, and any share token stay the same. The new object is written first, then the row points at it. Another replace of the same revision is `409 CONTENT_CONFLICT` and does not change the name. An acknowledged or successfully reconciled update returns 200 even if a later replace has landed since. The 200 shows the artifact's current state, which may already include a later replace. A content commit that throws can still land later, and that landing sets the name when this request included one. If the client sees 500 it should GET the artifact before retrying. Cookie-authenticated writes need an allowed Origin.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
       contentType: "multipart/form-data",
       required: true,
-      description: "One HTML file. Do not send accessType.",
+      description: "One HTML file and an optional library name. Do not send accessType.",
       schema: replaceFormSchema,
       schemaName: "ReplaceForm"
     },
     responses: {
       "200": {
-        description: "The same artifact id with the new size and upload time.",
+        description: "The same artifact id with the new size and upload time. The 200 shows the artifact's current state, which may already include a later replace.",
         schema: artifactEnvelopeSchema,
         schemaName: "ArtifactEnvelope"
       },
       "400": {
-        description: "Invalid multipart body, accessType on replace, or UTF-8. Code `INVALID_REQUEST`.",
+        description: `Invalid multipart body, accessType on replace, name, or UTF-8. An invalid name uses the same NFC, trim, and control-character rule as upload and is code \`INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\``,
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
@@ -456,7 +463,7 @@ export const httpOperations: HttpOperation[] = [
       "415": { description: "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.", schemaName: "ApiError" },
       "500": {
         description:
-          "The replace commit threw after the object was written. The new bytes may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
+          "The replace commit threw after the object was written. The new bytes, and the name when this request sent one, may already be live. GET the artifact before retrying. Code `INTERNAL_ERROR`.",
         schemaName: "ApiError"
       },
       "503": {

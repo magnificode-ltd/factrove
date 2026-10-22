@@ -28,6 +28,7 @@ export class UploadCommand {
     const upload = await this.files.read(invocation.path);
     const file = new Blob([arrayBufferOf(upload.bytes)], { type: "text/html" });
     const artifactId = invocation.artifactId;
+    const name = invocation.name === null ? undefined : invocation.name;
     // One request only. Retrying POST /artifacts would create another artifact.
     // Replace publishes the current HTML. A later version can keep the previous bytes.
     const envelope = await callApi(invocation.apiUrl, () =>
@@ -36,10 +37,12 @@ export class UploadCommand {
             file,
             filename: upload.filename,
             accessType: invocation.access,
+            name,
           })
         : this.client.replaceArtifactContent(artifactId, {
             file,
             filename: upload.filename,
+            name,
           }),
     );
 

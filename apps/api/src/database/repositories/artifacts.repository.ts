@@ -14,6 +14,7 @@ function toArtifactRecord(row: Artifact): ArtifactRecord {
     creatorUserId: row.creatorUserId,
     organizationId: row.organizationId,
     accessType: row.accessType,
+    name: row.name,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     objectKey: row.objectKey,
@@ -40,6 +41,7 @@ export class ArtifactsRepository {
         accessType: input.accessType,
         mimeType: input.mimeType,
         sizeBytes: input.sizeBytes,
+        name: input.name ?? null,
         objectKey: input.objectKey ?? `${input.id}.html`,
         uploadedAt: input.uploadedAt ?? null,
       },
@@ -49,12 +51,14 @@ export class ArtifactsRepository {
 
   // Commits one immutable object. Share columns, access, and createdAt stay as they are.
   // The update matches the revision the caller read, so a concurrent replace cannot share this write.
+  // name is set only when the caller passes it. Omitting name leaves the column unchanged.
   async commitContent(input: {
     id: string;
     expectedRevision: number;
     objectKey: string;
     sizeBytes: number;
     uploadedAt: Date;
+    name?: string;
   }): Promise<boolean> {
     const updated = await this.prisma.artifact.updateMany({
       where: { id: input.id, contentRevision: input.expectedRevision },
@@ -63,6 +67,7 @@ export class ArtifactsRepository {
         sizeBytes: input.sizeBytes,
         uploadedAt: input.uploadedAt,
         contentRevision: { increment: 1 },
+        ...(input.name === undefined ? {} : { name: input.name }),
       },
     });
     return updated.count === 1;
@@ -153,6 +158,7 @@ export class ArtifactsRepository {
         creatorUserId: true,
         organizationId: true,
         accessType: true,
+        name: true,
         mimeType: true,
         sizeBytes: true,
         objectKey: true,

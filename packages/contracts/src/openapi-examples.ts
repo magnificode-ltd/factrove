@@ -17,6 +17,7 @@ const artifact = {
   organizationId: null,
   accessType: "private",
   filename: `${ARTIFACT_ID}.html`,
+  name: "hello",
   mimeType: "text/html",
   sizeBytes: helloBytes,
   createdAt: UPLOADED_AT,
@@ -31,6 +32,7 @@ const artifact = {
 const publicArtifact = {
   id: ARTIFACT_ID,
   filename: `${ARTIFACT_ID}.html`,
+  name: "hello",
   mimeType: "text/html",
   sizeBytes: helloBytes,
   uploadedAt: UPLOADED_AT,

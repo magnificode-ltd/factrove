@@ -1,4 +1,15 @@
 import { z } from "zod";
+import { artifactNameValueSchema } from "./artifact-name.js";
+
+export {
+  ARTIFACT_NAME_MAX_LENGTH,
+  ARTIFACT_NAME_MESSAGE,
+  artifactNameCodePointLength,
+  artifactNameFromFilename,
+  artifactNameHasForbiddenCharacter,
+  artifactNameValueSchema,
+  normalizeArtifactName
+} from "./artifact-name.js";
 
 export const accessTypeSchema = z.enum(["private", "org_shared"]);
 export const artifactViewSchema = z.enum(["mine", "org"]);
@@ -39,6 +50,9 @@ export const artifactDtoSchema = z.object({
   organizationId: z.string().nullable(),
   accessType: accessTypeSchema,
   filename: z.string(),
+  name: artifactNameValueSchema()
+    .nullable()
+    .describe("Library name. Null when the artifact has no name."),
   mimeType: z.literal("text/html"),
   sizeBytes: z.number().int().nonnegative(),
   createdAt: z.string().datetime({ offset: true }),
@@ -92,6 +106,9 @@ export const createShareRequestSchema = z
 export const publicArtifactSchema = z.object({
   id: z.string().uuid(),
   filename: z.string(),
+  name: artifactNameValueSchema()
+    .nullable()
+    .describe("Library name. Null when the artifact has no name."),
   mimeType: z.literal("text/html"),
   sizeBytes: z.number().int().nonnegative(),
   uploadedAt: z.string().datetime({ offset: true }),

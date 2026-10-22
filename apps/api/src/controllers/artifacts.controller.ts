@@ -1,6 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
+import { Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
 import {
   artifactDtoSchema,
   artifactViewSchema,
@@ -11,9 +10,11 @@ import {
   type ContentFormat,
   type ShareEnvelope,
 } from "@factrove/contracts";
-import { htmlContentHeaders, markdownContentHeaders, MAX_HTML_BYTES } from "../rendering/html-policy.js";
+import { ActorService } from "../auth/actor.service.js";
+import { htmlContentHeaders, markdownContentHeaders } from "../rendering/html-policy.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { ArtifactsService } from "../services/artifacts.service.js";
+import { parseHtmlUpload } from "./html-upload.js";
 import { jsonBody } from "./json-body.js";
 import { streamHtml } from "./stream-html.js";
 
@@ -29,16 +30,23 @@ type JsonRequest = HeaderRequest & {
   body?: unknown;
 };
 
-const htmlUpload = FileInterceptor("file", {
-  limits: {
-    // Busboy emits its limit when the buffered size reaches this ceiling.
-    fileSize: MAX_HTML_BYTES + 1,
-    files: 2,
-    fields: 8,
-    fieldSize: 1024,
-    parts: 12,
+// Runs before the multipart parser, so a missing login never buffers the body.
+@Injectable()
+class RequireActorGuard implements CanActivate {
+  constructor(@Inject(ActorService) private readonly actors: ActorService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    await this.actors.requireActor(context.switchToHttp().getRequest<HeaderRequest>());
+    return true;
+  }
+}
+
+const htmlUpload: NestInterceptor = {
+  async intercept(context, next) {
+    await parseHtmlUpload(context.switchToHttp().getRequest());
+    return next.handle();
   },
-});
+};
 
 // private artifacts are readable only by their owner. org_shared artifacts are readable by organization members.
 // Missing access returns 404 so an id does not reveal that an artifact exists.
@@ -48,6 +56,7 @@ export class ArtifactsController {
 
   @Post()
   @HttpCode(201)
+  @UseGuards(RequireActorGuard)
   @UseInterceptors(htmlUpload)
   async upload(@Req() request: HeaderRequest, @UploadedFile() file: unknown, @Body() body: unknown): Promise<ArtifactEnvelope> {
     const artifact = await this.artifacts.upload(request, file, body);
@@ -56,6 +65,7 @@ export class ArtifactsController {
 
   // Replaces the current HTML. The same share token keeps serving whatever bytes are stored.
   @Put(":id/content")
+  @UseGuards(RequireActorGuard)
   @UseInterceptors(htmlUpload)
   async replaceContent(
     @Req() request: HeaderRequest,

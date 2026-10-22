@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
@@ -138,6 +138,9 @@ async function main() {
   if (jsonUpload.stdout.includes(owner.secret)) {
     throw new Error("JSON upload printed the API key.");
   }
+  if (jsonArtifact.name !== "hello" || jsonArtifact.filename !== `${jsonArtifact.id}.html`) {
+    throw new Error(`JSON upload name was ${jsonArtifact.name} and filename ${jsonArtifact.filename}.`);
+  }
 
   const shared = await must(
     "pnpm",
@@ -156,6 +159,12 @@ async function main() {
   }
   if (!mine.some((item) => item.id === sharedId && item.accessType === "org_shared")) {
     throw new Error("The org_shared upload was missing from My artifacts.");
+  }
+  for (const id of [plainId, jsonArtifact.id, sharedId]) {
+    const item = mine.find((entry) => entry.id === id);
+    if (item?.name !== "hello") {
+      throw new Error(`Upload ${id} stored name ${item?.name}.`);
+    }
   }
 
   await assertContent(plainId, fixture);
@@ -202,6 +211,7 @@ async function main() {
   await expectItems("org", [sharedId]);
   await assertContent(plainId, fixture);
   await assertContent(sharedId, fixture);
+  await checkNamedArtifact(configDir);
   await expectSql('select count(*) from "user"', "3");
   await revokeKey();
   const revokedUpload = await run(
@@ -697,6 +707,107 @@ function runInput(command, args, input, childEnv = env) {
       resolve({ code: code ?? 1, signal, stdout, stderr });
     });
   });
+}
+
+async function checkNamedArtifact(configDir) {
+  const named = await must(
+    "pnpm",
+    ["factrove", "upload", "./fixtures/hello.html", "--name", "X launch calendar", "--json", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  const artifact = JSON.parse(named.stdout).artifact;
+  if (artifact.name !== "X launch calendar" || artifact.filename !== `${artifact.id}.html`) {
+    throw new Error(`Named upload stored ${artifact.name} / ${artifact.filename}.`);
+  }
+  const replaced = await must(
+    "pnpm",
+    ["factrove", "upload", "./fixtures/hello.html", "--artifactId", artifact.id, "--json", "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  const after = JSON.parse(replaced.stdout).artifact;
+  if (after.id !== artifact.id || after.name !== "X launch calendar") {
+    throw new Error(`Replace dropped the name: ${after.name}.`);
+  }
+  const rejected = await run(
+    "pnpm",
+    ["factrove", "upload", "./fixtures/hello.html", "--name", "n".repeat(121), "--profile", "e2e"],
+    cliChildEnv(configDir),
+  );
+  if (rejected.code === 0 || !rejected.stderr.includes("name must be one line of 1 to 120 characters.")) {
+    throw new Error(`Over-long name was not rejected.\n${rejected.stderr}`);
+  }
+  const percentDir = await mkdtemp(join(tmpdir(), "factrove-e2e-name-"));
+  for (const [filename, name] of [
+    ["report%22draft.html", "report%22draft"],
+    ["report%0Adraft.html", "report%0Adraft"],
+    ["report%0Ddraft.html", "report%0Ddraft"],
+  ]) {
+    const path = join(percentDir, filename);
+    await writeFile(path, "<p>percent</p>");
+    const uploaded = await must(
+      "pnpm",
+      ["factrove", "upload", path, "--json", "--profile", "e2e"],
+      cliChildEnv(configDir),
+    );
+    const stored = JSON.parse(uploaded.stdout).artifact.name;
+    if (stored !== name) {
+      throw new Error(`CLI upload of ${filename} stored ${stored}.`);
+    }
+  }
+
+  const page = await ownerContext.newPage();
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(60000);
+  const shotDir = process.env.FACTROVE_E2E_SCREENSHOT_DIR;
+  try {
+    await page.goto(`${webOrigin}/`);
+    await renderedLibrary(page);
+    await page.getByRole("link", { name: "Refresh" }).click();
+    await page.waitForURL(`${webOrigin}/`);
+    const link = page.locator(`a[href="/artifacts/${artifact.id}"]`);
+    await link.waitFor();
+    const label = (await link.innerText()).trim();
+    if (label !== "X launch calendar") {
+      throw new Error(`Library label was ${label}.`);
+    }
+    const cardText = await link.locator("xpath=ancestor::li").innerText();
+    if (!cardText.includes(artifact.id)) {
+      throw new Error("Library card hid the artifact id.");
+    }
+    if (shotDir) {
+      await page.screenshot({ path: join(shotDir, "library_named_artifact.png"), fullPage: true });
+    }
+    await link.click();
+    await page.waitForURL(`${webOrigin}/artifacts/${artifact.id}`);
+    await page.locator("h1", { hasText: "X launch calendar" }).waitFor();
+    const header = await page.locator("header").innerText();
+    if (!header.includes("Back to library") || !header.includes(artifact.id)) {
+      throw new Error(`Viewer header was ${header}.`);
+    }
+    if (shotDir) {
+      await page.screenshot({ path: join(shotDir, "viewer_named_header.png"), fullPage: true });
+    }
+  } finally {
+    await page.close();
+  }
+
+  const shared = await must("pnpm", ["factrove", "share", artifact.id, "--profile", "e2e"], cliChildEnv(configDir));
+  const shareUrl = printedShareUrl(shared.stdout);
+  const anonymous = await browser.newContext();
+  const publicPage = await anonymous.newPage();
+  publicPage.setDefaultTimeout(30000);
+  publicPage.setDefaultNavigationTimeout(60000);
+  try {
+    await publicPage.goto(shareUrl);
+    await publicPage.locator("h1", { hasText: "X launch calendar" }).waitFor();
+    const publicHeader = await publicPage.locator("header").innerText();
+    if (publicHeader.includes("Back to library")) {
+      throw new Error("The public share header linked back to the library.");
+    }
+  } finally {
+    await publicPage.close();
+    await anonymous.close();
+  }
 }
 
 async function checkLibrary(plainId, jsonId, sharedId) {
