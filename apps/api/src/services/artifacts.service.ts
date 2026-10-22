@@ -161,7 +161,8 @@ export class ArtifactsService {
 
   // Owner only. private -> org_shared in the organization the caller confirmed.
   // Already org_shared is a 200 with no write, before the current organization is compared.
-  // A private row re-checks membership and the active organization in the update transaction.
+  // A private row re-checks membership and the session in the update statement. A session that
+  // was revoked or expired before that write is 401 and does not write.
   async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
     const actor = await this.actors.requireActor(request);
     const record = await this.artifacts.findById(id);
@@ -181,6 +182,9 @@ export class ArtifactsService {
     });
     if (outcome.outcome === "not-found") {
       throw artifactNotFound();
+    }
+    if (outcome.outcome === "unauthenticated") {
+      throw new ApiErrorException(401, "UNAUTHENTICATED", "Sign in to continue.");
     }
     if (outcome.outcome === "organization-required") {
       throw new ApiErrorException(

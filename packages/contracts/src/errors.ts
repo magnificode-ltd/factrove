@@ -15,12 +15,13 @@ export const apiErrorCatalog = [
     status: 409,
     code: "ORGANIZATION_CHANGED",
     description:
-      "PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership. The artifact is not written. An artifact that is already org_shared returns 200 instead."
+      "PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. An artifact that is already org_shared returns 200 instead."
   },
   {
     status: 401,
     code: "UNAUTHENTICATED",
-    description: "The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted."
+    description:
+      "The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before a private artifact was shared, and does not write."
   },
   {
     status: 401,

@@ -73,22 +73,47 @@ export class ArtifactsRepository {
     return updated.count === 1;
   }
 
-  // Switches private -> org_shared for this creator and assigns the current organization.
-  // The artifact row is locked first. Membership and the session's active organization are then
-  // locked and re-read in the same transaction, so a removal or active-organization change that
-  // landed while this update waited is visible, and one that arrives later waits until commit.
-  // An artifact that is already org_shared is returned with no write and no organization check.
-  // Share columns, content, and createdAt are not part of the write.
+  // Switches private -> org_shared for this creator when the confirmed organization is still current.
+  // The only row lock is the artifact. User, session, and membership rows are not locked, so a
+  // membership delete or a login is not blocked and cannot cycle with this transaction. An
+  // organization delete that also needs this artifact can still deadlock on the organization
+  // foreign key; that error is retried once and then reported as organization-changed, with no
+  // write. The authorization check is a later statement, so it sees commits that landed while this
+  // transaction waited on the artifact. An artifact that is already org_shared is returned
+  // with no write and no organization check. Share columns, content, and createdAt are not written.
   async shareWithOrganization(input: {
     id: string;
     creatorUserId: string;
     organizationId: string;
     sessionId: string | null;
   }): Promise<ShareWithOrganizationOutcome> {
-    return this.prisma.$transaction(
-      (tx) => shareWithOrganizationInTransaction(tx, input),
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 20_000 },
-    );
+    try {
+      return await this.shareWithOrganizationOnce(input);
+    } catch (error) {
+      if (!isShareLockConflict(error)) {
+        throw error;
+      }
+    }
+    try {
+      return await this.shareWithOrganizationOnce(input);
+    } catch (error) {
+      if (!isShareLockConflict(error)) {
+        throw error;
+      }
+      return { outcome: "organization-changed" };
+    }
+  }
+
+  private shareWithOrganizationOnce(input: {
+    id: string;
+    creatorUserId: string;
+    organizationId: string;
+    sessionId: string | null;
+  }): Promise<ShareWithOrganizationOutcome> {
+    return this.prisma.$transaction((tx) => shareWithOrganizationInTransaction(tx, input), {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      timeout: SHARE_TRANSACTION_TIMEOUT_MS,
+    });
   }
 
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
@@ -217,15 +242,24 @@ export class ArtifactsRepository {
 export type ShareWithOrganizationOutcome =
   | { outcome: "shared" | "already"; record: ArtifactRecord }
   | { outcome: "not-found" }
+  | { outcome: "unauthenticated" }
   | { outcome: "organization-required" }
   | { outcome: "organization-changed" };
+
+// A few seconds, and shorter than the Prisma transaction timeout, so a blocked lock becomes
+// 55P03 or 57014 instead of a late P2028 that the HTTP layer would turn into a 500.
+const SHARE_LOCK_TIMEOUT = "3000";
+const SHARE_STATEMENT_TIMEOUT = "4000";
+const SHARE_TRANSACTION_TIMEOUT_MS = 8_000;
 
 async function shareWithOrganizationInTransaction(
   tx: Prisma.TransactionClient,
   input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
 ): Promise<ShareWithOrganizationOutcome> {
-  // Lock the artifact before the authorization rows. A caller that already holds this row can
-  // change membership or the active organization before we observe them; we then refuse.
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${SHARE_LOCK_TIMEOUT}, true)`;
+  await tx.$queryRaw`SELECT set_config('statement_timeout', ${SHARE_STATEMENT_TIMEOUT}, true)`;
+  // Lock only this artifact. The next statement starts after the wait, so its snapshot includes
+  // a membership, session, or organization change that committed while this request was blocked.
   await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
   const locked = await tx.artifact.findUnique({ where: { id: input.id } });
   if (!locked || locked.creatorUserId !== input.creatorUserId) {
@@ -235,69 +269,186 @@ async function shareWithOrganizationInTransaction(
     return { outcome: "already", record: toArtifactRecord(locked) };
   }
 
-  const currentOrganizationId = await lockedCurrentOrganizationId(tx, input.creatorUserId, input.sessionId);
+  const updated = await tx.$executeRaw`
+    UPDATE artifact
+    SET access_type = 'org_shared'::"access_type",
+        organization_id = ${input.organizationId},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${input.id}::uuid
+      AND creator_user_id = ${input.creatorUserId}
+      AND access_type = 'private'::"access_type"
+      AND EXISTS (
+        SELECT 1 FROM "user" WHERE id = artifact.creator_user_id
+      )
+      AND ${shareAuthorizationSql(input)}
+  `;
+  if (updated === 1) {
+    const saved = await tx.artifact.findUnique({ where: { id: input.id } });
+    if (!saved || saved.creatorUserId !== input.creatorUserId) {
+      return { outcome: "not-found" };
+    }
+    return { outcome: "shared", record: toArtifactRecord(saved) };
+  }
+  return classifyShareRefusal(tx, input);
+}
+
+// Same rule as ActorService.organizationFor, evaluated in the UPDATE so the check and the write
+// cannot drift. A session must still be present and unexpired. API keys have no session row and
+// use the sole-membership rule. Plain EXISTS does not lock those rows.
+function shareAuthorizationSql(input: {
+  organizationId: string;
+  sessionId: string | null;
+}): Prisma.Sql {
+  const confirmedMembership = Prisma.sql`
+    EXISTS (
+      SELECT 1
+      FROM "member"
+      WHERE "userId" = artifact.creator_user_id
+        AND "organizationId" = ${input.organizationId}
+    )
+  `;
+  const soleMembership = Prisma.sql`
+    (SELECT COUNT(*)::int FROM "member" WHERE "userId" = artifact.creator_user_id) = 1
+    AND ${confirmedMembership}
+  `;
+  if (input.sessionId === null) {
+    return soleMembership;
+  }
+  return Prisma.sql`
+    EXISTS (
+      SELECT 1
+      FROM "session"
+      WHERE "session".id = ${input.sessionId}
+        AND "session"."userId" = artifact.creator_user_id
+        AND "session"."expiresAt" > CURRENT_TIMESTAMP
+        AND (
+          (
+            "session"."activeOrganizationId" = ${input.organizationId}
+            AND EXISTS (
+              SELECT 1
+              FROM "member"
+              WHERE "userId" = artifact.creator_user_id
+                AND "organizationId" = "session"."activeOrganizationId"
+            )
+          )
+          OR (
+            (
+              "session"."activeOrganizationId" IS NULL
+              OR "session"."activeOrganizationId" = ''
+              OR NOT EXISTS (
+                SELECT 1
+                FROM "member"
+                WHERE "userId" = artifact.creator_user_id
+                  AND "organizationId" = "session"."activeOrganizationId"
+              )
+            )
+            AND ${soleMembership}
+          )
+        )
+    )
+  `;
+}
+
+async function classifyShareRefusal(
+  tx: Prisma.TransactionClient,
+  input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
+): Promise<ShareWithOrganizationOutcome> {
+  const row = await tx.artifact.findUnique({ where: { id: input.id } });
+  if (!row || row.creatorUserId !== input.creatorUserId) {
+    return { outcome: "not-found" };
+  }
+  if (row.accessType === "org_shared") {
+    return { outcome: "already", record: toArtifactRecord(row) };
+  }
+  if (input.sessionId) {
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM "session"
+      WHERE id = ${input.sessionId}
+        AND "userId" = ${input.creatorUserId}
+        AND "expiresAt" > CURRENT_TIMESTAMP
+    `;
+    if (sessions.length === 0) {
+      return { outcome: "unauthenticated" };
+    }
+  }
+  const users = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM "user" WHERE id = ${input.creatorUserId}
+  `;
+  if (users.length === 0) {
+    return { outcome: "unauthenticated" };
+  }
+  const currentOrganizationId = await readCurrentOrganizationId(tx, input.creatorUserId, input.sessionId);
   if (currentOrganizationId === null) {
     return { outcome: "organization-required" };
   }
-  if (currentOrganizationId !== input.organizationId) {
-    return { outcome: "organization-changed" };
-  }
-
-  const updated = await tx.artifact.updateMany({
-    where: {
-      id: input.id,
-      creatorUserId: input.creatorUserId,
-      accessType: "private",
-    },
-    data: {
-      accessType: "org_shared",
-      organizationId: currentOrganizationId,
-      updatedAt: new Date(),
-    },
-  });
-  const saved = await tx.artifact.findUnique({ where: { id: input.id } });
-  if (!saved || saved.creatorUserId !== input.creatorUserId) {
-    return { outcome: "not-found" };
-  }
-  if (updated.count !== 1) {
-    return saved.accessType === "org_shared"
-      ? { outcome: "already", record: toArtifactRecord(saved) }
-      : { outcome: "not-found" };
-  }
-  return { outcome: "shared", record: toArtifactRecord(saved) };
+  return { outcome: "organization-changed" };
 }
 
-// Holds the user row, the session row, and every membership through the caller's commit.
-// FOR UPDATE on the user conflicts with a new membership's foreign-key lock. FOR SHARE
-// conflicts with deleting a membership or changing the active organization.
-async function lockedCurrentOrganizationId(
+async function readCurrentOrganizationId(
   tx: Prisma.TransactionClient,
   userId: string,
   sessionId: string | null,
 ): Promise<string | null> {
-  await tx.$queryRaw`SELECT id FROM "user" WHERE id = ${userId} FOR UPDATE`;
-
   let activeOrganizationId: string | null = null;
   if (sessionId) {
     const sessions = await tx.$queryRaw<Array<{ activeOrganizationId: string | null }>>`
       SELECT "activeOrganizationId"
       FROM "session"
-      WHERE id = ${sessionId} AND "userId" = ${userId}
-      FOR SHARE
+      WHERE id = ${sessionId}
+        AND "userId" = ${userId}
+        AND "expiresAt" > CURRENT_TIMESTAMP
     `;
     const active = sessions[0]?.activeOrganizationId;
     activeOrganizationId = typeof active === "string" && active.length > 0 ? active : null;
   }
-
+  if (activeOrganizationId) {
+    const activeMembership = await tx.$queryRaw<Array<{ organizationId: string }>>`
+      SELECT "organizationId"
+      FROM "member"
+      WHERE "userId" = ${userId} AND "organizationId" = ${activeOrganizationId}
+      LIMIT 1
+    `;
+    if (activeMembership.length === 1) {
+      return activeOrganizationId;
+    }
+  }
   const memberships = await tx.$queryRaw<Array<{ organizationId: string }>>`
     SELECT "organizationId"
     FROM "member"
     WHERE "userId" = ${userId}
     ORDER BY "createdAt" ASC
-    FOR SHARE
+    LIMIT 2
   `;
-  if (activeOrganizationId && memberships.some((membership) => membership.organizationId === activeOrganizationId)) {
-    return activeOrganizationId;
-  }
   return memberships.length === 1 ? memberships[0]?.organizationId ?? null : null;
+}
+
+function isShareLockConflict(error: unknown): boolean {
+  return matchesShareLockConflict(error) || matchesShareLockConflict(errorCause(error));
+}
+
+function matchesShareLockConflict(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  if (code === "P2028" || code === "P2034") {
+    return true;
+  }
+  const meta = "meta" in error ? error.meta : undefined;
+  const metaCode =
+    typeof meta === "object" && meta !== null && "code" in meta && typeof meta.code === "string" ? meta.code : "";
+  if (metaCode === "40P01" || metaCode === "40001" || metaCode === "55P03" || metaCode === "57014") {
+    return true;
+  }
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  return /(?:40P01|40001|55P03|57014)/.test(message)
+    || /deadlock detected|could not serialize access|canceling statement due to lock timeout|canceling statement due to statement timeout/i.test(message);
+}
+
+function errorCause(error: unknown): unknown {
+  if (typeof error !== "object" || error === null || !("cause" in error)) {
+    return undefined;
+  }
+  return error.cause;
 }

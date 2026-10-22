@@ -482,7 +482,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Share a private artifact with the confirmed organization",
     description:
-      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership, re-checked in the same transaction as the update. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. A concurrent membership removal or active-organization change either waits for that transaction or makes it return 409 or 400 with no write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. The update locks only the artifact row, then re-checks membership and, for a session, that the session is still present and unexpired, in the statement that writes. It does not lock the user, the session, or membership rows. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. A concurrent membership removal, organization deletion, or active-organization change is visible to that statement and returns 409 or 400 with no write. A session revoked or expired before the write returns `401 UNAUTHENTICATED` and does not write. A deadlock, serialization failure, or lock timeout retries once and then returns `409 ORGANIZATION_CHANGED` with no write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
@@ -502,14 +502,17 @@ export const httpOperations: HttpOperation[] = [
         description: `This route shares a private artifact with the confirmed organization. A JSON array, and a JSON object with any other shape, including accessType private or a missing organizationId, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` Malformed JSON, null, and JSON primitives are \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
         schemaName: "ApiError"
       },
-      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "401": {
+        description: "Missing credentials, or a session that was revoked or expired before a private artifact was shared. Code `UNAUTHENTICATED`. The artifact is not written.",
+        schemaName: "ApiError"
+      },
       "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
         schemaName: "ApiError"
       },
       "409": {
-        description: "The artifact is still private and organizationId is not the caller's current membership. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
+        description: "The artifact is still private and organizationId is not the caller's current membership, or a deadlock, serialization failure, or lock timeout persisted after one retry. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
         schemaName: "ApiError"
       },
       "413": {
