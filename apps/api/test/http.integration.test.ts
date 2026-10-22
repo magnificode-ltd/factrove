@@ -2806,7 +2806,7 @@ describe("HTTP API", () => {
     }
   });
 
-  it("does not write when deleting the owner waits on the creator foreign key", async () => {
+  it("returns 409 without writing when the share lock timeout runs out while owner deletion waits", async () => {
     const { orgB, artifactId } = await prepareLockedShare("lock-user-fk");
     const snapshot = await snapshotOwnerIdentity();
     await installArtifactUpdateAudit(prisma);
@@ -2818,26 +2818,41 @@ describe("HTTP API", () => {
     const acquired = new Promise<void>((resolve) => {
       locked = resolve;
     });
+    // Longer than the share's two attempts. Releasing early lets the delete and the share deadlock.
     const lock = prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${artifactId}::uuid FOR UPDATE`;
       locked();
       await held;
-    }, { timeout: 20_000 });
-    await acquired;
-    const pending = patchAccess(
-      baseUrl,
-      artifactId,
-      { accessType: "org_shared", organizationId: orgB },
-      { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
-    );
-    await waitForArtifactRowLockWaiter(prisma);
-    const deleting = prisma.user.delete({ where: { id: owner.userId } }).then(
-      () => "deleted" as const,
-      () => "rejected" as const,
-    );
-    let released = false;
+    }, { timeout: 45_000 });
+    let deleting: Promise<OwnerDeleteResult> = Promise.resolve({
+      deleted: false,
+      error: new Error("owner delete did not start"),
+    });
     try {
-      const response = await pending;
+      await acquired;
+      const pending = patchAccess(
+        baseUrl,
+        artifactId,
+        { accessType: "org_shared", organizationId: orgB },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      await waitForArtifactRowLockWaiter(prisma);
+      deleting = prisma.$transaction(async (tx) => {
+        // Outlives the share's two attempts, then fails the restrict check once this test releases the artifact.
+        await tx.$executeRaw`SELECT set_config('lock_timeout', '30000', true)`;
+        await tx.$executeRaw`DELETE FROM "user" WHERE id = ${owner.userId}`;
+      }, { timeout: 40_000 }).then(
+        () => ({ deleted: true as const }),
+        (error: unknown) => ({ deleted: false as const, error }),
+      );
+      await waitForOwnerDeleteWaitingOnArtifact(prisma);
+      const response = await promiseWithDeadline(
+        pending,
+        20_000,
+        "share did not finish within the lock-timeout budget",
+      );
+      // The delete is still waiting on artifact_creator_user_id_fkey and has not committed.
+      // 409 is the share exhausting its lock timeout (one retry, then ORGANIZATION_CHANGED) with no write.
       expect(response.status).not.toBe(500);
       expect(response.status).toBe(409);
       expect(await errorOf(response)).toEqual({
@@ -2850,24 +2865,27 @@ describe("HTTP API", () => {
       expect(row.creatorUserId).toBe(owner.userId);
       expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
       release();
-      released = true;
-      await lock.catch(() => undefined);
-      // The restrict foreign key is still present, so the delete waits on the artifact and then fails.
-      expect(await deleting).toBe("rejected");
+      const deleteResult = await promiseWithDeadline(
+        deleting,
+        10_000,
+        "owner delete did not finish after the artifact lock was released",
+      );
+      expect(deleteResult.deleted).toBe(false);
+      if (!deleteResult.deleted) {
+        expect(errorText(deleteResult.error)).toContain("artifact_creator_user_id_fkey");
+      }
       expect(await prisma.user.findUnique({ where: { id: owner.userId } })).not.toBeNull();
     } finally {
-      if (!released) {
-        release();
-      }
+      release();
       await lock.catch(() => undefined);
       const deleteResult = await deleting;
-      if (deleteResult === "deleted" || (await prisma.user.findUnique({ where: { id: owner.userId } })) === null) {
+      if (deleteResult.deleted || (await prisma.user.findUnique({ where: { id: owner.userId } })) === null) {
         await restoreOwnerIdentity(snapshot);
       }
       await removeArtifactUpdateAudit(prisma);
       await restoreLockedShare();
     }
-  });
+  }, 50_000);
 
   it("does not share when the session is revoked while the update is blocked", async () => {
     const { orgB, artifactId } = await prepareLockedShare("lock-session");
@@ -4960,6 +4978,40 @@ function expectRetryAfter(response: Response): number {
   return value;
 }
 
+type OwnerDeleteResult = { deleted: true } | { deleted: false; error: unknown };
+
+function promiseWithDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+function errorText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if ("message" in current && typeof current.message === "string") {
+      parts.push(current.message);
+    }
+    if ("code" in current && typeof current.code === "string") {
+      parts.push(current.code);
+    }
+    if ("meta" in current && typeof current.meta === "object" && current.meta !== null) {
+      parts.push(JSON.stringify(current.meta));
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return parts.join("\n");
+}
+
 async function waitForArtifactRowLockWaiter(client: PrismaService): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < 8_000) {
@@ -4978,6 +5030,48 @@ async function waitForArtifactRowLockWaiter(client: PrismaService): Promise<void
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error("organization share did not block on the artifact row");
+}
+
+async function waitForOwnerDeleteWaitingOnArtifact(client: PrismaService): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 8_000) {
+    const rows = await client.$queryRaw<Array<{ waiting: number }>>(Prisma.sql`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS waiter
+      JOIN pg_locks AS wanted ON wanted.pid = waiter.pid AND NOT wanted.granted
+      WHERE waiter.pid <> pg_backend_pid()
+        AND waiter.state = 'active'
+        AND waiter.wait_event_type = 'Lock'
+        AND waiter.query ILIKE '%DELETE%'
+        AND waiter.query ILIKE '%"user"%'
+        AND (
+          (
+            wanted.locktype = 'tuple'
+            AND wanted.relation = 'artifact'::regclass
+          )
+          OR (
+            wanted.locktype = 'transactionid'
+            AND EXISTS (
+              SELECT 1
+              FROM pg_locks AS holder_txn
+              JOIN pg_locks AS artifact_lock
+                ON artifact_lock.pid = holder_txn.pid
+               AND artifact_lock.granted
+               AND artifact_lock.relation = 'artifact'::regclass
+              WHERE holder_txn.granted
+                AND holder_txn.locktype = 'transactionid'
+                AND holder_txn.transactionid = wanted.transactionid
+                AND holder_txn.pid <> waiter.pid
+            )
+          )
+        )
+    `);
+    if (Number(rows[0]?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("owner delete did not wait on the artifact row");
 }
 
 async function errorEnvelope(response: Response): Promise<{
