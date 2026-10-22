@@ -12,26 +12,83 @@ const input = {
 // organization-changed is the repository outcome ArtifactsService maps to 409 ORGANIZATION_CHANGED.
 // A transaction that throws did not commit, so these cases do not write.
 
+const savedRecord = {
+  id: input.id,
+  creatorUserId: input.creatorUserId,
+  organizationId: input.organizationId,
+  accessType: "org_shared" as const,
+  name: null,
+  mimeType: "text/html",
+  sizeBytes: 1,
+  objectKey: `${input.id}.html`,
+  contentRevision: 0,
+  createdAt: new Date("2026-10-22T00:00:00.000Z"),
+  updatedAt: new Date("2026-10-22T00:00:00.000Z"),
+  uploadedAt: null,
+  shareToken: null,
+  shareTokenHash: null,
+  sharePasswordHash: null,
+};
+
 describe("shareWithOrganization retry", () => {
-  const cases = [
-    ["40P01", sqlStateError("40P01")],
-    ["40001", sqlStateError("40001")],
-    ["55P03", sqlStateError("55P03")],
-    ["57014", sqlStateError("57014")],
-    ["P2028", prismaCodeError("P2028")],
-    ["P2034", prismaCodeError("P2034")],
-  ] as const;
+  const sqlStates = ["40P01", "40001", "55P03", "57014"] as const;
 
-  it.each(cases)("retries %s once and then returns organization-changed with no write", async (_code, error) => {
+  it.each(sqlStates)("retries structured SQLSTATE %s from meta.code with a neutral message", async (sqlState) => {
+    await expectTwoFailures(structuredSqlState(sqlState));
+  });
+
+  it.each([
+    ["40P01", "deadlock detected"],
+    ["40001", "could not serialize access due to concurrent update"],
+    ["55P03", "canceling statement due to lock timeout"],
+    ["57014", "canceling statement due to statement timeout"],
+  ] as const)("retries %s from the message only", async (_sqlState, message) => {
+    await expectTwoFailures(messageOnly(message));
+  });
+
+  it.each(sqlStates)("retries SQLSTATE %s wrapped as the error cause", async (sqlState) => {
+    await expectTwoFailures(wrapped(structuredSqlState(sqlState)));
+  });
+
+  it.each(["P2028", "P2034"] as const)("retries structured Prisma code %s", async (code) => {
+    await expectTwoFailures(structuredPrismaCode(code));
+  });
+
+  it.each(["P2028", "P2034"] as const)("retries Prisma code %s wrapped as the error cause", async (code) => {
+    await expectTwoFailures(wrapped(structuredPrismaCode(code)));
+  });
+
+  it("returns the shared row when the second attempt succeeds", async () => {
     let attempts = 0;
-    const repository = new ArtifactsRepository({
-      $transaction: async () => {
-        attempts += 1;
-        throw error;
-      },
-    } as unknown as PrismaService);
+    const repository = repositoryFrom(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw structuredSqlState("40P01");
+      }
+      return { outcome: "shared" as const, record: savedRecord };
+    });
 
-    await expect(repository.shareWithOrganization(input)).resolves.toEqual({ outcome: "organization-changed" });
+    await expect(repository.shareWithOrganization(input)).resolves.toEqual({
+      outcome: "shared",
+      record: savedRecord,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("returns the saved row when the second attempt finds the artifact already shared", async () => {
+    let attempts = 0;
+    const repository = repositoryFrom(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw messageOnly("deadlock detected");
+      }
+      return { outcome: "already" as const, record: savedRecord };
+    });
+
+    await expect(repository.shareWithOrganization(input)).resolves.toEqual({
+      outcome: "already",
+      record: savedRecord,
+    });
     expect(attempts).toBe(2);
   });
 
@@ -98,18 +155,40 @@ describe("shareWithOrganization retry", () => {
   });
 });
 
-function sqlStateError(sqlState: string): Error {
-  const error = new Error(
-    `Raw query failed. Code: \`${sqlState}\`. Message: \`canceling statement due to lock timeout\``,
-  );
-  return Object.assign(error, {
+function repositoryFrom(run: () => Promise<unknown>): ArtifactsRepository {
+  return new ArtifactsRepository({ $transaction: run } as unknown as PrismaService);
+}
+
+async function expectTwoFailures(error: Error): Promise<void> {
+  let attempts = 0;
+  const repository = repositoryFrom(async () => {
+    attempts += 1;
+    throw error;
+  });
+  await expect(repository.shareWithOrganization(input)).resolves.toEqual({ outcome: "organization-changed" });
+  expect(attempts).toBe(2);
+}
+
+// The message stays neutral so a match can only come from meta.code.
+function structuredSqlState(sqlState: string): Error {
+  return Object.assign(new Error("persistence conflict"), {
     code: "P2010",
-    meta: { code: sqlState, message: "canceling statement due to lock timeout" },
+    meta: { code: sqlState, message: "persistence conflict" },
   });
 }
 
-function prismaCodeError(code: string): Error {
-  return Object.assign(new Error(`Transaction API error: ${code}`), { code });
+// No meta.code, so a match can only come from the message.
+function messageOnly(message: string): Error {
+  return Object.assign(new Error(message), { code: "P2010" });
+}
+
+// The message does not contain the Prisma code, so a match can only come from error.code.
+function structuredPrismaCode(code: string): Error {
+  return Object.assign(new Error("transaction could not finish"), { code });
+}
+
+function wrapped(cause: Error): Error {
+  return Object.assign(new Error("transaction failed"), { cause });
 }
 
 function foreignKeyError(constraint: string): Error {

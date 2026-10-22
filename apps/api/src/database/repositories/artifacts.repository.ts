@@ -74,10 +74,11 @@ export class ArtifactsRepository {
   }
 
   // Switches private -> org_shared for this creator when the confirmed organization is still current.
-  // The only row lock is the artifact. User, session, and membership rows are not locked, so a
-  // membership delete or a login is not blocked and cannot cycle with this transaction. An
-  // organization delete that also needs this artifact can still deadlock on the organization
-  // foreign key. A lock conflict retries once and then reports organization-changed. A foreign-key
+  // The only explicit row lock is the artifact. The organization foreign-key check takes an
+  // implicit KEY SHARE lock on the organization row. User, session, and membership rows are not
+  // locked, so a membership delete or a login is not blocked and cannot cycle with this
+  // transaction. An organization delete that also needs this artifact can still deadlock on that
+  // KEY SHARE. A lock conflict retries once and then reports organization-changed. A foreign-key
   // violation on artifact.organization_id retries once and then classifies the row again. Neither
   // path writes. The authorization check is a later statement, so it sees commits that landed while this
   // transaction waited on the artifact. An artifact that is already org_shared is returned
@@ -282,7 +283,8 @@ export type ShareWithOrganizationOutcome =
 // 55P03 or 57014 instead of a late P2028 that the HTTP layer would turn into a 500.
 // SHARE_TRANSACTION_TIMEOUT_MS applies to each attempt on its own. A conflict retries once,
 // so two attempts that both run until that timeout take about 16 seconds and then return
-// organization-changed with no write.
+// organization-changed with no write. That is the budget for the two attempts, not an endpoint
+// deadline.
 const SHARE_LOCK_TIMEOUT = "3000";
 const SHARE_STATEMENT_TIMEOUT = "4000";
 const SHARE_TRANSACTION_TIMEOUT_MS = 8_000;
@@ -293,7 +295,8 @@ async function shareWithOrganizationInTransaction(
   input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
 ): Promise<ShareWithOrganizationOutcome> {
   await applyShareTimeouts(tx);
-  // Lock only this artifact. The next statement starts after the wait, so its snapshot includes
+  // The explicit lock is only this artifact. The organization foreign-key check takes an implicit
+  // KEY SHARE lock. The next statement starts after the wait, so its snapshot includes
   // a membership, session, or organization change that committed while this request was blocked.
   await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
   const locked = await tx.artifact.findUnique({ where: { id: input.id } });

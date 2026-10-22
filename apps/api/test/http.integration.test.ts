@@ -2765,11 +2765,13 @@ describe("HTTP API", () => {
     }
   });
 
-  it("does not share when the owner is deleted while the update is blocked", async () => {
+  it("does not share an orphaned owner row when the creator foreign key is dropped", async () => {
     const { orgB, artifactId } = await prepareLockedShare("lock-user");
     const snapshot = await snapshotOwnerIdentity();
     await installArtifactUpdateAudit(prisma);
-    // Without this constraint, deleting the owner waits on the artifact row the test is holding.
+    // Defensive coverage only. Dropping the restrict constraint lets the owner row disappear
+    // while this artifact still points at it. With the constraint present, that delete waits
+    // on the artifact row instead of removing the user.
     await prisma.$executeRawUnsafe(`ALTER TABLE "artifact" DROP CONSTRAINT "artifact_creator_user_id_fkey"`);
     let constraintDropped = true;
     try {
@@ -2798,6 +2800,69 @@ describe("HTTP API", () => {
           `ALTER TABLE "artifact" ADD CONSTRAINT "artifact_creator_user_id_fkey" FOREIGN KEY ("creator_user_id") REFERENCES "user"("id") ON DELETE RESTRICT ON UPDATE CASCADE`,
         );
         constraintDropped = false;
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not write when deleting the owner waits on the creator foreign key", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-user-fk");
+    const snapshot = await snapshotOwnerIdentity();
+    await installArtifactUpdateAudit(prisma);
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked = (): void => {};
+    const acquired = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const lock = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${artifactId}::uuid FOR UPDATE`;
+      locked();
+      await held;
+    }, { timeout: 20_000 });
+    await acquired;
+    const pending = patchAccess(
+      baseUrl,
+      artifactId,
+      { accessType: "org_shared", organizationId: orgB },
+      { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+    );
+    await waitForArtifactRowLockWaiter(prisma);
+    const deleting = prisma.user.delete({ where: { id: owner.userId } }).then(
+      () => "deleted" as const,
+      () => "rejected" as const,
+    );
+    let released = false;
+    try {
+      const response = await pending;
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(row.creatorUserId).toBe(owner.userId);
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+      release();
+      released = true;
+      await lock.catch(() => undefined);
+      // The restrict foreign key is still present, so the delete waits on the artifact and then fails.
+      expect(await deleting).toBe("rejected");
+      expect(await prisma.user.findUnique({ where: { id: owner.userId } })).not.toBeNull();
+    } finally {
+      if (!released) {
+        release();
+      }
+      await lock.catch(() => undefined);
+      const deleteResult = await deleting;
+      if (deleteResult === "deleted" || (await prisma.user.findUnique({ where: { id: owner.userId } })) === null) {
+        await restoreOwnerIdentity(snapshot);
       }
       await removeArtifactUpdateAudit(prisma);
       await restoreLockedShare();

@@ -482,7 +482,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Share a private artifact with the confirmed organization",
     description:
-      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. The update locks only the artifact row, then re-checks membership and, for a session, that the session is still present and unexpired, in the statement that writes. It does not lock the user, the session, or membership rows. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. A concurrent membership removal, organization deletion, or active-organization change is visible to that statement and returns 409 or 400 with no write. A session revoked or expired before the write returns `401 UNAUTHENTICATED` and does not write. A deadlock, serialization failure, or lock timeout retries once and then returns `409 ORGANIZATION_CHANGED` with no write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. The only explicit row lock is the artifact. The organization foreign-key check takes an implicit KEY SHARE lock on the organization row. The update does not lock the user, the session, or membership rows. It re-checks membership and, for a session, that the session is still present and unexpired, in the conditional UPDATE. That statement is the linearization point. A different current organization at that snapshot is `409 ORGANIZATION_CHANGED` and does not write. A membership removal, organization deletion, active-organization change, or session revocation that commits before the statement reads its rows returns 409, 400, or `401 UNAUTHENTICATED` with no write. An authorization change that commits after that snapshot can land before the transaction commits and does not cancel the share. A deadlock, serialization failure, or lock timeout retries once and then returns `409 ORGANIZATION_CHANGED` with no write. About 16 seconds is the budget for those two attempts, not a deadline for this endpoint. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
@@ -503,7 +503,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "401": {
-        description: "Missing credentials, or a session that was revoked or expired before a private artifact was shared. Code `UNAUTHENTICATED`. The artifact is not written.",
+        description: "Missing credentials, or a session that was revoked or expired before the conditional update read it. Code `UNAUTHENTICATED`. The artifact is not written. A revocation that commits after that snapshot does not cancel a share the statement already accepted.",
         schemaName: "ApiError"
       },
       "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
@@ -512,7 +512,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "409": {
-        description: "The artifact is still private and organizationId is not the caller's current membership, or a deadlock, serialization failure, or lock timeout persisted after one retry. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
+        description: "The artifact is still private and organizationId is not the caller's current membership when the conditional update reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. Code `ORGANIZATION_CHANGED`. The artifact is not written. An authorization change that commits after that snapshot does not produce this response and does not undo the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline.",
         schemaName: "ApiError"
       },
       "413": {
