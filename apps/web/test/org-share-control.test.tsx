@@ -266,4 +266,84 @@ describe("organization share control", () => {
     expect(bodies[1]).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "org-b" }));
     expect(toast.success).toHaveBeenCalledWith("Shared with \u2068Organization B\u2069");
   });
+
+  it("says the artifact was already shared when the server stored a different organization", async () => {
+    const stored = { ...artifact, organizationId: "org-a", accessType: "org_shared" as const };
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/context")) {
+        return new Response(JSON.stringify({
+          user: { id: "local-user", name: "Local User" },
+          organization: { id: "local-org", name: "Local Organization" }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ artifact: stored }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const seen: string[] = [];
+    await act(async () => {
+      root?.render(
+        <>
+          <span id={`artifact-access-${id}`} tabIndex={-1} data-testid="access-badge">
+            Private
+          </span>
+          <OrgShareControl
+            artifactId={id}
+            organizationId="local-org"
+            organizationName="Local Organization"
+            onShared={(next) => {
+              seen.push(next.organizationId ?? "");
+              const badge = document.getElementById(`artifact-access-${id}`);
+              if (badge) {
+                badge.textContent = next.accessType;
+              }
+            }}
+          />
+        </>
+      );
+    });
+    await act(async () => {
+      buttonNamed("Share with Local Organization").click();
+    });
+    await act(async () => {
+      dialogButton("Share with Local Organization").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(seen).toEqual(["org-a"]);
+    expect(document.getElementById(`artifact-access-${id}`)?.textContent).toBe("org_shared");
+    expect(toast.success).toHaveBeenCalledWith("Already shared with another organization");
+  });
+
+  it("names the stored organization when context still identifies it", async () => {
+    const stored = { ...artifact, organizationId: "org-a", accessType: "org_shared" as const };
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/context")) {
+        return new Response(JSON.stringify({
+          user: { id: "local-user", name: "Local User" },
+          organization: { id: "org-a", name: "Organization A" }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ artifact: stored }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    await renderControl();
+    await act(async () => {
+      buttonNamed("Share with Local Organization").click();
+    });
+    await act(async () => {
+      dialogButton("Share with Local Organization").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(toast.success).toHaveBeenCalledWith("Already shared with \u2068Organization A\u2069");
+  });
 });

@@ -8,6 +8,8 @@ import { AuthService } from "./auth.service.js";
 
 export type Actor = ContextEnvelope & {
   via: "session" | "api-key";
+  // Set for a session cookie. API keys have no session row to lock.
+  sessionId: string | null;
 };
 
 export type HeaderSource = {
@@ -56,6 +58,7 @@ export class ActorService {
       user: { id: session.user.id, name: session.user.name },
       organization,
       via: "session",
+      sessionId: readSessionId(session.session),
     };
   }
 
@@ -76,6 +79,7 @@ export class ActorService {
       user: { id: user.id, name: user.name },
       organization,
       via: "api-key",
+      sessionId: null,
     };
   }
 
@@ -128,6 +132,14 @@ function bearerToken(headers: IncomingHttpHeaders): string | null {
     return null;
   }
   return token;
+}
+
+function readSessionId(session: unknown): string | null {
+  if (typeof session !== "object" || session === null || !("id" in session)) {
+    return null;
+  }
+  const value = session.id;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function readActiveOrganizationId(session: unknown): string | null {

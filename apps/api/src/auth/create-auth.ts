@@ -19,7 +19,7 @@ export type FactroveAuth = {
   api: {
     getSession: (input: { headers: Headers }) => Promise<{
       user: { id: string; name: string };
-      session: { activeOrganizationId?: string | null };
+      session: { id: string; activeOrganizationId?: string | null };
     } | null>;
     verifyApiKey: (input: { body: { key: string } }) => Promise<{
       valid: boolean;

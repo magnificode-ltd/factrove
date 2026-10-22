@@ -149,8 +149,7 @@ export function OrgShareControl({
     try {
       const envelope = await api.shareArtifactWithOrganization(artifactId, confirmed.id);
       onShared(envelope.artifact);
-      const name = await verifiedOrganizationName(api, envelope.artifact.organizationId, confirmed);
-      toast.success(`Shared with ${isolate(name)}`);
+      toast.success(await shareResultMessage(api, envelope.artifact.organizationId, confirmed));
       succeeded = true;
       setOpen(false);
     } catch (caught) {
@@ -280,20 +279,34 @@ function focusEnabled(element: HTMLElement | null | undefined): boolean {
   return document.activeElement === element;
 }
 
-async function verifiedOrganizationName(
+async function shareResultMessage(
   client: FactroveClient,
   organizationId: string | null,
   confirmed: Audience
 ): Promise<string> {
+  const storedName = await knownOrganizationName(client, organizationId);
+  if (organizationId === confirmed.id) {
+    return `Shared with ${isolate(storedName ?? confirmed.name)}`;
+  }
+  if (storedName) {
+    return `Already shared with ${isolate(storedName)}`;
+  }
+  return "Already shared with another organization";
+}
+
+async function knownOrganizationName(client: FactroveClient, organizationId: string | null): Promise<string | null> {
+  if (!organizationId) {
+    return null;
+  }
   try {
     const context = await client.getContext();
     if (context.organization && context.organization.id === organizationId) {
       return context.organization.name;
     }
   } catch {
-    // The accepted organization id still names the audience the server stored.
+    // The stored organization name is used only when this context identifies it.
   }
-  return organizationId === confirmed.id ? confirmed.name : "your organization";
+  return null;
 }
 
 async function audienceAfterChange(

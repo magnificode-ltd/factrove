@@ -482,7 +482,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Share a private artifact with the confirmed organization",
     description:
-      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password when `organizationId` is current, and also when the caller has no current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\", \"organizationId\": \"<current organization id>\" }` switches a private artifact to `org_shared` and sets `organizationId` to that id. The id must be the caller's current membership, re-checked in the same transaction as the update. A different current organization is `409 ORGANIZATION_CHANGED` and does not write. A concurrent membership removal or active-organization change either waits for that transaction or makes it return 409 or 400 with no write. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password, for any confirmed organizationId and whether or not the caller has a current organization. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
     security: "owner",
     pathParameters: [artifactIdParam],
     requestBody: {
@@ -494,12 +494,12 @@ export const httpOperations: HttpOperation[] = [
     },
     responses: {
       "200": {
-        description: "The artifact is org_shared. A repeat request returns the current artifact without writing when the confirmed organization is current.",
+        description: "The artifact is org_shared. A repeat request for an artifact that is already org_shared returns it without writing, for any confirmed organizationId.",
         schema: artifactEnvelopeSchema,
         schemaName: "ArtifactEnvelope"
       },
       "400": {
-        description: `This route shares a private artifact with the confirmed organization. A JSON object with any other shape, including accessType private or a missing organizationId, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` Malformed JSON, and a JSON value that is not an object, is \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
+        description: `This route shares a private artifact with the confirmed organization. A JSON array, and a JSON object with any other shape, including accessType private or a missing organizationId, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` Malformed JSON, null, and JSON primitives are \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
@@ -509,7 +509,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "409": {
-        description: "organizationId is not the caller's current membership. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
+        description: "The artifact is still private and organizationId is not the caller's current membership. Code `ORGANIZATION_CHANGED`. The artifact is not written.",
         schemaName: "ApiError"
       },
       "413": {

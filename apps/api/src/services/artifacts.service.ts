@@ -160,9 +160,8 @@ export class ArtifactsService {
   }
 
   // Owner only. private -> org_shared in the organization the caller confirmed.
-  // That id must be the current membership. Already org_shared is a 200 with no write
-  // when the confirmed id is current, or when the caller has no current organization.
-  // The conditional update lets concurrent requests both succeed.
+  // Already org_shared is a 200 with no write, before the current organization is compared.
+  // A private row re-checks membership and the active organization in the update transaction.
   async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
     const actor = await this.actors.requireActor(request);
     const record = await this.artifacts.findById(id);
@@ -170,36 +169,30 @@ export class ArtifactsService {
       throw artifactNotFound();
     }
     const confirmed = readShareWithOrganizationBody(readBody());
-    const current = actor.organization;
-    if (record.accessType === "org_shared" && current === null) {
-      return this.toDto(record, !this.actors.hasCredentialHeader(request));
+    const includeGrant = !this.actors.hasCredentialHeader(request);
+    if (record.accessType === "org_shared") {
+      return this.toDto(record, includeGrant);
     }
-    if (current === null) {
+    const outcome = await this.artifacts.shareWithOrganization({
+      id: record.id,
+      creatorUserId: actor.user.id,
+      organizationId: confirmed.organizationId,
+      sessionId: actor.sessionId,
+    });
+    if (outcome.outcome === "not-found") {
+      throw artifactNotFound();
+    }
+    if (outcome.outcome === "organization-required") {
       throw new ApiErrorException(
         400,
         "ORGANIZATION_REQUIRED",
         "Organization sharing requires membership in an organization.",
       );
     }
-    if (confirmed.organizationId !== current.id) {
+    if (outcome.outcome === "organization-changed") {
       throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
     }
-    if (record.accessType === "org_shared") {
-      return this.toDto(record, !this.actors.hasCredentialHeader(request));
-    }
-    await this.artifacts.shareWithOrganization({
-      id: record.id,
-      creatorUserId: actor.user.id,
-      organizationId: current.id,
-    });
-    const saved = await this.artifacts.findById(record.id);
-    if (!saved || saved.creatorUserId !== actor.user.id) {
-      throw artifactNotFound();
-    }
-    if (saved.accessType !== "org_shared") {
-      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
-    }
-    return this.toDto(saved, !this.actors.hasCredentialHeader(request));
+    return this.toDto(outcome.record, includeGrant);
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {

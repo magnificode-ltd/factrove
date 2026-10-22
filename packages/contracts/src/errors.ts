@@ -15,7 +15,7 @@ export const apiErrorCatalog = [
     status: 409,
     code: "ORGANIZATION_CHANGED",
     description:
-      "PATCH /api/v1/artifacts/{id} named an organizationId that is not the caller's current membership. The artifact is not written."
+      "PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership. The artifact is not written. An artifact that is already org_shared returns 200 instead."
   },
   {
     status: 401,
