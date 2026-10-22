@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": ["dist", "prisma"],
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
@@ -23,6 +24,7 @@
     "@nestjs/core": "11.1.9",
     "@nestjs/platform-express": "11.1.9",
     "@prisma/client": "6.19.0",
+    "prisma": "6.19.0",
     "better-auth": "1.7.7",
     "busboy": "1.6.0",
     "express": "5.1.0",
@@ -39,7 +41,6 @@
     "markdown-it": "14.1.0",
     "marked": "14.1.4",
     "pg": "8.23.1",
-    "prisma": "6.19.0",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
   }

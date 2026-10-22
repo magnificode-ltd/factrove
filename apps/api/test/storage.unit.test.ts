@@ -161,6 +161,39 @@ describe("S3 storage configuration", () => {
     ).toBe("https://s3.example.com");
   });
 
+  it("allows cleartext HTTP to a non-loopback host only when opted in", () => {
+    expect(
+      readS3StorageConfig({
+        S3_BUCKET: "factrove",
+        S3_REGION: "us-east-1",
+        S3_ENDPOINT: "http://garage:3900",
+        S3_ALLOW_INSECURE_HTTP: "true",
+      }).endpoint,
+    ).toBe("http://garage:3900");
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_ENDPOINT: "http://garage:3900",
+          S3_ALLOW_INSECURE_HTTP: "false",
+        }),
+      "S3_ENDPOINT must use https, or http on a loopback host",
+      "garage",
+    );
+    expectUnavailable(
+      () =>
+        readS3StorageConfig({
+          S3_BUCKET: "factrove",
+          S3_REGION: "us-east-1",
+          S3_ENDPOINT: "http://garage:3900",
+          S3_ALLOW_INSECURE_HTTP: "yes",
+        }),
+      "S3_ALLOW_INSECURE_HTTP must be true or false",
+      "yes",
+    );
+  });
+
   it("forces local Garage settings over an empty endpoint and real AWS credentials", () => {
     const env: NodeJS.ProcessEnv = {
       S3_ENDPOINT: "",

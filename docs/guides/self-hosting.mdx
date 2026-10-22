@@ -3,7 +3,7 @@ title: Self-hosting and local development
 description: Local infrastructure, production startup, origins, object storage, backups, and rollback.
 ---
 
-Factrove is meant to be run as your own install. Docker Compose in this repository starts PostgreSQL and Garage for local development. It does not start the API or the web app.
+Factrove is meant to be run as your own install. `compose.yaml` starts PostgreSQL and Garage for local development with `pnpm dev`. It does not start the API or the web app. `docker-compose.yml` starts PostgreSQL, Garage, a migration container, the API, and the web app. The commands are in the repository README under Self-host with Docker Compose.
 
 ## Applications
 
@@ -69,7 +69,7 @@ curl -fsS http://127.0.0.1:3001/api/v1/health
 A ready API returns `{"status":"ok"}`.
 
 <Warning>
-Set `NEXT_PUBLIC_API_URL` before `pnpm build` or `next build`. Next.js fixes that origin in the client bundle. Changing it requires a rebuild. `next start` cannot change it.
+Set `NEXT_PUBLIC_API_URL` before `pnpm build` or `next build`. Next.js fixes that origin in the client bundle. Changing it requires a rebuild. `next start` cannot change it. The Docker web image reads `BROWSER_API_URL` when it renders a page, so that origin can change without a rebuild. `INTERNAL_API_URL` is the origin the Next.js server uses to reach the API. Leave both unset outside that image.
 </Warning>
 
 ## Object storage
@@ -92,7 +92,7 @@ For an existing AWS bucket:
 A provider other than AWS keeps its own `S3_ENDPOINT`. Removing that variable sends the client to AWS.
 
 - Set `S3_BUCKET`, `S3_REGION`, and `S3_ENDPOINT`.
-- Use `https` for any host other than `localhost`, `127.0.0.1`, or `::1`. `http` is accepted only for those loopback names.
+- Use `https` for any host other than `localhost`, `127.0.0.1`, or `::1`. `http` is accepted only for those loopback names, unless `S3_ALLOW_INSECURE_HTTP=true`. That flag allows cleartext HTTP to another host. Use it only on a private network, such as Garage in `docker-compose.yml`. The access key is sent in cleartext.
 - Set `S3_FORCE_PATH_STYLE` to match the provider. Path-style addressing is `true`. Virtual-hosted buckets use `false`. When the variable is unset and `S3_ENDPOINT` is set, the client uses path style.
 - Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` with that provider's credentials. A session token is sent only together with both keys.
 
@@ -103,7 +103,9 @@ A provider other than AWS keeps its own `S3_ENDPOINT`. Removing that variable se
 | `WEB_ORIGIN` | Browser origin of the web app |
 | `API_PUBLIC_ORIGIN` | Origin the API uses when it writes absolute API URLs |
 | `PUBLIC_BASE_URL` | Origin for viewer URLs and public share links. Defaults to `WEB_ORIGIN` |
-| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API. Read at web build time |
+| `NEXT_PUBLIC_API_URL` | Origin the browser uses to call the API. Read at web build time for `pnpm build` and `next start` |
+| `BROWSER_API_URL` | Optional runtime override of that origin. The Docker web image reads it when rendering a page |
+| `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `AUTH_COOKIE_DOMAIN` | Parent cookie domain when the web app and API use different hosts |
 
 `PUBLIC_BASE_URL` must be an absolute `http` or `https` origin with no path, query, or hash. A trailing slash is dropped. Setting it does not publish the app.

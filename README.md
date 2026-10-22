@@ -160,7 +160,7 @@ Edit `apps/api/.env` before uploading:
 - For an existing AWS bucket, set `S3_BUCKET` and `S3_REGION`. Remove `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`. Replace `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or remove both. The storage client uses that pair whenever both are set, so the Garage values `factrove-local` and `factrove-local-secret` keep an instance role or `AWS_PROFILE` from being selected. When the key is temporary, set `AWS_SESSION_TOKEN` as well. The API sends the token only together with the access key and secret. With `S3_ENDPOINT` unset, the API calls AWS in `S3_REGION` and ignores `AWS_ENDPOINT_URL`. It does not create the AWS bucket.
 - AWS calls need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` on the object keys the API generates.
 
-`NEXT_PUBLIC_API_URL` in `apps/api/.env` is the origin the browser uses for the API. It defaults to `http://localhost:3001`. A production bundle keeps the origin from the build.
+`NEXT_PUBLIC_API_URL` in `apps/api/.env` is the origin the browser uses for the API. It defaults to `http://localhost:3001`. A production bundle from `pnpm build` keeps the origin from the build. The Docker web image reads `BROWSER_API_URL` when it renders a page, so that origin can change without a rebuild. `INTERNAL_API_URL` is the origin the Next.js server uses to reach the API. Leave both unset for `pnpm dev`.
 
 CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `--endpoint-url` and `--api-url` set the API origin for one command. They must agree when both are present. Then `FACTROVE_API_URL` from the process environment, then `FACTROVE_ENDPOINT_URL` when that is unset. Then the selected profile's `api_url` in `~/.factrove/config`, or `endpoint_url` in that profile when `api_url` is absent. `pnpm factrove` uses a URL from `apps/cli/.env` only when the environment and the profile have no URL. The built-in default is `http://localhost:3001`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials` and ignores `FACTROVE_API_KEY`. `factrove configure` writes those files mode 0600 and stores the origin as `api_url`. `apps/cli/.env` does not supply a key or `FACTROVE_ENDPOINT_URL`. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted, and `pnpm factrove` can fill that name from `apps/cli/.env` when the variable is unset. The API key is not printed. Commands, config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
 
@@ -218,6 +218,34 @@ A link can also need a password. `--password` prompts twice without echoing and 
 
 Creating an upload assigns a new id. `--name` sets the library name, one line of 1 to 120 characters. Omit it and the name is the file name without `.html` or `.htm`. A stem that is empty, longer than 120 characters, or not one line stores null, and the upload still succeeds. Replacing content keeps that id, the current name, the current access, and any existing share link. Pass `--name` with `--artifactId` to change the name. A replace that loses the revision check does not change the name. A lost acknowledgement can still land the new HTML and the name together, because they are one update. `--access` with `--artifactId` is an error. A replace can rarely return 500 after the new object is already committed. GET the artifact before retrying. Config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
 
+### Self-host with Docker Compose
+
+`compose.yaml` is PostgreSQL and Garage for `pnpm dev`. [`docker-compose.yml`](docker-compose.yml) is the self-host stack: PostgreSQL, Garage, a one-shot migration, the API, and the web app. [`Dockerfile`](Dockerfile) has two targets, `api` and `web`, so both images share one workspace install. Node 24.16.0 and pnpm 11.25.0 match the pins in this repository.
+
+```sh
+cp .env.docker.example .env.docker
+```
+
+Replace every placeholder in `.env.docker`. `openssl rand -hex 32` generates a secret. Use that hex output as-is, because `@`, `:`, `/`, or `#` in the database password breaks `DATABASE_URL`. `GARAGE_RPC_SECRET` must be 64 hex characters. `BETTER_AUTH_SECRET` must be at least 32 characters. Do not commit `.env.docker`.
+
+```sh
+docker compose --env-file .env.docker -f docker-compose.yml up --build
+```
+
+`docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`.
+
+The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
+
+```sh
+docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
+```
+
+Set `FACTROVE_MIGRATE=1` on the API container only when that container should migrate before it listens. Any other value leaves startup as it is.
+
+`BROWSER_API_URL` is the origin the browser uses to call the API. The web server injects it when it renders a page, so one image works for any host. It must match the host and port you publish for the API. `INTERNAL_API_URL` is `http://api:3001` on this Compose network, which is the origin the Next.js server uses for its own requests. Changing either value does not require a rebuild. `pnpm build` and `next start` still keep `NEXT_PUBLIC_API_URL` from the build.
+
+Garage is `http://garage:3900` on the Compose network, and it creates the bucket named by `S3_BUCKET` when it starts. The API sets `S3_ALLOW_INSECURE_HTTP=true` so that private-network HTTP endpoint is accepted. The access key is sent in cleartext. Leave the flag unset for localhost and for AWS.
+
 `pnpm infra:down` stops PostgreSQL and Garage and keeps their data volumes. `pnpm infra:reset` stops the dev Compose project and deletes its PostgreSQL and Garage volumes. In a terminal it asks you to type `yes`. From a non-interactive shell, confirm with `pnpm infra:reset -- --yes`. That removes local metadata and local object bytes for the dev project. Objects in a real AWS bucket are outside these volumes and stay there. `pnpm e2e` deletes volumes only for its own Compose project, `factrove-e2e`.
 
 Workspace checks:
@@ -244,7 +272,7 @@ pnpm e2e
 - **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set a local placeholder in `apps/api/.env`, then run `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
 - **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--endpoint-url` or `--api-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
-- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`. A production bundle keeps the origin from the build, so run `pnpm build` again after changing it.
+- **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`. A production bundle from `pnpm build` keeps the origin from the build, so run `pnpm build` again after changing it. On the Docker web image, set `BROWSER_API_URL` to the origin the browser uses and `INTERNAL_API_URL` to the origin the Next.js server can reach. Those two are read at request time.
 
 ## Development
 
