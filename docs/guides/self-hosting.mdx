@@ -73,24 +73,28 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | yes | Password for the database user `factrove`, database `factrove`, on the `postgres` service |
 | `BETTER_AUTH_SECRET` | yes | Session signing secret, at least 32 characters |
-| `GARAGE_RPC_SECRET` | yes with bundled Garage | 64 hex characters. Garage stores it with the meta volume |
+| `GARAGE_RPC_SECRET` | yes with bundled Garage | 64 hex characters. Replace the placeholder before the first start |
 | `S3_ACCESS_KEY_ID` | yes with bundled Garage | Garage access key id, passed to the API as `AWS_ACCESS_KEY_ID` |
 | `S3_SECRET_ACCESS_KEY` | yes with bundled Garage | Garage secret key, passed to the API as `AWS_SECRET_ACCESS_KEY` |
 | `S3_BUCKET` | no | Bucket name. Default `factrove`. Garage creates it on startup |
 | `S3_REGION` | no | Region string. Default `us-east-1`, which matches `s3_region` in `infra/garage.toml` |
 | `WEB_ORIGIN` | no | Browser origin of the web app. Default `http://localhost:3000` |
 | `API_PUBLIC_ORIGIN` | no | Origin the API writes into absolute API URLs, and the Better Auth base URL. Default `http://localhost:3001` |
-| `PUBLIC_BASE_URL` | no | Origin for viewer URLs and public share links. Default `http://localhost:3000`. When empty, the API uses `WEB_ORIGIN` |
+| `PUBLIC_BASE_URL` | set it whenever the web origin is not `http://localhost:3000` | Origin for viewer URLs and public share links. An empty value becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN` |
 | `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
-| `MARKDOWN_CONVERSION_CONCURRENCY` | no | Markdown workers at once. Default `2`, clamped to 1–4. A non-integer uses the default |
-| `MARKDOWN_CONVERSION_QUEUE` | no | Conversions that may wait. Default `2`, clamped to 0–8. A full queue is `503 CONVERSION_UNAVAILABLE` |
+| `MARKDOWN_CONVERSION_CONCURRENCY` | no | Markdown workers at once. Default `2`, then clamped to 1–4 |
+| `MARKDOWN_CONVERSION_QUEUE` | no | Conversions that may wait. Default `2`, then clamped to 0–8. A full queue is `503 CONVERSION_UNAVAILABLE` |
 
 `PUBLIC_BASE_URL`, `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, and `BROWSER_API_URL` are absolute `http` or `https` origins. No userinfo, path, query, or hash. A trailing slash is dropped. Setting `PUBLIC_BASE_URL` does not start a server or publish the app.
+
+`docker-compose.yml` sets `PUBLIC_BASE_URL` from `${PUBLIC_BASE_URL:-http://localhost:3000}`. An empty value in `.env.docker` becomes `http://localhost:3000` before the API process starts. On this stack the API does not fall back to `WEB_ORIGIN`. If you change the public origin or `WEB_PORT`, set `PUBLIC_BASE_URL` to that same origin. With `WEB_ORIGIN=http://localhost:13000` and `PUBLIC_BASE_URL` empty, viewer and share links still use port 3000. The API uses `WEB_ORIGIN` for those links only when `PUBLIC_BASE_URL` is unset, which is the [from-source](#run-from-source) process with the variable left out of `apps/api/.env`.
+
+`MARKDOWN_CONVERSION_CONCURRENCY` and `MARKDOWN_CONVERSION_QUEUE` are read with `parseInt`. A leading integer is kept, so `1.5` becomes 1 and `2abc` becomes 2. A value with no leading integer, such as `abc`, uses the default 2. An empty value uses 2. The integer is then clamped.
 
 `localhost` and `127.0.0.1` are different hosts. A cookie domain cannot cover either. Keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same host when either one is localhost or an IP address. When those hosts differ and both are domain names, set `AUTH_COOKIE_DOMAIN` to the narrowest parent of `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, and `PUBLIC_BASE_URL`. The API refuses to start when that domain is an IP, a public suffix, or a name that does not cover all three.
 
@@ -105,7 +109,7 @@ API_PUBLIC_ORIGIN=http://localhost:3001
 BROWSER_API_URL=http://localhost:3001
 ```
 
-If you change `WEB_PORT` or `API_PORT`, change those origins to the same host ports.
+If you change `WEB_PORT` or `API_PORT`, set `WEB_ORIGIN`, `PUBLIC_BASE_URL`, `API_PUBLIC_ORIGIN`, and `BROWSER_API_URL` to those host ports. `PUBLIC_BASE_URL` still needs its own value.
 
 ### Values the compose file sets
 
@@ -171,11 +175,15 @@ docker compose --env-file .env.docker -f docker-compose.yml logs migrate api web
 
 Startup of the API process does not migrate. The `migrate` service runs `prisma migrate deploy` from the migrations baked into `factrove-api:local`, then exits.
 
-`docker compose up` creates that container and runs it. A container that already exited successfully is left as it is on the next `up`. After you pull new migrations, run them yourself:
+`docker compose up` creates that container and runs `prisma migrate deploy`. A later `up` or `up -d` starts the service again and runs the deploy again. The process exits when it finishes. `restart: "no"` stops Compose from bringing that exited container back by itself. The next `up` still starts the service. Repeating the deploy is safe: a database that already has the migrations reports that none are pending.
+
+After you pull new migrations, apply them with the upgrade command before the new API serves:
 
 ```bash
 docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
 ```
+
+`up -d` runs that same deploy again. The explicit `run --rm migrate` remains the upgrade step. It applies the migrations before you treat the new API as ready.
 
 `FACTROVE_MIGRATE=1` is an opt-in on the API container: the entrypoint migrates, then serves. Any other value, including empty, serves without migrating. The committed compose file does not set it. Adding the name to `.env.docker` has no effect until the `api` service environment contains `FACTROVE_MIGRATE`. The `migrate` service is the path this file already runs.
 
@@ -218,7 +226,7 @@ To publish a port beyond loopback, change the mapping in `docker-compose.yml` fr
 
 Do not log the `access` or `ticket` query on content URLs. `access` is the signed-in viewer grant. `ticket` is the grant for a password-protected public link. The viewer loads HTML from `API_PUBLIC_ORIGIN` in an iframe with `sandbox="allow-scripts"` and without `allow-same-origin`. There is no separate content hostname. `frame-ancestors` allows `PUBLIC_BASE_URL` and `WEB_ORIGIN`, so those origins must be the ones that frame the API response.
 
-Recreate the containers after origin changes:
+Recreate the containers after origin changes. `up -d` also starts `migrate` and runs `prisma migrate deploy` again, which exits once the database is already current:
 
 ```bash
 docker compose --env-file .env.docker -f docker-compose.yml up -d
@@ -335,7 +343,7 @@ docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
 docker compose --env-file .env.docker -f docker-compose.yml up -d
 ```
 
-`build` refreshes `factrove-api:local` and `factrove-web:local`. `run --rm migrate` applies committed migrations that are not yet in the database. `up -d` recreates the API and the web app on those images. `prisma migrate deploy` is safe to repeat. Keep `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` stable across the upgrade, or existing sessions and share links stop resolving.
+`build` refreshes `factrove-api:local` and `factrove-web:local`. `run --rm migrate` is the deliberate migration step. It applies committed migrations before the new API serves. `up -d` recreates the API and the web app and starts `migrate` again, which runs the same deploy. Both runs are safe to repeat. Keep `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` stable across the upgrade, or existing sessions and share links stop resolving.
 
 Stop writers before a migration that rewrites `artifact` if you are crossing `20261021170000_add_artifact_object_key` from an older build. That migration locks `artifact`. An API process from before it cannot insert or replace content once `object_key` is required. There is no down migration. Rolling back that cutover means stopping the API, copying each current object to `{artifactId}.html` in the same bucket, and restoring the previous schema and application. The previous application reads `{artifactId}.html`.
 
@@ -349,7 +357,7 @@ Stop the API and the web app so a replacement cannot delete an object during the
 docker compose --env-file .env.docker -f docker-compose.yml stop api web
 ```
 
-Dump PostgreSQL from the bundled service. Inside that container, local peer authentication accepts user `factrove`:
+Dump PostgreSQL from the bundled service. Inside that container, local connections use trust authentication, so `pg_dump` accepts user `factrove` without a password:
 
 ```bash
 docker compose --env-file .env.docker -f docker-compose.yml exec -T postgres \
@@ -376,11 +384,11 @@ On AWS or MinIO, copy the bucket with that store's tools. Include every object n
 select id, object_key, size_bytes from artifact order by id;
 ```
 
-Store `BETTER_AUTH_SECRET`, any `SHARE_TOKEN_KEY`, `GARAGE_RPC_SECRET`, and the S3 key pair with the backup, outside the dump. Sessions and share tokens cannot be read without the same auth material. When `SHARE_TOKEN_KEY` is unset, the share key is derived from `BETTER_AUTH_SECRET`. Garage will not open an existing meta volume with a different RPC secret.
+Store `BETTER_AUTH_SECRET`, any `SHARE_TOKEN_KEY`, `GARAGE_RPC_SECRET`, and the S3 key pair with the backup, outside the dump. Sessions and share tokens cannot be read without the same auth material. When `SHARE_TOKEN_KEY` is unset, the share key is derived from `BETTER_AUTH_SECRET`. Keep `GARAGE_RPC_SECRET` with that backup.
 
 Restore by loading that dump and those object bytes, then starting the stack with the same secrets. The dump does not include rows written after it, and it does not recreate objects a later replacement deleted.
 
-Start the stack again with `docker compose --env-file .env.docker -f docker-compose.yml up -d`.
+Start the stack again with `docker compose --env-file .env.docker -f docker-compose.yml up -d`. That starts `migrate` again. `prisma migrate deploy` leaves a database that already contains those migrations unchanged.
 
 ## Run from source
 
@@ -400,7 +408,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL URL. The example is `postgresql://factrove:factrove@127.0.0.1:5432/factrove` |
 | `HOST` / `PORT` | API bind. Default `127.0.0.1` and `3001`. Use `0.0.0.0` when a proxy on another machine must connect |
-| `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, `PUBLIC_BASE_URL` | Same origin rules as the Compose stack |
+| `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, `PUBLIC_BASE_URL` | Same origin shape as the Compose stack. An empty `PUBLIC_BASE_URL` uses `WEB_ORIGIN`. The Compose file substitutes `http://localhost:3000` instead |
 | `NEXT_PUBLIC_API_URL` | Origin baked into the web client at `pnpm build`. Default `http://localhost:3001` |
 | `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
