@@ -1,4 +1,4 @@
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Readable } from "node:stream";
 import { BadRequestException, PayloadTooLargeException } from "@nestjs/common";
 import Busboy from "busboy";
@@ -7,6 +7,11 @@ import { MAX_HTML_BYTES } from "../rendering/html-policy.js";
 type UploadRequest = IncomingMessage & {
   body?: unknown;
   file?: unknown;
+  res?: ServerResponse;
+};
+
+type ServerSocket = NonNullable<IncomingMessage["socket"]> & {
+  destroySoon?: () => void;
 };
 
 type ParsedFile = {
@@ -22,9 +27,11 @@ const PARTS_LIMIT = 12;
 const FIELD_COUNT_LIMIT = 8;
 const FIELD_SIZE_LIMIT = 1024;
 const FILE_COUNT_LIMIT = 2;
-// After a known parse error the response is already sent. Read at most this
-// much of whatever the client still has buffered, then close.
-const DRAIN_CAP_BYTES = 64 * 1024;
+// A rejected upload is discarded, not stored. Destroying as soon as 64 KiB
+// more arrives resets the socket, which drops this error and any earlier
+// response still in the send buffer. An upload that never finishes is closed
+// after this long.
+const DRAIN_TIMEOUT_MS = 5000;
 
 // Busboy decodes a plain filename as UTF-8 and filename* per RFC 5987.
 // That string is the filename. A later %xx pass would turn a literal %22, %0A,
@@ -201,28 +208,82 @@ function headerText(value: string | string[] | undefined): string | undefined {
   return undefined;
 }
 
-function releaseRequest(request: IncomingMessage): void {
+function releaseRequest(request: UploadRequest): void {
+  const response = request.res;
+  // Advertise close before the error headers are written. The socket stays up
+  // until this response finishes, so an earlier pipelined response is not cut off.
+  if (response && !response.headersSent) {
+    response.setHeader("Connection", "close");
+  }
+  const socket = request.socket as ServerSocket | null;
+  if (!socket) {
+    return;
+  }
   request.on("error", () => {});
-  setImmediate(() => {
-    if (request.destroyed || request.readableEnded) {
+  socket.on("error", () => {});
+
+  let started = false;
+  const start = (): void => {
+    if (started) {
       return;
     }
-    let drained = 0;
-    const stop = (): void => {
-      request.removeListener("data", onData);
-      if (!request.destroyed) {
-        request.destroy();
-      }
-    };
-    const onData = (chunk: Buffer): void => {
-      drained += chunk.length;
-      if (drained >= DRAIN_CAP_BYTES) {
-        stop();
-      }
-    };
-    request.on("data", onData);
+    started = true;
+    gracefulClose(request, socket);
+  };
+  // Node calls destroySoon from the response 'finish' handler, after any
+  // earlier response on this connection has been handed to the socket.
+  socket.destroySoon = start;
+  if (response && !response.writableEnded) {
+    response.once("finish", start);
+    response.once("close", start);
+    return;
+  }
+  start();
+}
+
+function gracefulClose(request: IncomingMessage, socket: ServerSocket): void {
+  let requestEnded = request.readableEnded;
+  let closed = false;
+  // FIN is queued behind bytes the socket already accepted, so a slow reader
+  // still receives an earlier response and this error. destroy() discards that
+  // buffer, so it runs only when the upload itself never finishes.
+  if (socket.writable && !socket.writableEnded) {
+    socket.end();
+  }
+  const timer = setTimeout(() => {
+    if (!requestEnded) {
+      finishClose();
+    }
+  }, DRAIN_TIMEOUT_MS);
+  timer.unref();
+
+  const onData = (): void => {
+    // Drop the chunk. Reading it keeps a client that is still sending from
+    // blocking, without retaining the rejected body.
+  };
+  const onEnd = (): void => {
+    requestEnded = true;
+    clearTimeout(timer);
+  };
+  request.on("data", onData);
+  request.on("end", onEnd);
+  request.on("error", () => {});
+  if (!request.readableEnded) {
     request.resume();
-  });
+  }
+
+  function finishClose(): void {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearTimeout(timer);
+    request.removeListener("data", onData);
+    request.removeListener("end", onEnd);
+    if (!socket.destroyed) {
+      socket.destroy();
+    }
+  }
 }
 
 function multipartFailure(error: unknown): Error {

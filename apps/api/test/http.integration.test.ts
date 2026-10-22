@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { Agent, request as httpRequest } from "node:http";
+import { connect as openTcp, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { PrismaClient } from "@prisma/client";
@@ -825,6 +826,33 @@ describe("HTTP API", () => {
     }
     expect(await prisma.artifact.count()).toBe(0);
     expect((await upload(baseUrl, "after-trickle.html", new TextEncoder().encode("<p>after</p>"))).name).toBe("after-trickle");
+  });
+
+  it("returns the JSON 400 for a large invalid upload and keeps an earlier response", async () => {
+    const boundary = "----factrove-large-close";
+    const prefix = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="a.html"\r\nContent-Type: text/html\r\n\r\n`,
+      "utf8",
+    );
+    const suffix = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+    const body = Buffer.concat([prefix, Buffer.alloc(8 * 1024 * 1024, 0x78), suffix]);
+    const rejected = await writeThenRead(baseUrl, "POST", "/api/v1/artifacts", {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+      connection: "keep-alive",
+    }, body);
+    expect(rejected.status).toBe(400);
+    expect(rejected.headers.connection).toBe("close");
+    expect(JSON.parse(rejected.body.toString("utf8")).error.message).toBe("Send exactly one file.");
+
+    const stored = Buffer.alloc(8 * 1024 * 1024, 0x61);
+    const artifact = await upload(baseUrl, "slow.html", stored);
+    const pipelined = await slowPipelinedRead(baseUrl, artifact.id, boundary);
+    expect(pipelined.messages[0]?.status).toBe(200);
+    expect(pipelined.messages[0]?.headers.connection?.toLowerCase()).not.toBe("close");
+    expect(pipelined.messages[0]?.body.equals(stored)).toBe(true);
+    expect(pipelined.messages[1]?.status).toBe(400);
+    expect(pipelined.messages[1]?.headers.connection).toBe("close");
+    expect(JSON.parse(pipelined.messages[1]?.body.toString("utf8") ?? "{}").error.message).toBe("Send exactly one file.");
   });
 
   it("rejects an empty field name before saving create or replace", async () => {
@@ -3314,6 +3342,168 @@ function rawRequest(
     req.on("error", reject);
     req.end(body);
   });
+}
+
+type RawHttpMessage = {
+  status: number;
+  headers: Record<string, string>;
+  body: Buffer;
+};
+
+function writeThenRead(
+  url: string,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body: Buffer,
+): Promise<RawHttpMessage> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const socket = openTcp(Number(target.port), target.hostname, () => {
+      const headerLines = Object.entries({
+        host: `${target.hostname}:${target.port}`,
+        authorization: `Bearer ${ownerApiKey}`,
+        "content-length": String(body.length),
+        ...headers,
+      }).map(([name, value]) => `${name}: ${value}`).join("\r\n");
+      socket.write(`${method} ${path} HTTP/1.1\r\n${headerLines}\r\n\r\n`);
+      writeSocket(socket, body).then(() => {
+        readSocket(socket).then((received) => {
+          const parsed = readHttpMessages(received);
+          const message = parsed[0];
+          if (!message) {
+            reject(new Error(`no response after ${received.length} bytes`));
+            return;
+          }
+          resolve(message);
+        }).catch(reject);
+      }).catch(reject);
+    });
+    socket.on("error", reject);
+  });
+}
+
+function slowPipelinedRead(
+  url: string,
+  artifactId: string,
+  boundary: string,
+): Promise<{ messages: RawHttpMessage[] }> {
+  const target = new URL(url);
+  const postBody = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="a.html"\r\nContent-Type: text/html\r\n\r\nhello\r\n--${boundary}--\r\n`,
+    "utf8",
+  );
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const socket = openTcp(Number(target.port), target.hostname, () => {
+      const common = `Host: ${target.hostname}:${target.port}\r\nAuthorization: Bearer ${ownerApiKey}\r\n`;
+      socket.write(
+        `GET /api/v1/artifacts/${artifactId}/content HTTP/1.1\r\n${common}Connection: keep-alive\r\n\r\n` +
+        `POST /api/v1/artifacts HTTP/1.1\r\n${common}Content-Type: multipart/form-data; boundary=${boundary}\r\nContent-Length: ${postBody.length}\r\nConnection: keep-alive\r\n\r\n`,
+      );
+      writeSocket(socket, postBody).catch((error: unknown) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        }
+      });
+    });
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const received = Buffer.concat(chunks).length;
+      socket.destroy();
+      reject(new Error(`slow read stalled after ${received} bytes`));
+    }, 20000);
+    socket.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      socket.pause();
+      setTimeout(() => {
+        if (!socket.destroyed) {
+          socket.resume();
+        }
+      }, 10);
+    });
+    socket.on("end", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve({ messages: readHttpMessages(Buffer.concat(chunks)) });
+    });
+    socket.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  });
+}
+
+function writeSocket(socket: Socket, body: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let offset = 0;
+    const write = (): void => {
+      while (offset < body.length) {
+        const end = Math.min(offset + 64 * 1024, body.length);
+        const ok = socket.write(body.subarray(offset, end));
+        offset = end;
+        if (!ok) {
+          socket.once("drain", write);
+          return;
+        }
+      }
+      resolve();
+    };
+    socket.on("error", reject);
+    write();
+  });
+}
+
+function readSocket(socket: Socket): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("end", () => resolve(Buffer.concat(chunks)));
+    socket.on("error", reject);
+  });
+}
+
+function readHttpMessages(buffer: Buffer): RawHttpMessage[] {
+  const messages: RawHttpMessage[] = [];
+  let offset = 0;
+  while (offset + 4 < buffer.length) {
+    const headerEnd = buffer.indexOf("\r\n\r\n", offset);
+    if (headerEnd === -1) {
+      break;
+    }
+    const head = buffer.toString("latin1", offset, headerEnd);
+    const status = Number(/^HTTP\/1\.1 (\d+)/.exec(head)?.[1] ?? 0);
+    const headers: Record<string, string> = {};
+    for (const line of head.split("\r\n").slice(1)) {
+      const split = line.indexOf(":");
+      if (split > 0) {
+        headers[line.slice(0, split).trim().toLowerCase()] = line.slice(split + 1).trim();
+      }
+    }
+    const length = Number(headers["content-length"] ?? Number.NaN);
+    if (!Number.isFinite(length)) {
+      break;
+    }
+    const bodyStart = headerEnd + 4;
+    if (buffer.length < bodyStart + length) {
+      break;
+    }
+    messages.push({ status, headers, body: buffer.subarray(bodyStart, bodyStart + length) });
+    offset = bodyStart + length;
+  }
+  return messages;
 }
 
 function tricklingMultipart(
