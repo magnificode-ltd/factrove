@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE } from "./index.js";
 
 const ARTIFACT_ID = "11111111-1111-4111-8111-111111111111";
 const SHARE_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -104,6 +105,7 @@ const REQUEST_EXAMPLES: Record<string, unknown> = {
     password: "replace-this-password",
   },
   CreateShareRequest: { password: "example-link-password" },
+  ShareWithOrganizationRequest: { accessType: "org_shared" },
   PublicUnlockRequest: { password: "example-link-password" },
 };
 
@@ -158,6 +160,15 @@ export function responseExampleFor(
 
 function successExample(operationId: string, schemaName: string | undefined): unknown | undefined {
   if (schemaName === "ArtifactEnvelope") {
+    if (operationId === "shareArtifactWithOrganization") {
+      return {
+        artifact: {
+          ...artifact,
+          organizationId: "org_example",
+          accessType: "org_shared",
+        },
+      };
+    }
     return { artifact };
   }
   if (schemaName === "ArtifactListEnvelope") {
@@ -231,6 +242,9 @@ function errorBody(code: string, description: string): { code: string; message: 
 }
 
 function invalidRequestMessage(description: string): string {
+  if (/shares a private artifact/i.test(description)) {
+    return SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE;
+  }
   if (/not a UUID/i.test(description)) {
     return "Artifact id must be a UUID.";
   }

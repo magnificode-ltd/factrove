@@ -450,6 +450,6 @@ Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#
 
 `pnpm infra:down` stops the dev PostgreSQL and Garage from `compose.yaml` and keeps their volumes. `pnpm infra:reset` deletes those dev volumes after you confirm. Neither command touches project `factrove-selfhost`.
 
-CLI credentials in `~/.factrove` stay until you delete those files. There is no artifact-delete command and no route that changes access after upload. See [Current limits](/concepts#current-limits).
+CLI credentials in `~/.factrove` stay until you delete those files. There is no artifact-delete command. A private artifact can be shared with the current organization from the web app, or with `PATCH /api/v1/artifacts/{id}` and `{ "accessType": "org_shared", "organizationId": "<current organization id>" }`. The CLI does not change access on an existing artifact. See [Current limits](/concepts#current-limits).
 
 Failures during startup are collected in [Troubleshooting](/guides/troubleshooting).

@@ -69,6 +69,8 @@ export interface FactroveClient {
   uploadArtifact(input: UploadArtifactInput): Promise<ArtifactEnvelope>;
   /** Replaces the current HTML for an existing artifact. Does not change access or the share token. */
   replaceArtifactContent(id: string, input: ReplaceArtifactContentInput): Promise<ArtifactEnvelope>;
+  /** Shares a private artifact with the caller's current organization. Does not change a public share. */
+  shareArtifactWithOrganization(id: string): Promise<ArtifactEnvelope>;
   listArtifacts(input?: { view?: "mine" | "org" }): Promise<ArtifactListEnvelope>;
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
@@ -221,6 +223,16 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
       if (name !== undefined) form.append("name", name);
       return request(`/artifacts/${encodeURIComponent(id)}/content`, { method: "PUT", body: form }, artifactEnvelopeSchema);
     },
+    shareArtifactWithOrganization: (id) =>
+      request(
+        `/artifacts/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ accessType: "org_shared" })
+        },
+        artifactEnvelopeSchema
+      ),
     listArtifacts: ({ view = "mine" } = {}) => {
       const query = new URLSearchParams({ view });
       return request(`/artifacts?${query.toString()}`, { method: "GET" }, artifactListEnvelopeSchema);

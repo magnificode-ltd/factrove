@@ -120,6 +120,7 @@ function LibraryBody({ state, now }: { state: LibraryModel; now: number }) {
           artifact={artifact}
           now={now}
           canShare={artifact.creatorUserId === state.context.user.id}
+          organization={state.context.organization}
         />
       ))}
     </ul>

@@ -73,6 +73,29 @@ export class ArtifactsRepository {
     return updated.count === 1;
   }
 
+  // Switches private -> org_shared for this creator and assigns the current organization.
+  // The predicate is the concurrency control: a second request matches no row.
+  // Share columns, content, and createdAt are not part of the write.
+  async shareWithOrganization(input: {
+    id: string;
+    creatorUserId: string;
+    organizationId: string;
+  }): Promise<boolean> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: {
+        id: input.id,
+        creatorUserId: input.creatorUserId,
+        accessType: "private",
+      },
+      data: {
+        accessType: "org_shared",
+        organizationId: input.organizationId,
+        updatedAt: new Date(),
+      },
+    });
+    return updated.count === 1;
+  }
+
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.update({
       where: { id },

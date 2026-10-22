@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export const TEST_AUTH_SECRET = "factrove-test-auth-secret-32chars-min";
@@ -64,6 +64,49 @@ export async function signUpWithApiKey(
     apiKey: created.key,
     prefix: created.start ?? created.key.slice(0, 12),
     keyId: created.id,
+  };
+}
+
+export async function createUserWithApiKey(
+  prisma: PrismaClient,
+  input: { email: string; name: string; keyName: string },
+): Promise<SignedInUser> {
+  const userId = randomUUID();
+  const now = new Date();
+  await prisma.user.create({
+    data: {
+      id: userId,
+      name: input.name,
+      email: input.email,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  const apiKey = `ftrv_${randomBytes(32).toString("base64url")}`;
+  const keyId = randomUUID();
+  await prisma.apikey.create({
+    data: {
+      id: keyId,
+      name: input.keyName,
+      start: apiKey.slice(0, 12),
+      prefix: "ftrv_",
+      referenceId: userId,
+      key: createHash("sha256").update(apiKey).digest("base64url"),
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  return {
+    userId,
+    email: input.email,
+    name: input.name,
+    cookie: "",
+    apiKey,
+    prefix: apiKey.slice(0, 12),
+    keyId,
   };
 }
 

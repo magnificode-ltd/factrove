@@ -49,7 +49,7 @@ import { browserOrigins } from "../src/sharing/public-origin.js";
 import { SHARE_TICKET_MAX_USES } from "../src/sharing/share-grant.js";
 import { createShareToken, hashShareToken } from "../src/sharing/share-link.js";
 import { deriveShareTokenKey, encryptShareToken } from "../src/sharing/share-token-cipher.js";
-import { addMembership, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
+import { addMembership, createUserWithApiKey, signUpWithApiKey, TEST_AUTH_SECRET, type SignedInUser } from "./auth-session.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
@@ -2166,6 +2166,257 @@ describe("HTTP API", () => {
     }
   });
 
+  it("shares a private artifact with the current organization and hides it from everyone else", async () => {
+    const bytes = new TextEncoder().encode("<p>share-org</p>");
+    const artifact = await upload(baseUrl, "share-org.html", bytes, { name: "Share org" });
+    expect(artifact.accessType).toBe("private");
+    expect(artifact.organizationId).toBe(localOrganizationFixture.id);
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+
+    const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "example-link-password" }),
+    })).json());
+    const shareUrl = created.share.shareUrl;
+    expect(shareUrl).toBeTruthy();
+    const protectedRow = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(protectedRow.shareTokenHash).not.toBeNull();
+    expect(protectedRow.sharePasswordHash).not.toBeNull();
+
+    const stranger = await createUserWithApiKey(prisma, {
+      email: "org-share-stranger@example.invalid",
+      name: "Stranger",
+      keyName: "org-share-stranger",
+    });
+    const reader = await createUserWithApiKey(prisma, {
+      email: "org-share-reader@example.invalid",
+      name: "Reader",
+      keyName: "org-share-reader",
+    });
+    await addMembership(prisma, reader.userId, localOrganizationFixture.id);
+    const missingId = "00000000-0000-4000-8000-000000000077";
+    const missing = await patchAccess(baseUrl, missingId, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    const strangerDenied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: stranger.apiKey });
+    const readerDenied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: reader.apiKey });
+    expect(missing.status).toBe(404);
+    expect(strangerDenied.status).toBe(404);
+    expect(readerDenied.status).toBe(404);
+    const missingError = await errorOf(missing);
+    expect(await errorOf(strangerDenied)).toEqual(missingError);
+    expect(await errorOf(readerDenied)).toEqual(missingError);
+    const readerDetail = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    expect(readerDetail.status).toBe(404);
+    expect(await errorOf(readerDetail)).toEqual(missingError);
+
+    const anonymous = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" });
+    expect(anonymous.status).toBe(401);
+    expect(await errorOf(anonymous)).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
+    });
+
+    const privateBody = await patchAccess(baseUrl, artifact.id, { accessType: "private" }, { apiKey: owner.apiKey });
+    expect(privateBody.status).toBe(400);
+    expect(await errorOf(privateBody)).toEqual({
+      code: "INVALID_REQUEST",
+      message: 'Send { "accessType": "org_shared" }. This shares a private artifact with the current organization.',
+    });
+    const extra = await patchAccess(
+      baseUrl,
+      artifact.id,
+      { accessType: "org_shared", organizationId: "other" },
+      { apiKey: owner.apiKey },
+    );
+    expect(extra.status).toBe(400);
+    expect((await errorOf(extra)).code).toBe("INVALID_REQUEST");
+    const textBody = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${owner.apiKey}`, "content-type": "text/plain" },
+      body: "org_shared",
+    });
+    expect(textBody.status).toBe(400);
+
+    const unchanged = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(unchanged.accessType).toBe("private");
+    expect(unchanged.organizationId).toBe(localOrganizationFixture.id);
+    expect(unchanged.shareTokenHash).toBe(protectedRow.shareTokenHash);
+    expect(unchanged.sharePasswordHash).toBe(protectedRow.sharePasswordHash);
+    expect(unchanged.objectKey).toBe(before.objectKey);
+    expect(unchanged.contentRevision).toBe(before.contentRevision);
+
+    const otherOrgId = "org-share-other";
+    await prisma.organization.create({
+      data: { id: otherOrgId, name: "Other Organization", slug: "org-share-other", createdAt: new Date() },
+    });
+    try {
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { organizationId: null } });
+
+    const shared = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(shared.status).toBe(200);
+    const body = artifactEnvelopeSchema.parse(await shared.json());
+    expect(body.artifact.id).toBe(artifact.id);
+    expect(body.artifact.accessType).toBe("org_shared");
+    expect(body.artifact.organizationId).toBe(localOrganizationFixture.id);
+    expect(body.artifact.shared).toBe(true);
+    expect(body.artifact.passwordProtected).toBe(true);
+    expect(body.artifact.name).toBe("Share org");
+    expectPlainContentUrl(body.artifact.contentUrl, artifact.id);
+
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.accessType).toBe("org_shared");
+    expect(row.organizationId).toBe(localOrganizationFixture.id);
+    expect(row.objectKey).toBe(before.objectKey);
+    expect(row.contentRevision).toBe(before.contentRevision);
+    expect(row.sizeBytes).toBe(before.sizeBytes);
+    expect(row.shareToken).toBeTruthy();
+    expect(row.shareTokenHash).not.toBeNull();
+    expect(row.sharePasswordHash).not.toBeNull();
+    const share = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`)).json());
+    expect(share.share.shareUrl).toBe(shareUrl);
+    expect(share.share.passwordProtected).toBe(true);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(bytes));
+
+    const again = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(again.status).toBe(200);
+    const repeated = artifactEnvelopeSchema.parse(await again.json());
+    expect(repeated.artifact.accessType).toBe("org_shared");
+    expect(repeated.artifact.organizationId).toBe(localOrganizationFixture.id);
+    expect(repeated.artifact.updatedAt).toBe(body.artifact.updatedAt);
+    const afterRepeat = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(afterRepeat.updatedAt.toISOString()).toBe(row.updatedAt.toISOString());
+    expect(afterRepeat.shareTokenHash).toBe(row.shareTokenHash);
+    expect(afterRepeat.sharePasswordHash).toBe(row.sharePasswordHash);
+
+    const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${reader.apiKey}` },
+    });
+    expect(readable.status).toBe(200);
+    const readerWrite = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: reader.apiKey });
+    expect(readerWrite.status).toBe(404);
+    expect(await errorOf(readerWrite)).toEqual(missingError);
+    const orgList = artifactListEnvelopeSchema.parse(
+      await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts?view=org`, {
+        headers: { authorization: `Bearer ${reader.apiKey}` },
+      })).json(),
+    );
+    expect(orgList.items.map((item) => item.id)).toContain(artifact.id);
+
+    const back = await patchAccess(baseUrl, artifact.id, { accessType: "private" }, { apiKey: owner.apiKey });
+    expect(back.status).toBe(400);
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).accessType).toBe("org_shared");
+
+    await prisma.artifact.update({ where: { id: artifact.id }, data: { organizationId: otherOrgId } });
+    const parked = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const stay = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(stay.status).toBe(200);
+    const stayed = artifactEnvelopeSchema.parse(await stay.json());
+    expect(stayed.artifact.accessType).toBe("org_shared");
+    expect(stayed.artifact.organizationId).toBe(otherOrgId);
+    const parkedAfter = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(parkedAfter.updatedAt.toISOString()).toBe(parked.updatedAt.toISOString());
+    expect(parkedAfter.shareTokenHash).toBe(row.shareTokenHash);
+    expect(parkedAfter.sharePasswordHash).toBe(row.sharePasswordHash);
+    } finally {
+      await prisma.artifact.updateMany({
+        where: { organizationId: otherOrgId },
+        data: { organizationId: localOrganizationFixture.id },
+      });
+      await prisma.organization.deleteMany({ where: { id: otherOrgId } });
+    }
+  });
+
+  it("refuses to share a private artifact when the caller has no current organization", async () => {
+    const isolated = new MemoryBlobStore();
+    const noOrg = await createApp(config, isolated);
+    try {
+      await noOrg.listen(0, "127.0.0.1");
+      const url = await noOrg.getUrl();
+      const solo = await createUserWithApiKey(noOrg.get(PrismaService), {
+        email: "no-org-share@example.invalid",
+        name: "Solo",
+        keyName: "solo",
+      });
+      const created = await upload(url, "solo.html", new TextEncoder().encode("<p>solo</p>"), {}, solo.apiKey);
+      expect(created.organizationId).toBeNull();
+      const rejected = await patchAccess(url, created.id, { accessType: "org_shared" }, { apiKey: solo.apiKey });
+      expect(rejected.status).toBe(400);
+      expect(await errorOf(rejected)).toEqual({
+        code: "ORGANIZATION_REQUIRED",
+        message: "Organization sharing requires membership in an organization.",
+      });
+      const row = await noOrg.get(PrismaService).artifact.findUniqueOrThrow({ where: { id: created.id } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+    } finally {
+      await noOrg.close();
+    }
+  });
+
+  it("accepts an owner cookie share and rejects a cross-site cookie write", async () => {
+    const artifact = await upload(baseUrl, "cookie-share.html", new TextEncoder().encode("<p>cookie</p>"));
+    const denied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { origin: "https://evil.example" },
+    });
+    expect(denied.status).toBe(403);
+    expect((await errorOf(denied)).code).toBe("FORBIDDEN");
+    const missingOrigin = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { cookie: owner.cookie });
+    expect(missingOrigin.status).toBe(403);
+    const referer = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { referer: "http://localhost:3000/artifacts" },
+    });
+    expect(referer.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await referer.json()).artifact.accessType).toBe("org_shared");
+
+    const second = await upload(baseUrl, "cookie-origin.html", new TextEncoder().encode("<p>origin</p>"));
+    const allowed = await patchAccess(baseUrl, second.id, { accessType: "org_shared" }, {
+      cookie: owner.cookie,
+      headers: { origin: "http://localhost:3000" },
+    });
+    expect(allowed.status).toBe(200);
+    const keyWithoutOrigin = await upload(baseUrl, "key-share.html", new TextEncoder().encode("<p>key</p>"));
+    const keyed = await patchAccess(baseUrl, keyWithoutOrigin.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(keyed.status).toBe(200);
+
+    const preflight = await ownerFetch(`${baseUrl}/api/v1/artifacts/${second.id}`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-methods")).toContain("PATCH");
+    expect(preflight.headers.get("access-control-allow-credentials")).toBe("true");
+  });
+
+  it("keeps one organization-shared row when two shares run together", async () => {
+    const artifact = await upload(baseUrl, "race.html", new TextEncoder().encode("<p>race</p>"));
+    const [first, second] = await Promise.all([
+      patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+      patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey }),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const left = artifactEnvelopeSchema.parse(await first.json()).artifact;
+    const right = artifactEnvelopeSchema.parse(await second.json()).artifact;
+    expect(left.accessType).toBe("org_shared");
+    expect(right.accessType).toBe("org_shared");
+    expect(left.organizationId).toBe(localOrganizationFixture.id);
+    expect(right.organizationId).toBe(localOrganizationFixture.id);
+    const rows = await prisma.artifact.findMany({ where: { id: artifact.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.accessType).toBe("org_shared");
+    expect(rows[0]?.organizationId).toBe(localOrganizationFixture.id);
+    expect(rows[0]?.shareTokenHash).toBeNull();
+  });
+
   it("keeps API keys hashed, revocable, and session-only to manage", async () => {
     const listed = await globalThis.fetch(`${baseUrl}/api/auth/api-key/list`, { headers: { cookie: owner.cookie } });
     expect(listed.status).toBe(200);
@@ -4043,6 +4294,29 @@ function settledWithin<T>(work: Promise<T>, milliseconds: number): Promise<T> {
 async function readContent(url: string): Promise<Uint8Array> {
   const response = await ownerFetch(url);
   return new Uint8Array(await response.arrayBuffer());
+}
+
+function patchAccess(
+  url: string,
+  id: string,
+  body: unknown,
+  init: { apiKey?: string | null; cookie?: string; headers?: Record<string, string> } = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (init.apiKey) {
+    headers.set("authorization", `Bearer ${init.apiKey}`);
+  }
+  if (init.cookie) {
+    headers.set("cookie", init.cookie);
+  }
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  return globalThis.fetch(`${url}/api/v1/artifacts/${id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
 }
 
 function postCookieFile(

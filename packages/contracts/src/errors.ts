@@ -8,7 +8,8 @@ export const apiErrorCatalog = [
   {
     status: 400,
     code: "ORGANIZATION_REQUIRED",
-    description: "The caller asked for org_shared access but has no current organization membership."
+    description:
+      "The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} both use this code."
   },
   {
     status: 401,

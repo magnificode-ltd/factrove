@@ -1,13 +1,20 @@
+"use client";
+
+import { useState } from "react";
+import type { AccessType } from "@factrove/contracts";
 import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { CopyButton } from "@/components/copy-button";
+import { OrgShareControl } from "@/components/org-share-control";
 import { ShareControl } from "@/components/share-control";
 import { Button } from "@/components/ui/button";
 import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
 
 export function ViewerScreen({ state }: { state: ViewerModel }) {
+  const initialAccess = state.status === "ready" ? state.artifact.accessType : "private";
+  const [accessType, setAccessType] = useState<AccessType>(initialAccess);
   const title =
     state.status === "ready"
       ? artifactLabel(state.artifact)
@@ -20,8 +27,16 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <ViewerBar
         title={title}
-        meta={state.status === "ready" ? <ViewerFacts state={state} /> : null}
-        tools={state.status === "ready" ? <ViewerTools state={state} /> : null}
+        meta={state.status === "ready" ? <ViewerFacts state={state} accessType={accessType} /> : null}
+        tools={
+          state.status === "ready" ? (
+            <ViewerTools
+              state={state}
+              accessType={accessType}
+              onShared={(next) => setAccessType(next)}
+            />
+          ) : null
+        }
       />
       <main className="min-h-0 flex-1 bg-white">
         {state.status === "ready" ? <ReadyArtifact state={state} /> : <ViewerNotice state={state} />}
@@ -30,13 +45,28 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
   );
 }
 
-function ViewerFacts({ state }: { state: Extract<ViewerModel, { status: "ready" }> }) {
+function ViewerFacts({
+  state,
+  accessType
+}: {
+  state: Extract<ViewerModel, { status: "ready" }>;
+  accessType: AccessType;
+}) {
   const { artifact } = state;
   const uploaded = formatUploadedAt(artifact.uploadedAt);
   return (
     <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
       <code className="font-mono text-[13px] text-ink">{artifact.id}</code>
-      <span>{accessLabel(artifact.accessType)}</span>
+      <span
+        id={`artifact-access-${artifact.id}`}
+        tabIndex={-1}
+        data-testid="artifact-access"
+        data-access={accessType}
+        aria-live="polite"
+        className="rounded-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+      >
+        {accessLabel(accessType)}
+      </span>
       <time dateTime={artifact.uploadedAt} title={uploaded}>
         <span className="sr-only">{uploaded}</span>
         <span aria-hidden="true">{formatRelativeTime(artifact.uploadedAt)}</span>
@@ -46,11 +76,28 @@ function ViewerFacts({ state }: { state: Extract<ViewerModel, { status: "ready" 
   );
 }
 
-function ViewerTools({ state }: { state: Extract<ViewerModel, { status: "ready" }> }) {
+function ViewerTools({
+  state,
+  accessType,
+  onShared
+}: {
+  state: Extract<ViewerModel, { status: "ready" }>;
+  accessType: AccessType;
+  onShared: (accessType: AccessType) => void;
+}) {
   const { artifact } = state;
   const share = state.share ?? null;
+  const organization = state.organization ?? null;
+  const showOrgShare = state.owner === true && accessType === "private" && organization !== null;
   return (
     <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+      {showOrgShare ? (
+        <OrgShareControl
+          artifactId={artifact.id}
+          organizationName={organization.name}
+          onShared={(next) => onShared(next.accessType)}
+        />
+      ) : null}
       {share ? (
         <ShareControl artifactId={artifact.id} initial={share} viewerUrl={artifact.viewerUrl} showCopyLink />
       ) : (

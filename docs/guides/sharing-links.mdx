@@ -3,7 +3,7 @@ title: Sharing links
 description: Create public artifact links, optionally protect them with a password, and understand unlock, lockout, and Retry-After.
 ---
 
-Artifacts use private or organization-shared access. The owner can separately enable a public link, optionally protected by a password. Organization members can read an `org_shared` artifact without that link. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
+Artifacts use private or organization-shared access. The owner of a private artifact can share it with the current organization from the viewer. That switch does not create, change, or remove a public link. The owner can separately enable a public link, optionally protected by a password. Organization members can read an `org_shared` artifact without that link. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
 
 ## Create and revoke a link
 

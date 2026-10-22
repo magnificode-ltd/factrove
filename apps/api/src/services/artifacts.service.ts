@@ -7,6 +7,8 @@ import {
   ARTIFACT_NAME_MESSAGE,
   createShareRequestSchema,
   normalizeArtifactName,
+  SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  shareWithOrganizationRequestSchema,
   publicArtifactSchema,
   publicUnlockRequestSchema,
   shareStateSchema,
@@ -154,6 +156,41 @@ export class ArtifactsService {
 
     const replaced = await this.publishReplacement(record, upload.bytes, name);
     return this.toDto(replaced, false);
+  }
+
+  // Owner only. private -> org_shared in the caller's current organization.
+  // Already org_shared is a 200 with no write, so a repeat does not move the organization
+  // or touch the share token. The conditional update lets concurrent requests both succeed.
+  async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
+    const actor = await this.actors.requireActor(request);
+    const record = await this.artifacts.findById(id);
+    if (!record || actor.user.id !== record.creatorUserId) {
+      throw artifactNotFound();
+    }
+    readShareWithOrganizationBody(readBody());
+    if (record.accessType === "org_shared") {
+      return this.toDto(record, !this.actors.hasCredentialHeader(request));
+    }
+    if (actor.organization === null) {
+      throw new ApiErrorException(
+        400,
+        "ORGANIZATION_REQUIRED",
+        "Organization sharing requires membership in an organization.",
+      );
+    }
+    await this.artifacts.shareWithOrganization({
+      id: record.id,
+      creatorUserId: actor.user.id,
+      organizationId: actor.organization.id,
+    });
+    const current = await this.artifacts.findById(record.id);
+    if (!current || current.creatorUserId !== actor.user.id) {
+      throw artifactNotFound();
+    }
+    if (current.accessType !== "org_shared") {
+      throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
+    }
+    return this.toDto(current, !this.actors.hasCredentialHeader(request));
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -740,6 +777,13 @@ function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
 
 function unlockBusy(): ApiErrorException {
   return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
+}
+
+function readShareWithOrganizationBody(body: unknown): void {
+  const parsed = shareWithOrganizationRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE);
+  }
 }
 
 function readCreateShareInput(body: unknown): CreateShareRequest {

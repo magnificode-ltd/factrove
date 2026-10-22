@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
+import { Body, CanActivate, Controller, Delete, Get, HttpCode, Inject, Injectable, Param, Patch, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors, type ExecutionContext, type NestInterceptor } from "@nestjs/common";
 import {
   artifactDtoSchema,
   artifactViewSchema,
@@ -74,6 +74,13 @@ export class ArtifactsController {
     @Body() body: unknown,
   ): Promise<ArtifactEnvelope> {
     const artifact = await this.artifacts.replaceContent(request, parseArtifactId(id), file, body);
+    return { artifact: artifactDtoSchema.parse(artifact) };
+  }
+
+  // Owner only. private -> org_shared in the caller's current organization. Share columns stay put.
+  @Patch(":id")
+  async shareWithOrganization(@Req() request: JsonRequest, @Param("id") id: string): Promise<ArtifactEnvelope> {
+    const artifact = await this.artifacts.shareWithOrganization(request, parseArtifactId(id), () => jsonBody(request));
     return { artifact: artifactDtoSchema.parse(artifact) };
   }
 

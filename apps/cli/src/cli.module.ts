@@ -45,6 +45,7 @@ function lazyClient(config: CliConfigService): FactroveClient {
     getContext: () => resolve().getContext(),
     uploadArtifact: (input) => resolve().uploadArtifact(input),
     replaceArtifactContent: (id, input) => resolve().replaceArtifactContent(id, input),
+    shareArtifactWithOrganization: (id) => resolve().shareArtifactWithOrganization(id),
     listArtifacts: (input) => resolve().listArtifacts(input),
     getArtifact: (id) => resolve().getArtifact(id),
     getArtifactContent: (id, input) => resolve().getArtifactContent(id, input),

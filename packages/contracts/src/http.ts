@@ -14,6 +14,8 @@ import {
   contextEnvelopeSchema,
   createShareRequestSchema,
   healthEnvelopeSchema,
+  SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  shareWithOrganizationRequestSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   publicUnlockRequestSchema,
@@ -202,6 +204,7 @@ export const namedSchemas: Record<string, z.ZodType> = {
   HealthEnvelope: healthEnvelopeSchema,
   ShareEnvelope: shareEnvelopeSchema,
   CreateShareRequest: createShareRequestSchema,
+  ShareWithOrganizationRequest: shareWithOrganizationRequestSchema,
   PublicArtifactEnvelope: publicArtifactEnvelopeSchema,
   PublicUnlockRequest: publicUnlockRequestSchema,
   PublicUnlockEnvelope: publicUnlockEnvelopeSchema,
@@ -470,6 +473,42 @@ export const httpOperations: HttpOperation[] = [
         description: "Object storage failed before the row was updated. Code `STORAGE_UNAVAILABLE`.",
         schemaName: "ApiError"
       }
+    }
+  },
+  {
+    operationId: "shareArtifactWithOrganization",
+    method: "patch",
+    path: "/api/v1/artifacts/{id}",
+    tags: ["Artifacts"],
+    summary: "Share a private artifact with the current organization",
+    description:
+      "Owner only. JSON body `{ \"accessType\": \"org_shared\" }` switches a private artifact to `org_shared` and sets `organizationId` to the caller's current organization. The update matches the id, the creator, and `accessType` private, so concurrent requests leave one organization-shared row. An artifact that is already `org_shared` returns 200 and does not change its organization, share token, or share password. This route does not create or remove a public share, and it does not change an organization-shared artifact back to private. Cookie-authenticated writes need Origin or Referer to be WEB_ORIGIN or PUBLIC_BASE_URL.",
+    security: "owner",
+    pathParameters: [artifactIdParam],
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: "Share the artifact with the caller's current organization.",
+      schema: shareWithOrganizationRequestSchema,
+      schemaName: "ShareWithOrganizationRequest"
+    },
+    responses: {
+      "200": {
+        description: "The artifact is org_shared. A repeat request returns the current artifact without writing.",
+        schema: artifactEnvelopeSchema,
+        schemaName: "ArtifactEnvelope"
+      },
+      "400": {
+        description: `This route shares a private artifact with the current organization. Any other body, including accessType private, is \`400 INVALID_REQUEST\` with message \`${SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE}\` A private artifact and no current organization is \`400 ORGANIZATION_REQUIRED\` and the row stays private. An id that is not a UUID is also \`400 INVALID_REQUEST\`.`,
+        schemaName: "ApiError"
+      },
+      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": {
+        description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "500": apiErrorResponse
     }
   },
   {
