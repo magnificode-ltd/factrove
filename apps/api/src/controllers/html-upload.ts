@@ -27,11 +27,11 @@ const PARTS_LIMIT = 12;
 const FIELD_COUNT_LIMIT = 8;
 const FIELD_SIZE_LIMIT = 1024;
 const FILE_COUNT_LIMIT = 2;
-// A rejected upload is discarded, not stored. Destroying as soon as 64 KiB
-// more arrives resets the socket, which drops this error and any earlier
-// response still in the send buffer. An upload that never finishes is closed
-// after this long.
-const DRAIN_TIMEOUT_MS = 5000;
+// A rejected upload is discarded, not stored. The deadline starts when the
+// parse error is known and destroys the socket whether or not the body or
+// this response ever finishes. Inside that window a progressing reader still
+// gets a FIN queued after this response, instead of a reset at 64 KiB.
+export const REJECT_DEADLINE_MS = 6_000;
 
 // Busboy decodes a plain filename as UTF-8 and filename* per RFC 5987.
 // That string is the filename. A later %xx pass would turn a literal %22, %0A,
@@ -216,73 +216,99 @@ function releaseRequest(request: UploadRequest): void {
     response.setHeader("Connection", "close");
   }
   const socket = request.socket as ServerSocket | null;
-  if (!socket) {
+  if (!socket || socket.destroyed) {
     return;
   }
-  request.on("error", () => {});
-  socket.on("error", () => {});
 
-  let started = false;
-  const start = (): void => {
-    if (started) {
-      return;
-    }
-    started = true;
-    gracefulClose(request, socket);
-  };
-  // Node calls destroySoon from the response 'finish' handler, after any
-  // earlier response on this connection has been handed to the socket.
-  socket.destroySoon = start;
-  if (response && !response.writableEnded) {
-    response.once("finish", start);
-    response.once("close", start);
-    return;
-  }
-  start();
-}
+  const onError = (): void => {};
+  request.on("error", onError);
+  socket.on("error", onError);
 
-function gracefulClose(request: IncomingMessage, socket: ServerSocket): void {
-  let requestEnded = request.readableEnded;
-  let closed = false;
-  // FIN is queued behind bytes the socket already accepted, so a slow reader
-  // still receives an earlier response and this error. destroy() discards that
-  // buffer, so it runs only when the upload itself never finishes.
-  if (socket.writable && !socket.writableEnded) {
-    socket.end();
-  }
-  const timer = setTimeout(() => {
-    if (!requestEnded) {
-      finishClose();
-    }
-  }, DRAIN_TIMEOUT_MS);
-  timer.unref();
+  let settled = false;
+  let destroying = false;
+  let graceful = false;
+  let peerEnded = socket.readableEnded;
+  // One deadline for every rejected connection. It does not wait for the body
+  // to end or for this response to finish, so a half-open client and a client
+  // that never reads an earlier pipelined response are both released.
+  const deadline = setTimeout(() => {
+    destroySocket();
+  }, REJECT_DEADLINE_MS);
+  deadline.unref();
 
   const onData = (): void => {
     // Drop the chunk. Reading it keeps a client that is still sending from
     // blocking, without retaining the rejected body.
   };
-  const onEnd = (): void => {
-    requestEnded = true;
-    clearTimeout(timer);
+  const onPeerEnd = (): void => {
+    peerEnded = true;
+    if (graceful) {
+      destroySocket();
+    }
   };
-  request.on("data", onData);
-  request.on("end", onEnd);
-  request.on("error", () => {});
-  if (!request.readableEnded) {
-    request.resume();
-  }
+  const onSocketClose = (): void => {
+    settle();
+  };
 
-  function finishClose(): void {
-    if (closed) {
+  request.on("data", onData);
+  socket.on("end", onPeerEnd);
+  socket.on("close", onSocketClose);
+  if (response && !response.writableEnded) {
+    response.once("finish", beginGraceful);
+    response.once("close", beginGraceful);
+  } else {
+    beginGraceful();
+  }
+  // Node calls destroySoon from the response 'finish' handler, after any
+  // earlier response on this connection has been handed to the socket.
+  // Connection: close makes that call the socket's normal final destruction.
+  // Replacing it here keeps the FIN behind bytes a progressing reader still
+  // has to pull. The deadline, or the peer ending after that FIN, destroys.
+  socket.destroySoon = () => {
+    beginGraceful();
+  };
+
+  function beginGraceful(): void {
+    if (settled || graceful || socket.destroyed) {
       return;
     }
-    closed = true;
-    clearTimeout(timer);
+    graceful = true;
+    if (socket.writable && !socket.writableEnded) {
+      socket.end();
+    }
+    if (!request.readableEnded) {
+      request.resume();
+    }
+    if (peerEnded) {
+      destroySocket();
+    }
+  }
+
+  function settle(): void {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    clearTimeout(deadline);
+    request.removeListener("error", onError);
     request.removeListener("data", onData);
-    request.removeListener("end", onEnd);
+    socket.removeListener("error", onError);
+    socket.removeListener("end", onPeerEnd);
+    socket.removeListener("close", onSocketClose);
+    response?.removeListener("finish", beginGraceful);
+    response?.removeListener("close", beginGraceful);
+  }
+
+  function destroySocket(): void {
+    if (settled || destroying) {
+      return;
+    }
+    destroying = true;
     if (!socket.destroyed) {
       socket.destroy();
+      return;
     }
+    settle();
   }
 }
 
