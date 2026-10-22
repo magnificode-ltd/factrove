@@ -2765,68 +2765,40 @@ describe("HTTP API", () => {
     }
   });
 
-  it("does not share when the user is deleted while the update is blocked", async () => {
+  it("does not share when the owner is deleted while the update is blocked", async () => {
     const { orgB, artifactId } = await prepareLockedShare("lock-user");
     const snapshot = await snapshotOwnerIdentity();
-    const placeholder = await createUserWithApiKey(prisma, {
-      email: "org-share-deleted-owner@example.invalid",
-      name: "Deleted Owner Placeholder",
-      keyName: "deleted-owner-placeholder",
-    });
     await installArtifactUpdateAudit(prisma);
-    let proceed = (): void => {};
-    const go = new Promise<void>((resolve) => {
-      proceed = resolve;
-    });
-    let locked = (): void => {};
-    const acquired = new Promise<void>((resolve) => {
-      locked = resolve;
-    });
-    const lock = prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${artifactId}::uuid FOR UPDATE`;
-      locked();
-      await go;
-      // Reassign on this connection. A delete from another connection would wait forever on
-      // the artifact row this transaction already holds.
-      await tx.artifact.update({
-        where: { id: artifactId },
-        data: { creatorUserId: placeholder.userId },
-      });
-      await tx.user.delete({ where: { id: owner.userId } });
-    }, { timeout: 20_000 });
+    // Without this constraint, deleting the owner waits on the artifact row the test is holding.
+    await prisma.$executeRawUnsafe(`ALTER TABLE "artifact" DROP CONSTRAINT "artifact_creator_user_id_fkey"`);
+    let constraintDropped = true;
     try {
-      const pending = patchAccess(
-        baseUrl,
-        artifactId,
-        { accessType: "org_shared", organizationId: orgB },
-        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
-      );
-      await acquired;
-      await waitForArtifactRowLockWaiter(prisma);
-      proceed();
-      const response = await pending;
-      await lock;
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('lock_timeout', '2000', true)`;
+          await tx.user.delete({ where: { id: owner.userId } });
+        });
+      });
+      expect(await prisma.user.findUnique({ where: { id: owner.userId } })).toBeNull();
       expect(response.status).not.toBe(500);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(401);
       expect(await errorOf(response)).toEqual({
-        code: "ARTIFACT_NOT_FOUND",
-        message: "Artifact was not found.",
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
       });
       const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
       expect(row.accessType).toBe("private");
       expect(row.organizationId).toBeNull();
-      expect(row.creatorUserId).toBe(placeholder.userId);
-      expect(await artifactUpdateCount(prisma, artifactId)).toBe(1);
+      expect(row.creatorUserId).toBe(owner.userId);
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
     } finally {
-      proceed();
-      await lock.catch(() => undefined);
       await restoreOwnerIdentity(snapshot);
-      await prisma.artifact.updateMany({
-        where: { creatorUserId: placeholder.userId },
-        data: { creatorUserId: owner.userId },
-      });
-      await prisma.apikey.deleteMany({ where: { referenceId: placeholder.userId } });
-      await prisma.user.deleteMany({ where: { id: placeholder.userId } });
+      if (constraintDropped) {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "artifact" ADD CONSTRAINT "artifact_creator_user_id_fkey" FOREIGN KEY ("creator_user_id") REFERENCES "user"("id") ON DELETE RESTRICT ON UPDATE CASCADE`,
+        );
+        constraintDropped = false;
+      }
       await removeArtifactUpdateAudit(prisma);
       await restoreLockedShare();
     }
@@ -2887,6 +2859,91 @@ describe("HTTP API", () => {
           data: { expiresAt: session.expiresAt },
         });
       }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("does not share when the session expires after the transaction starts and before the write", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-session-clock");
+    const sessions = await prisma.session.findMany({ where: { userId: owner.userId } });
+    await installArtifactUpdateAudit(prisma);
+    try {
+      const response = await shareWhileArtifactLocked(artifactId, orgB, async () => {
+        // The share transaction has already started. This expiry is after that start and
+        // before the UPDATE, which is the window CURRENT_TIMESTAMP would still treat as valid.
+        await prisma.$executeRaw`
+          UPDATE "session"
+          SET "expiresAt" = clock_timestamp() + interval '250 milliseconds'
+          WHERE "userId" = ${owner.userId}
+        `;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      });
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(401);
+      expect(await errorOf(response)).toEqual({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to continue.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+    } finally {
+      for (const session of sessions) {
+        await prisma.session.updateMany({
+          where: { id: session.id },
+          data: { expiresAt: session.expiresAt },
+        });
+      }
+      await removeArtifactUpdateAudit(prisma);
+      await restoreLockedShare();
+    }
+  });
+
+  it("returns 409 when the confirmed organization disappears before the foreign-key check", async () => {
+    const { orgB, artifactId } = await prepareLockedShare("lock-org-fk");
+    await installArtifactUpdateAudit(prisma);
+    // The trigger deletes the organization after the UPDATE's membership check and before the
+    // foreign-key check. Deleting it earlier makes actor lookup fail, so this is the deterministic
+    // way to hit artifact_organization_id_fkey.
+    await prisma.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION factrove_delete_org_on_share() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.organization_id = 'org-lock-b' THEN
+          DELETE FROM organization WHERE id = NEW.organization_id;
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER factrove_delete_org_on_share
+      BEFORE UPDATE ON artifact
+      FOR EACH ROW EXECUTE FUNCTION factrove_delete_org_on_share()
+    `);
+    try {
+      const response = await patchAccess(
+        baseUrl,
+        artifactId,
+        { accessType: "org_shared", organizationId: orgB },
+        { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } },
+      );
+      expect(response.status).not.toBe(500);
+      expect(response.status).toBe(409);
+      expect(await errorOf(response)).toEqual({
+        code: "ORGANIZATION_CHANGED",
+        message: "The current organization changed. Confirm the organization and try again.",
+      });
+      const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+      expect(row.accessType).toBe("private");
+      expect(row.organizationId).toBeNull();
+      expect(await artifactUpdateCount(prisma, artifactId)).toBe(0);
+      expect(await prisma.organization.findUnique({ where: { id: orgB } })).not.toBeNull();
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS factrove_delete_org_on_share ON artifact`);
+      await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS factrove_delete_org_on_share()`);
       await removeArtifactUpdateAudit(prisma);
       await restoreLockedShare();
     }

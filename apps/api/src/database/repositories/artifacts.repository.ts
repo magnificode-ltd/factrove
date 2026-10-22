@@ -77,8 +77,9 @@ export class ArtifactsRepository {
   // The only row lock is the artifact. User, session, and membership rows are not locked, so a
   // membership delete or a login is not blocked and cannot cycle with this transaction. An
   // organization delete that also needs this artifact can still deadlock on the organization
-  // foreign key; that error is retried once and then reported as organization-changed, with no
-  // write. The authorization check is a later statement, so it sees commits that landed while this
+  // foreign key. A lock conflict retries once and then reports organization-changed. A foreign-key
+  // violation on artifact.organization_id retries once and then classifies the row again. Neither
+  // path writes. The authorization check is a later statement, so it sees commits that landed while this
   // transaction waited on the artifact. An artifact that is already org_shared is returned
   // with no write and no organization check. Share columns, content, and createdAt are not written.
   async shareWithOrganization(input: {
@@ -90,18 +91,49 @@ export class ArtifactsRepository {
     try {
       return await this.shareWithOrganizationOnce(input);
     } catch (error) {
-      if (!isShareLockConflict(error)) {
+      if (!isRetriableShareConflict(error)) {
         throw error;
       }
     }
     try {
       return await this.shareWithOrganizationOnce(input);
     } catch (error) {
-      if (!isShareLockConflict(error)) {
-        throw error;
+      if (isShareLockConflict(error)) {
+        return { outcome: "organization-changed" };
       }
-      return { outcome: "organization-changed" };
+      if (isArtifactOrganizationForeignKeyViolation(error)) {
+        try {
+          return await this.classifyRefusedShare(input);
+        } catch (classifyError) {
+          if (isShareLockConflict(classifyError) || isArtifactOrganizationForeignKeyViolation(classifyError)) {
+            return { outcome: "organization-changed" };
+          }
+          throw classifyError;
+        }
+      }
+      throw error;
     }
+  }
+
+  // Read the same refusal the update would return, without writing. Used after the organization
+  // foreign key rejects a write, so the caller gets the outcome that is true now.
+  private classifyRefusedShare(input: {
+    id: string;
+    creatorUserId: string;
+    organizationId: string;
+    sessionId: string | null;
+  }): Promise<ShareWithOrganizationOutcome> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await applyShareTimeouts(tx);
+        await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
+        return classifyShareRefusal(tx, input);
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        timeout: SHARE_TRANSACTION_TIMEOUT_MS,
+      },
+    );
   }
 
   private shareWithOrganizationOnce(input: {
@@ -248,16 +280,19 @@ export type ShareWithOrganizationOutcome =
 
 // A few seconds, and shorter than the Prisma transaction timeout, so a blocked lock becomes
 // 55P03 or 57014 instead of a late P2028 that the HTTP layer would turn into a 500.
+// SHARE_TRANSACTION_TIMEOUT_MS applies to each attempt on its own. A conflict retries once,
+// so two attempts that both run until that timeout take about 16 seconds and then return
+// organization-changed with no write.
 const SHARE_LOCK_TIMEOUT = "3000";
 const SHARE_STATEMENT_TIMEOUT = "4000";
 const SHARE_TRANSACTION_TIMEOUT_MS = 8_000;
+const ARTIFACT_ORGANIZATION_FOREIGN_KEY = "artifact_organization_id_fkey";
 
 async function shareWithOrganizationInTransaction(
   tx: Prisma.TransactionClient,
   input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
 ): Promise<ShareWithOrganizationOutcome> {
-  await tx.$queryRaw`SELECT set_config('lock_timeout', ${SHARE_LOCK_TIMEOUT}, true)`;
-  await tx.$queryRaw`SELECT set_config('statement_timeout', ${SHARE_STATEMENT_TIMEOUT}, true)`;
+  await applyShareTimeouts(tx);
   // Lock only this artifact. The next statement starts after the wait, so its snapshot includes
   // a membership, session, or organization change that committed while this request was blocked.
   await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
@@ -269,6 +304,10 @@ async function shareWithOrganizationInTransaction(
     return { outcome: "already", record: toArtifactRecord(locked) };
   }
 
+  // The conditional UPDATE is the linearization point, on purpose. A revocation, membership
+  // removal, or active-organization change that commits after this statement has read is ordered
+  // after the share. That is the same as the share having happened a moment earlier. There is no
+  // extra lock or version check around that window.
   const updated = await tx.$executeRaw`
     UPDATE artifact
     SET access_type = 'org_shared'::"access_type",
@@ -320,7 +359,7 @@ function shareAuthorizationSql(input: {
       FROM "session"
       WHERE "session".id = ${input.sessionId}
         AND "session"."userId" = artifact.creator_user_id
-        AND "session"."expiresAt" > CURRENT_TIMESTAMP
+        AND "session"."expiresAt" > clock_timestamp()
         AND (
           (
             "session"."activeOrganizationId" = ${input.organizationId}
@@ -366,7 +405,7 @@ async function classifyShareRefusal(
       FROM "session"
       WHERE id = ${input.sessionId}
         AND "userId" = ${input.creatorUserId}
-        AND "expiresAt" > CURRENT_TIMESTAMP
+        AND "expiresAt" > clock_timestamp()
     `;
     if (sessions.length === 0) {
       return { outcome: "unauthenticated" };
@@ -397,7 +436,7 @@ async function readCurrentOrganizationId(
       FROM "session"
       WHERE id = ${sessionId}
         AND "userId" = ${userId}
-        AND "expiresAt" > CURRENT_TIMESTAMP
+        AND "expiresAt" > clock_timestamp()
     `;
     const active = sessions[0]?.activeOrganizationId;
     activeOrganizationId = typeof active === "string" && active.length > 0 ? active : null;
@@ -423,8 +462,39 @@ async function readCurrentOrganizationId(
   return memberships.length === 1 ? memberships[0]?.organizationId ?? null : null;
 }
 
+async function applyShareTimeouts(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${SHARE_LOCK_TIMEOUT}, true)`;
+  await tx.$queryRaw`SELECT set_config('statement_timeout', ${SHARE_STATEMENT_TIMEOUT}, true)`;
+}
+
+function isRetriableShareConflict(error: unknown): boolean {
+  return isShareLockConflict(error) || isArtifactOrganizationForeignKeyViolation(error);
+}
+
 function isShareLockConflict(error: unknown): boolean {
   return matchesShareLockConflict(error) || matchesShareLockConflict(errorCause(error));
+}
+
+// Only artifact.organization_id's foreign key. A creator-user foreign key, or any other 23503,
+// stays a 500 so a real constraint bug is not reported as an organization change.
+function isArtifactOrganizationForeignKeyViolation(error: unknown): boolean {
+  return matchesArtifactOrganizationForeignKey(error) || matchesArtifactOrganizationForeignKey(errorCause(error));
+}
+
+function matchesArtifactOrganizationForeignKey(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  const code = "code" in error && typeof error.code === "string" ? error.code : "";
+  const meta = "meta" in error && typeof error.meta === "object" && error.meta !== null ? error.meta : undefined;
+  const metaCode = meta && "code" in meta && typeof meta.code === "string" ? meta.code : "";
+  const metaMessage = meta && "message" in meta && typeof meta.message === "string" ? meta.message : "";
+  const foreignKey = code === "23503" || metaCode === "23503" || message.includes("23503");
+  if (!foreignKey) {
+    return false;
+  }
+  return `${message}\n${metaMessage}`.includes(ARTIFACT_ORGANIZATION_FOREIGN_KEY);
 }
 
 function matchesShareLockConflict(error: unknown): boolean {
