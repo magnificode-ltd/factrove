@@ -215,10 +215,11 @@ function releaseRequest(request: UploadRequest): void {
   if (response && !response.headersSent) {
     response.setHeader("Connection", "close");
   }
-  const socket = request.socket as ServerSocket | null;
-  if (!socket || socket.destroyed) {
+  const connected = request.socket as ServerSocket | null;
+  if (!connected || connected.destroyed) {
     return;
   }
+  const socket: ServerSocket = connected;
 
   const onError = (): void => {};
   request.on("error", onError);
