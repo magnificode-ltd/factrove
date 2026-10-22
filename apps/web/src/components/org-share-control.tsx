@@ -90,7 +90,9 @@ export function OrgShareControl({
       if (event.target instanceof Node && dialog.contains(event.target)) {
         return;
       }
-      focusEnabled(confirmRef.current) || focusEnabled(cancelRef.current);
+      if (!focusEnabled(confirmRef.current)) {
+        focusEnabled(cancelRef.current);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("focusin", onFocusIn);
@@ -175,10 +177,14 @@ export function OrgShareControl({
           return;
         }
         if (dialogRef.current?.isConnected) {
-          focusEnabled(confirmRef.current) || focusEnabled(cancelRef.current);
+          if (!focusEnabled(confirmRef.current)) {
+            focusEnabled(cancelRef.current);
+          }
           return;
         }
-        focusEnabled(access) || focusEnabled(triggerRef.current);
+        if (!focusEnabled(access)) {
+          focusEnabled(triggerRef.current);
+        }
       });
     }
   }
