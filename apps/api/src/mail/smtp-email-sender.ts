@@ -2,7 +2,7 @@ import { Logger } from "@nestjs/common";
 import { createTransport as createNodemailerTransport } from "nodemailer";
 import type { ApiConfig, SmtpConfig } from "../services/api-config.js";
 import type { EmailSender, OutboundEmail } from "./email-sender.js";
-import { redactSecrets } from "./redact-secret.js";
+import { redactSecrets, safeMessageId } from "./redact-secret.js";
 
 const SMTP_TIMEOUT_MS = 10_000;
 
@@ -60,8 +60,8 @@ export class SmtpEmailSender implements EmailSender {
         text: message.text,
         html: message.html,
       });
-      const messageId = typeof result.messageId === "string" && result.messageId.length > 0
-        ? result.messageId
+      const messageId = typeof result.messageId === "string"
+        ? safeMessageId(result.messageId, [this.smtp.password, this.smtp.user])
         : null;
       const suffix = messageId === null ? "" : ` messageId=${messageId}`;
       this.log(`Invite email sent to ${message.to}${suffix}`);

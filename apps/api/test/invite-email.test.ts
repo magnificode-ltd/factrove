@@ -1,4 +1,7 @@
 import "reflect-metadata";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import type { PrismaClient } from "@prisma/client";
 import { Logger } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -396,6 +399,20 @@ describe("Brevo email sender", () => {
     expect(lines.join("\n")).not.toContain(FAKE_KEY);
   });
 
+  it("drops a 201 message id that echoes the API key", async () => {
+    const lines: string[] = [];
+    const sender = new BrevoEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      FAKE_KEY,
+      async () => new Response(JSON.stringify({ messageId: FAKE_KEY }), { status: 201 }),
+      (message) => lines.push(message),
+    );
+    await sender.send(sampleEmail());
+    expect(lines).toEqual([`Invite email sent to ${PLUS_EMAIL}`]);
+    expect(lines.join("\n")).not.toContain(FAKE_KEY);
+    expect(lines.join("\n")).not.toContain("xkeysib-");
+  });
+
   it("omits the key from a rejected response and a transport error", async () => {
     const rejected = new BrevoEmailSender(
       { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
@@ -520,6 +537,23 @@ describe("SMTP email sender", () => {
     await expect(failed.send(sampleEmail())).rejects.not.toThrow(/smtp-user-not-real/);
     await expect(failed.send(sampleEmail())).rejects.not.toThrow(new RegExp(SMTP_PASSWORD));
   });
+
+  it("drops a message id that echoes the password", async () => {
+    const lines: string[] = [];
+    const sender = new SmtpEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: "login", password: SMTP_PASSWORD },
+      () => ({
+        async sendMail() {
+          return { messageId: SMTP_PASSWORD };
+        },
+      }),
+      (message) => lines.push(message),
+    );
+    await sender.send(sampleEmail());
+    expect(lines).toEqual([`Invite email sent to ${PLUS_EMAIL}`]);
+    expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
+  });
 });
 
 describe("invite mailer", () => {
@@ -588,6 +622,192 @@ describe("invite mailer", () => {
         }),
       ]);
       expect(result).toBe("done");
+    } finally {
+      release();
+    }
+  });
+
+  it("falls back to console.error when the failure logger throws", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    const error = Logger.prototype.error;
+    const consoleError = console.error;
+    const fallback: string[] = [];
+    Logger.prototype.error = () => {
+      throw new Error("logger exploded");
+    };
+    console.error = (...args: unknown[]) => {
+      fallback.push(args.map((part) => String(part)).join(" "));
+    };
+    try {
+      const mailer = new InviteMailer({
+        async send() {
+          throw new Error(`rejected key ${FAKE_KEY}`);
+        },
+      }, apiConfig({ brevoApiKey: FAKE_KEY }));
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
+      await flush();
+      expect(unhandled).toEqual([]);
+      const logged = fallback.join("\n");
+      expect(logged).toContain(`Invite email failed for ${PLUS_EMAIL}`);
+      expect(logged).toContain("[redacted]");
+      expect(logged).toContain("Logger failed");
+      expect(logged).not.toContain(FAKE_KEY);
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      Logger.prototype.error = error;
+      console.error = consoleError;
+    }
+  });
+
+  it("sends at most four invites at once", async () => {
+    let started = 0;
+    const releases: Array<() => void> = [];
+    const mailer = new InviteMailer({
+      send: () => {
+        started += 1;
+        return new Promise((resolve) => {
+          releases.push(resolve);
+        });
+      },
+    }, apiConfig({}));
+    mailer.concurrency = 4;
+    try {
+      for (let index = 0; index < 6; index += 1) {
+        await mailer.sendInvite({
+          email: `user${index}+factrove@mail.grokbot.com`,
+          name: "Ada Lovelace",
+        });
+      }
+      await flush();
+      expect(started).toBe(4);
+      const releaseOne = releases[0];
+      expect(releaseOne).toBeTypeOf("function");
+      releaseOne?.();
+      await flush();
+      expect(started).toBe(5);
+    } finally {
+      for (const release of releases) {
+        release();
+      }
+    }
+  });
+
+  it("finishes queued invites during shutdown", async () => {
+    const releases: Array<() => void> = [];
+    const mailer = new InviteMailer({
+      send: () => new Promise((resolve) => {
+        releases.push(resolve);
+      }),
+    }, apiConfig({}));
+    mailer.concurrency = 1;
+    mailer.shutdownTimeoutMs = 1_000;
+    await mailer.sendInvite({ email: "one+factrove@mail.grokbot.com", name: "Ada Lovelace" });
+    await mailer.sendInvite({ email: "two+factrove@mail.grokbot.com", name: "Ada Lovelace" });
+    await flush();
+    expect(releases).toHaveLength(1);
+    const lines: string[] = [];
+    const error = Logger.prototype.error;
+    Logger.prototype.error = function (message: unknown) {
+      lines.push(String(message));
+      return this;
+    };
+    try {
+      const shutdown = mailer.onApplicationShutdown();
+      const releaseFirst = releases[0];
+      expect(releaseFirst).toBeTypeOf("function");
+      releaseFirst?.();
+      await flush();
+      expect(releases).toHaveLength(2);
+      releases[1]?.();
+      await shutdown;
+      expect(lines).toEqual([]);
+    } finally {
+      Logger.prototype.error = error;
+      for (const release of releases) {
+        release();
+      }
+    }
+  });
+
+  it("logs invites that are still pending when shutdown times out", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mailer = new InviteMailer({
+      send: () => gate,
+    }, apiConfig({}));
+    mailer.concurrency = 4;
+    mailer.shutdownTimeoutMs = 40;
+    try {
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
+      await mailer.sendInvite({ email: "other+factrove@mail.grokbot.com", name: "Ada Lovelace" });
+      const lines = await captureLogs(() => mailer.onApplicationShutdown());
+      expect(lines).toEqual([
+        `Invite email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
+      ]);
+    } finally {
+      release();
+    }
+  });
+
+  it("counts queued invites that shutdown does not reach", async () => {
+    let started = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mailer = new InviteMailer({
+      send: () => {
+        started += 1;
+        return gate;
+      },
+    }, apiConfig({}));
+    mailer.concurrency = 4;
+    mailer.shutdownTimeoutMs = 40;
+    try {
+      for (let index = 0; index < 6; index += 1) {
+        await mailer.sendInvite({
+          email: `user${index}+factrove@mail.grokbot.com`,
+          name: "Ada Lovelace",
+        });
+      }
+      await flush();
+      expect(started).toBe(4);
+      const lines = await captureLogs(() => mailer.onApplicationShutdown());
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("left 6 send(s) unfinished");
+      expect(lines[0]).toContain("user4+factrove@mail.grokbot.com");
+      expect(lines[0]).toContain("user5+factrove@mail.grokbot.com");
+      expect(started).toBe(4);
+    } finally {
+      release();
+    }
+  });
+
+  it("drains when the Nest module closes", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        { provide: EMAIL_SENDER, useValue: { send: () => gate } },
+        { provide: API_CONFIG, useValue: apiConfig({}) },
+        InviteMailer,
+      ],
+    }).compile();
+    const mailer = moduleRef.get(InviteMailer);
+    mailer.shutdownTimeoutMs = 40;
+    try {
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
+      const lines = await captureLogs(() => moduleRef.close());
+      expect(lines.join("\n")).toContain(`Invite email shutdown left 1 send(s) unfinished: ${PLUS_EMAIL}.`);
     } finally {
       release();
     }
@@ -692,6 +912,44 @@ describe("sign-up invite", () => {
       release();
     }
   });
+
+  it("stays up when invite failure logging throws", async () => {
+    const require = createRequire(import.meta.url);
+    const vitestEntry = require.resolve("vitest/vitest.mjs");
+    const apiRoot = fileURLToPath(new URL("..", import.meta.url));
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+      if (key.startsWith("VITEST")) {
+        delete env[key];
+      }
+    }
+    const child = spawn(process.execPath, [
+      vitestEntry,
+      "run",
+      "test/invite-failure-worker.test.ts",
+      "--reporter=verbose",
+    ], {
+      cwd: apiRoot,
+      env,
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const code = await new Promise<number | null>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error("invite failure subprocess timed out"));
+      }, 45_000);
+      child.on("exit", (exitCode) => {
+        clearTimeout(timer);
+        resolve(exitCode);
+      });
+    });
+    const output = `${Buffer.concat(stdout).toString()}\n${Buffer.concat(stderr).toString()}`;
+    expect(code, output).toBe(0);
+    expect(output).toContain("invite-failure-process-ok");
+  });
 });
 
 function cellByClass(html: string, className: string): string {
@@ -765,6 +1023,11 @@ function signUpRequest(email: string): Request {
       password: "local-invite-check-1",
     }),
   });
+}
+
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 async function captureLogs(run: () => Promise<void>): Promise<string[]> {

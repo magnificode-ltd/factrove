@@ -13,6 +13,7 @@ loadLocalEnv();
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // InviteMailer drains in-flight sends from onApplicationShutdown.
   app.enableShutdownHooks();
   configureHttpApp(app);
   const config = app.get<ApiConfig>(API_CONFIG);

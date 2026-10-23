@@ -4,6 +4,7 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { PrismaClient } from "@prisma/client";
+import { logWithoutThrowing } from "../mail/safe-log.js";
 import { factroveApiKey } from "./api-key-plugin.js";
 import { CLIENT_IP_HEADER } from "./client-ip.js";
 
@@ -101,15 +102,23 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
               return;
             }
             // Sign-up must not wait on the mail provider. The .then also catches
-            // a synchronous throw, so the detached promise cannot reject unhandled.
+            // a synchronous throw. The logger call cannot throw out of this chain.
             void Promise.resolve()
               .then(() => input.onUserCreated({
                 email,
                 name: user.name.trim(),
               }))
               .catch((error: unknown) => {
-                const detail = error instanceof Error ? error.message : "request failed";
-                new Logger("Auth").error(`Invite email failed for ${email}. ${detail}`);
+                let message = `Invite email failed for ${email}.`;
+                try {
+                  const detail = error instanceof Error ? error.message : "request failed";
+                  message = `Invite email failed for ${email}. ${detail}`;
+                } catch {
+                  message = `Invite email failed for ${email}.`;
+                }
+                logWithoutThrowing((line) => {
+                  new Logger("Auth").error(line);
+                }, message);
               });
           },
         },

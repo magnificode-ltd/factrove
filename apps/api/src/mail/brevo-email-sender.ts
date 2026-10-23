@@ -1,7 +1,7 @@
 import { Logger } from "@nestjs/common";
 import type { ApiConfig } from "../services/api-config.js";
 import type { EmailSender, OutboundEmail } from "./email-sender.js";
-import { redactSecrets } from "./redact-secret.js";
+import { redactSecrets, safeMessageId } from "./redact-secret.js";
 
 export const BREVO_TRANSACTIONAL_EMAIL_URL = "https://api.brevo.com/v3/smtp/email";
 
@@ -50,7 +50,7 @@ export class BrevoEmailSender implements EmailSender {
       const detail = await brevoErrorDetail(response, this.apiKey);
       throw new Error(`Brevo rejected the invite email with status ${response.status}.${detail}`);
     }
-    const messageId = await readMessageId(response);
+    const messageId = safeMessageId(await readMessageId(response) ?? "", [this.apiKey]);
     const suffix = messageId === null ? "" : ` messageId=${messageId}`;
     this.log(`Invite email sent to ${message.to}${suffix}`);
   }
