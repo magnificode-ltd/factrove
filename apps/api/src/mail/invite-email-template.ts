@@ -28,13 +28,13 @@ export function renderInviteEmail(input: InviteEmailTemplateInput): { subject: s
   const signInUrl = input.signInUrl.trim();
   const supportEmail = input.supportEmail.trim();
   const logoUrl = input.logoUrl?.trim() ?? "";
-  const welcome = name.length > 0
-    ? `${name}, your account for ${email} is ready.`
-    : `Your account for ${email} is ready.`;
+  const greeting = name.length > 0 ? `Hi ${name},` : "Hi,";
+  const accountReady = `Your Factrove account for ${email} is ready.`;
   const text = [
     "Welcome to Factrove",
     "",
-    welcome,
+    greeting,
+    accountReady,
     "",
     "Sign in to Factrove:",
     signInUrl,
@@ -46,7 +46,8 @@ export function renderInviteEmail(input: InviteEmailTemplateInput): { subject: s
   return {
     subject: INVITE_EMAIL_SUBJECT,
     html: renderHtml({
-      welcome,
+      greeting,
+      accountReady,
       signInUrl,
       supportEmail,
       logoUrl,
@@ -56,12 +57,15 @@ export function renderInviteEmail(input: InviteEmailTemplateInput): { subject: s
 }
 
 function renderHtml(input: {
-  welcome: string;
+  greeting: string;
+  accountReady: string;
   signInUrl: string;
   supportEmail: string;
   logoUrl: string;
 }): string {
-  const welcome = escapeHtml(input.welcome);
+  const greeting = escapeHtml(input.greeting);
+  const accountReady = escapeHtml(input.accountReady);
+  const welcome = `${greeting}<br>${accountReady}`;
   const signInUrl = escapeHtml(input.signInUrl);
   const supportEmail = escapeHtml(input.supportEmail);
   const siteUrl = escapeHtml(FACTROVE_SITE_URL);

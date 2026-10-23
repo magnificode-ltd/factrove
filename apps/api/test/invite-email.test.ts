@@ -208,7 +208,7 @@ describe("invite email", () => {
 
   it("keeps a plus-address in the text and the HTML", () => {
     const message = buildInviteEmail({
-      recipient: { email: `  ${PLUS_EMAIL}  `, name: "Invite Check" },
+      recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada Lovelace " },
       signInUrl,
       supportEmail: "support@factrove.app",
     });
@@ -218,7 +218,8 @@ describe("invite email", () => {
     });
     expect(message.subject).toBe("Welcome to Factrove");
     expect(message.text).toContain("Welcome to Factrove");
-    expect(message.text).toContain(`Invite Check, your account for ${PLUS_EMAIL} is ready.`);
+    expect(message.text).toContain(`Hi Ada Lovelace,\nYour Factrove account for ${PLUS_EMAIL} is ready.`);
+    expect(message.html).toContain(`Hi Ada Lovelace,<br>Your Factrove account for ${PLUS_EMAIL} is ready.`);
     expect(message.text).toContain("Sign in to Factrove:");
     expect(message.text).toContain(signInUrl);
     expect(message.text).toContain("Contact support@factrove.app if you need help.");
@@ -260,13 +261,14 @@ describe("invite email", () => {
       supportEmail: "support+help@factrove.app",
       logoUrl: "https://cdn.example.com/logo.png",
     });
-    expect(message.html).toContain("Ada &lt;script&gt;");
+    expect(message.html).toContain("Hi Ada &lt;script&gt;,");
+    expect(message.html).toContain(`Your Factrove account for ${PLUS_EMAIL} is ready.`);
     expect(message.html).not.toContain("<script>");
     expect(message.html).toContain('src="https://cdn.example.com/logo.png"');
     expect(message.html).toContain('alt="Factrove"');
     expect(message.html).not.toContain("fac<b");
     expect(message.html).not.toContain("?");
-    expect(message.text).toContain("Ada <script>, your account");
+    expect(message.text).toContain(`Hi Ada <script>,\nYour Factrove account for ${PLUS_EMAIL} is ready.`);
     expect(message.html).toContain("mailto:support+help@factrove.app");
     expect(message.text).not.toContain("invited");
   });
@@ -277,9 +279,9 @@ describe("invite email", () => {
       signInUrl,
       supportEmail: "support@factrove.app",
     });
-    expect(message.text).toContain(`Your account for ${PLUS_EMAIL} is ready.`);
-    expect(message.text).not.toContain(", your account");
-    expect(message.html).toContain(`Your account for ${PLUS_EMAIL} is ready.`);
+    expect(message.text).toContain(`Hi,\nYour Factrove account for ${PLUS_EMAIL} is ready.`);
+    expect(message.text).not.toContain("Hi ,");
+    expect(message.html).toContain(`Hi,<br>Your Factrove account for ${PLUS_EMAIL} is ready.`);
   });
 });
 
