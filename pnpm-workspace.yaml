@@ -12,3 +12,5 @@ allowBuilds:
 overrides:
   '@prisma/client': 6.19.0
   prisma: 6.19.0
+minimumReleaseAgeExclude:
+  - nodemailer@10.2.1

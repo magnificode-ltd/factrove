@@ -44,11 +44,12 @@ export function supervise(specs, hooks = {}) {
     for (const child of children) {
       signalProcessGroup(child, signal);
     }
+    // The API drains in-flight invites for 10s. Kill only after that can finish.
     killTimer = setTimeout(() => {
       for (const child of children) {
         signalProcessGroup(child, "SIGKILL");
       }
-    }, 5000);
+    }, 15000);
   }
 
   function settled(child) {
