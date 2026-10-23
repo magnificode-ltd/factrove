@@ -1,6 +1,7 @@
 import type { OutboundEmail } from "./email-sender.js";
+import { renderInviteEmail } from "./invite-email-template.js";
 
-export const INVITE_EMAIL_SUBJECT = "You're invited to Factrove";
+export { INVITE_EMAIL_SUBJECT } from "./invite-email-template.js";
 
 export type InviteRecipient = {
   email: string;
@@ -10,44 +11,21 @@ export type InviteRecipient = {
 export function buildInviteEmail(input: {
   recipient: InviteRecipient;
   signInUrl: string;
+  supportEmail: string;
+  logoUrl?: string | null;
 }): OutboundEmail {
   const email = input.recipient.email.trim();
-  const displayName = oneLine(input.recipient.name);
-  const greeting = displayName.length > 0
-    ? `${displayName}, you are invited to Factrove.`
-    : "You are invited to Factrove.";
-  const text = [
-    greeting,
-    "",
-    `An account is ready for ${email}. Sign in at ${input.signInUrl}.`,
-    "",
-    "This message was sent because an account was created for this address.",
-  ].join("\n");
-  const html = [
-    "<!DOCTYPE html>",
-    "<html><body>",
-    `<p>${escapeHtml(greeting)}</p>`,
-    `<p>An account is ready for ${escapeHtml(email)}. Sign in at <a href="${escapeHtml(input.signInUrl)}">${escapeHtml(input.signInUrl)}</a>.</p>`,
-    "<p>This message was sent because an account was created for this address.</p>",
-    "</body></html>",
-  ].join("");
+  const rendered = renderInviteEmail({
+    recipientEmail: email,
+    recipientName: input.recipient.name,
+    signInUrl: input.signInUrl,
+    supportEmail: input.supportEmail,
+    logoUrl: input.logoUrl ?? null,
+  });
   return {
     to: email,
-    subject: INVITE_EMAIL_SUBJECT,
-    html,
-    text,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
   };
-}
-
-function oneLine(value: string): string {
-  return value.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

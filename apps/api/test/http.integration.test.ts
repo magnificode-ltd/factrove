@@ -69,6 +69,7 @@ const config: ApiConfig = {
   emailTransport: "log",
   emailFromAddress: "support@factrove.app",
   emailFromName: "Factrove",
+  emailLogoUrl: null,
   brevoApiKey: null,
   smtp: null,
 };
@@ -205,6 +206,7 @@ describe("API configuration", () => {
     expect(defaults.emailTransport).toBe("log");
     expect(defaults.emailFromAddress).toBe("support@factrove.app");
     expect(defaults.emailFromName).toBe("Factrove");
+    expect(defaults.emailLogoUrl).toBeNull();
     expect(defaults.brevoApiKey).toBeNull();
     expect(defaults.smtp).toBeNull();
   });

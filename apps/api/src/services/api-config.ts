@@ -19,6 +19,8 @@ export type ApiConfig = {
   emailTransport: EmailTransport;
   emailFromAddress: string;
   emailFromName: string;
+  // Absolute http(s) logo for the invite. Null uses the text wordmark.
+  emailLogoUrl: string | null;
   // Set only when emailTransport is brevo. Other transports leave this null.
   brevoApiKey: string | null;
   // Set only when emailTransport is smtp. Other transports leave this null.
@@ -109,15 +111,17 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTransport" | "emailFromAddress" | "emailFromName" | "brevoApiKey" | "smtp"> {
+function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTransport" | "emailFromAddress" | "emailFromName" | "emailLogoUrl" | "brevoApiKey" | "smtp"> {
   const emailTransport = readEmailTransport(env.EMAIL_TRANSPORT);
   const emailFromAddress = readEmailFromAddress(env.EMAIL_FROM_ADDRESS);
   const emailFromName = readEmailFromName(env.EMAIL_FROM_NAME);
+  const emailLogoUrl = readEmailLogoUrl(env.EMAIL_LOGO_URL);
   if (emailTransport === "brevo") {
     return {
       emailTransport,
       emailFromAddress,
       emailFromName,
+      emailLogoUrl,
       brevoApiKey: readRequiredBrevoApiKey(env.BREVO_API_KEY),
       smtp: null,
     };
@@ -127,6 +131,7 @@ function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTranspor
       emailTransport,
       emailFromAddress,
       emailFromName,
+      emailLogoUrl,
       brevoApiKey: null,
       smtp: readSmtpConfig(env),
     };
@@ -135,9 +140,30 @@ function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTranspor
     emailTransport,
     emailFromAddress,
     emailFromName,
+    emailLogoUrl,
     brevoApiKey: null,
     smtp: null,
   };
+}
+
+function readEmailLogoUrl(value: string | undefined): string | null {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("EMAIL_LOGO_URL must be an absolute HTTP(S) URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("EMAIL_LOGO_URL must be an absolute HTTP(S) URL.");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("EMAIL_LOGO_URL must not include credentials.");
+  }
+  return raw;
 }
 
 function readEmailTransport(value: string | undefined): EmailTransport {

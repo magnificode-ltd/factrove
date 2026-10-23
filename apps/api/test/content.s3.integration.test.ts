@@ -71,6 +71,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       emailTransport: "log",
       emailFromAddress: "support@factrove.app",
       emailFromName: "Factrove",
+      emailLogoUrl: null,
       brevoApiKey: null,
       smtp: null,
     };

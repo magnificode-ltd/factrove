@@ -90,6 +90,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes the invite to the API log and does not send it |
 | `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
+| `EMAIL_LOGO_URL` | no | Absolute http(s) logo for the invite. Empty uses the text wordmark |
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
 | `SMTP_PORT` | when transport is `smtp` | Port from 1 to 65535. `587` is the usual STARTTLS port |
 | `SMTP_SECURE` | when transport is `smtp` | `true` for implicit TLS, usually port 465. `false` for STARTTLS, usually port 587 |
@@ -423,7 +424,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove` |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user and password, which are both set or both empty |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
@@ -461,6 +462,14 @@ Creating an account sends one invite email to that address. The signup page and 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
 `EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
+
+The message says welcome, names the new address, and links a "Sign in to Factrove" button to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
+
+Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
+
+The HTML and plain-text layout live in `apps/api/src/mail/invite-email-template.ts`. Edit that file, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
+
+This install needs Node.js 24 (`>=24.7.0 <25`; 24.16.0 is pinned). A ready API answers `GET /api/v1/health`.
 
 Plus-addresses are valid. The stored address is lower case and the plus tag is kept, so `Magnificode+Factrove@Mail.Grokbot.com` is the same account as `magnificode+factrove@mail.grokbot.com`. Send the body as JSON. A form body would turn `+` into a space.
 

@@ -53,6 +53,7 @@ apps/api/
 │   │   ├── email-sender.ts           # EmailSender and the log transport
 │   │   ├── smtp-email-sender.ts      # SMTP transport for any server
 │   │   ├── brevo-email-sender.ts     # Brevo HTTP transport
+│   │   ├── invite-email-template.ts  # Branded HTML and text invite template
 │   │   ├── invite-email.ts           # Invite message for a new account
 │   │   ├── invite-mailer.ts          # Sends that message and logs failures
 │   │   ├── redact-secret.ts          # Removes provider secrets from error text

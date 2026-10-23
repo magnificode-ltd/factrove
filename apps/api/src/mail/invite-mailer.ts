@@ -20,6 +20,8 @@ export class InviteMailer {
     const message = buildInviteEmail({
       recipient: { email, name: recipient.name },
       signInUrl: `${this.config.webOrigin}/login`,
+      supportEmail: this.config.emailFromAddress,
+      logoUrl: this.config.emailLogoUrl,
     });
     try {
       await this.email.send(message);

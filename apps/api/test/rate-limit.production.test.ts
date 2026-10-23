@@ -39,6 +39,7 @@ const config: ApiConfig = {
   emailTransport: "log",
   emailFromAddress: "support@factrove.app",
   emailFromName: "Factrove",
+  emailLogoUrl: null,
   brevoApiKey: null,
   smtp: null,
 };

@@ -82,6 +82,7 @@ services:
       EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-log}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-support@factrove.app}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Factrove}
+      EMAIL_LOGO_URL: ${EMAIL_LOGO_URL:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
