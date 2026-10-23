@@ -18,7 +18,7 @@ import {
   type OutboundEmail,
 } from "../src/mail/email-sender.js";
 import { buildInviteEmail, INVITE_EMAIL_SUBJECT } from "../src/mail/invite-email.js";
-import { InviteMailer } from "../src/mail/invite-mailer.js";
+import { INVITE_QUEUE_LIMIT, InviteMailer } from "../src/mail/invite-mailer.js";
 import { SmtpEmailSender, type SmtpMail, type SmtpTransportOptions } from "../src/mail/smtp-email-sender.js";
 import {
   API_CONFIG,
@@ -554,6 +554,35 @@ describe("SMTP email sender", () => {
     expect(lines).toEqual([`Invite email sent to ${PLUS_EMAIL}`]);
     expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
   });
+
+  it("drops a message id that echoes a password with surrounding spaces", async () => {
+    const password = `  ${SMTP_PASSWORD}  `;
+    const lines: string[] = [];
+    const sender = new SmtpEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: "login", password },
+      () => ({
+        async sendMail() {
+          return { messageId: password };
+        },
+      }),
+      (message) => lines.push(message),
+    );
+    await sender.send(sampleEmail());
+    const trimmedOnly = new SmtpEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: "login", password },
+      () => ({
+        async sendMail() {
+          return { messageId: SMTP_PASSWORD };
+        },
+      }),
+      (message) => lines.push(message),
+    );
+    await trimmedOnly.send(sampleEmail());
+    expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
+    expect(lines.join("\n")).not.toContain("messageId=");
+  });
 });
 
 describe("invite mailer", () => {
@@ -656,7 +685,51 @@ describe("invite mailer", () => {
       expect(logged).toContain("[redacted]");
       expect(logged).toContain("Logger failed");
       expect(logged).not.toContain(FAKE_KEY);
+      expect(logged).not.toContain("logger exploded");
       expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      Logger.prototype.error = error;
+      console.error = consoleError;
+    }
+  });
+
+  it("does not print the logger error when its message cannot be read", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    const error = Logger.prototype.error;
+    const consoleError = console.error;
+    const fallback: string[] = [];
+    Logger.prototype.error = () => {
+      const failure = new Error("unused");
+      Object.defineProperty(failure, "message", {
+        get() {
+          throw new Error(`getter ${FAKE_KEY}`);
+        },
+      });
+      throw failure;
+    };
+    console.error = (...args: unknown[]) => {
+      fallback.push(args.map((part) => String(part)).join(" "));
+    };
+    try {
+      const mailer = new InviteMailer({
+        async send() {
+          throw new Error("provider down");
+        },
+      }, apiConfig({ brevoApiKey: FAKE_KEY }));
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
+      await flush();
+      expect(unhandled).toEqual([]);
+      const logged = fallback.join("\n");
+      expect(logged).toContain(`Invite email failed for ${PLUS_EMAIL}. provider down`);
+      expect(logged).toContain("Logger failed.");
+      expect(logged).not.toContain(FAKE_KEY);
+      expect(logged).not.toContain("getter");
+      expect(logged).not.toContain("unused");
     } finally {
       process.off("unhandledRejection", onUnhandled);
       Logger.prototype.error = error;
@@ -694,6 +767,67 @@ describe("invite mailer", () => {
       for (const release of releases) {
         release();
       }
+    }
+  });
+
+  it("skips an invite when 100 are already waiting", async () => {
+    let started = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mailer = new InviteMailer({
+      send: () => {
+        started += 1;
+        return gate;
+      },
+    }, apiConfig({}));
+    mailer.concurrency = 1;
+    const skipped = "overflow+factrove@mail.grokbot.com";
+    const warn = Logger.prototype.warn;
+    const lines: string[] = [];
+    Logger.prototype.warn = function (message: unknown) {
+      lines.push(String(message));
+      return this;
+    };
+    try {
+      for (let index = 0; index < INVITE_QUEUE_LIMIT + 1; index += 1) {
+        await mailer.sendInvite({
+          email: `user${index}+factrove@mail.grokbot.com`,
+          name: "Ada Lovelace",
+        });
+      }
+      await mailer.sendInvite({ email: skipped, name: "Ada Lovelace" });
+      expect(started).toBe(1);
+      expect(lines).toEqual([`Invite email skipped for ${skipped}. The send queue is full.`]);
+    } finally {
+      Logger.prototype.warn = warn;
+      release();
+    }
+  });
+
+  it("clears the drain timer when sends finish early", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mailer = new InviteMailer({
+      send: () => gate,
+    }, apiConfig({}));
+    mailer.shutdownTimeoutMs = 10_000;
+    try {
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
+      await flush();
+      const before = timeoutCount();
+      const shutdown = mailer.onApplicationShutdown();
+      expect(timeoutCount()).toBeGreaterThan(before);
+      release();
+      const started = Date.now();
+      await shutdown;
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect(timeoutCount()).toBe(before);
+    } finally {
+      release();
     }
   });
 
@@ -1023,6 +1157,10 @@ function signUpRequest(email: string): Request {
       password: "local-invite-check-1",
     }),
   });
+}
+
+function timeoutCount(): number {
+  return process.getActiveResourcesInfo().filter((name) => name === "Timeout").length;
 }
 
 async function flush(): Promise<void> {

@@ -5,6 +5,7 @@ import { buildInviteEmail, type InviteRecipient } from "./invite-email.js";
 import { logWithoutThrowing } from "./safe-log.js";
 
 export const INVITE_SEND_CONCURRENCY = 4;
+export const INVITE_QUEUE_LIMIT = 100;
 export const INVITE_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 type InviteJob = {
@@ -34,6 +35,13 @@ export class InviteMailer implements OnApplicationShutdown {
     if (email.length === 0 || this.closed) {
       return;
     }
+    if (this.waiting.length >= INVITE_QUEUE_LIMIT) {
+      logWithoutThrowing(
+        (line) => this.logger.warn(line),
+        `Invite email skipped for ${email}. The send queue is full.`,
+      );
+      return;
+    }
     const message = buildInviteEmail({
       recipient: { email, name: recipient.name },
       signInUrl: `${this.config.webOrigin}/login`,
@@ -61,13 +69,10 @@ export class InviteMailer implements OnApplicationShutdown {
         if (this.waiting.length === 0) {
           break;
         }
-        await wait(0);
+        await settle(wait(0));
         continue;
       }
-      await Promise.race([
-        Promise.allSettled(current),
-        wait(remaining),
-      ]);
+      await settle(wait(remaining), Promise.allSettled(current));
     }
     this.closed = true;
     const unfinished = [
@@ -127,8 +132,29 @@ export class InviteMailer implements OnApplicationShutdown {
   }
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function wait(ms: number): { done: Promise<void>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const done = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
   });
+  return {
+    done,
+    cancel() {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
+}
+
+async function settle(
+  timer: { done: Promise<void>; cancel: () => void },
+  until?: Promise<unknown>,
+): Promise<void> {
+  try {
+    await (until === undefined ? timer.done : Promise.race([until, timer.done]));
+  } finally {
+    timer.cancel();
+  }
 }

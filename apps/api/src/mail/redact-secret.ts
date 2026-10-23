@@ -19,9 +19,26 @@ export function safeMessageId(
   if (trimmed.length === 0 || trimmed.length > 200) {
     return null;
   }
-  // Drop the whole id when it contains a secret. Redacting in place can leave a prefix.
-  if (redactSecrets(trimmed, secrets) !== trimmed) {
+  // Compare the raw id and the trimmed id. A secret with surrounding spaces
+  // would not match the trimmed id, and the log would keep the password.
+  if (containsConfiguredSecret(value, secrets) || containsConfiguredSecret(trimmed, secrets)) {
     return null;
   }
   return SAFE_MESSAGE_ID.test(trimmed) ? trimmed : null;
+}
+
+function containsConfiguredSecret(value: string, secrets: ReadonlyArray<string | null | undefined>): boolean {
+  for (const secret of secrets) {
+    if (typeof secret !== "string" || secret.length === 0) {
+      continue;
+    }
+    if (value.includes(secret)) {
+      return true;
+    }
+    const trimmedSecret = secret.trim();
+    if (trimmedSecret.length > 0 && trimmedSecret !== secret && value.includes(trimmedSecret)) {
+      return true;
+    }
+  }
+  return false;
 }

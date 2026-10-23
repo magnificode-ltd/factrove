@@ -468,7 +468,7 @@ The message greets the person with "Hi {name}," or "Hi," when the name is blank,
 
 Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
 
-Sign-up does not wait for the provider. The API sends at most four invites at once. On shutdown it waits up to 10 seconds for the ones still queued or in flight, then logs `Invite email shutdown left N send(s) unfinished:` followed by those addresses.
+Sign-up does not wait for the provider. The API sends at most four invites at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Invite email skipped for <address>. The send queue is full.` and that invite is not sent. On shutdown the API waits up to 10 seconds for queued and in-flight invites, then logs `Invite email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
 
 The HTML and plain-text layout live in `apps/api/src/mail/invite-email-template.ts`. Edit that file, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
 

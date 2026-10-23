@@ -1,13 +1,16 @@
 // The last step of a detached invite. A throw here becomes an unhandled rejection.
+const LOGGER_FAILED = "Logger failed.";
+
 export function logWithoutThrowing(write: (message: string) => void, message: string): void {
   try {
-    try {
-      write(message);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "logger failed";
-      console.error(`${message}\nLogger failed: ${detail}`);
-    }
+    write(message);
   } catch {
-    // console.error failed. Swallow it so the process stays up.
+    try {
+      // The logger error is not printed. Its text can hold a secret, and reading
+      // it can throw.
+      console.error(`${message}\n${LOGGER_FAILED}`);
+    } catch {
+      // console.error failed. Swallow it so the process stays up.
+    }
   }
 }
