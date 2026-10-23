@@ -278,7 +278,7 @@ describe("local runtime", () => {
     assert.equal(launcher.includes("FACTROVE_API_URL"), false);
     assert.equal(launcher.includes("loadCliEnv"), false);
     const cliPackage = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
-    assert.deepEqual(cliPackage.files, ["dist"]);
+    assert.deepEqual(cliPackage.files, ["dist", "LICENSE", "NOTICE"]);
     const cliMain = readFileSync(join(repoRoot, "apps/cli/src/main.ts"), "utf8");
     assert.equal(cliMain.includes("loadCliEnv"), false);
     const devScript = readFileSync(join(repoRoot, "scripts/dev.mjs"), "utf8");
