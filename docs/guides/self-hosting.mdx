@@ -87,6 +87,9 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
+| `BREVO_API_KEY` | no | Transactional key for invite email. Empty logs the message. The API does not call `GET /v3/account` |
+| `BREVO_SENDER_EMAIL` | no | Sender address. Default `support@factrove.app` |
+| `BREVO_SENDER_NAME` | no | Sender name. Default `Factrove` |
 | `MARKDOWN_CONVERSION_CONCURRENCY` | no | Markdown workers at once. Default `2`, then clamped to 1–4 |
 | `MARKDOWN_CONVERSION_QUEUE` | no | Conversions that may wait. Default `2`, then clamped to 0–8. A full queue is `503 CONVERSION_UNAVAILABLE` |
 
@@ -414,6 +417,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Invite email. Empty key logs the message. Sender defaults are `support@factrove.app` and `Factrove` |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
 | `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `S3_ALLOW_INSECURE_HTTP` | Garage on the host is `http://127.0.0.1:3900` with path style. Leave the insecure-HTTP flag unset for loopback and for AWS |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Set both, or neither. The Garage example pair is `factrove-local` / `factrove-local-secret` |
@@ -440,7 +444,55 @@ pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 
 `pnpm --filter @factrove/api start` runs `node apps/api/dist/main.js`. pnpm appends `--hostname` and `--port` to `next start`. An extra `--` before them makes Next.js treat `--hostname` as a directory and the process exits. Bind both to loopback when the proxy is on the same machine. Behind that proxy, `TRUSTED_PROXIES=127.0.0.1` matches a proxy that connects to the host loopback. That value is for this host process. The container path in [HTTPS and a reverse proxy](#https-and-a-reverse-proxy) sees the bridge gateway instead.
 
-`pnpm db:seed` upserts the fixture user `local-user` and organization `local-org`. That user has no password. It is optional and it does not wipe artifacts. A real install signs up in the web app.
+`pnpm db:seed` upserts the fixture user `local-user` and organization `local-org`. That user has no password. It is optional and it does not wipe artifacts. A real install signs up in the web app. That sign-up sends the invite email. Seed does not.
+
+### Invite email
+
+Creating an account sends one invite email to that address. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts. There is no organization-member invite route.
+
+`BREVO_API_KEY` empty logs the message. A transactional key sends `POST https://api.brevo.com/v3/smtp/email`. The verified sender is Factrove `<support@factrove.app>`, which is the default for `BREVO_SENDER_NAME` and `BREVO_SENDER_EMAIL`. Switching to a real key is those variables only. The API does not call `GET /v3/account`. Do not commit the key.
+
+Plus-addresses are valid. The stored address is lower case and the plus tag is kept, so `Magnificode+Factrove@Mail.Grokbot.com` is the same account as `magnificode+factrove@mail.grokbot.com`. Send the body as JSON. A form body would turn `+` into a space.
+
+Copy `apps/api/.env.example` to `apps/api/.env` when that file is missing. Set `BREVO_API_KEY` there for a live send. Leave the sender lines as the example. `BETTER_AUTH_SECRET` in the example is long enough for local use.
+
+From the repository root, with the API stopped:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm infra:up
+pnpm db:migrate
+pnpm --filter "@factrove/api..." build
+pnpm --filter @factrove/api start
+```
+
+`pnpm infra:up` starts PostgreSQL. `pnpm db:migrate` applies the committed migrations. The API listens on `http://127.0.0.1:3001`. In a second terminal, from the repository root, the invitee address is the first argument:
+
+```bash
+send_factrove_invite() {
+  invitee_email="${1:?Pass the invitee email. Example: magnificode+factrove@mail.grokbot.com}"
+  invitee_password="${2:-local-invite-check-1}"
+  payload=$(node --input-type=module -e 'process.stdout.write(JSON.stringify({name:"Invite Check",email:process.argv[1],password:process.argv[2]}))' -- "$invitee_email" "$invitee_password")
+  curl -sS -D - -o /tmp/factrove-signup.json \
+    -X POST http://127.0.0.1:3001/api/auth/sign-up/email \
+    -H 'Content-Type: application/json' \
+    -H 'Origin: http://localhost:3000' \
+    --data-binary "$payload"
+  printf '\n'
+}
+
+send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
+```
+
+A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
+
+- `Invite email sent to <address> messageId=<id>` means Brevo accepted the message.
+- `Brevo API key is unset. Invite email was not sent.` means the key was empty. The following lines are the message that would have been sent.
+- `Invite email failed for <address>.` means the key was set and Brevo or the network rejected it. The account still exists.
+
+A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
+
+The signup form at `http://localhost:3000/signup` sends the same request. `pnpm dev` starts the web app and the API together. Use the curl above when you only need the API.
 
 Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#point-the-cli-at-this-install). Health, library, and share checks are the same, against the host ports.
 

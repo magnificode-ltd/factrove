@@ -264,7 +264,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an account with email and password",
     description:
-      "Better Auth email/password sign-up. Email verification is off. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user.",
+      "Better Auth email/password sign-up. Email verification is off. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user. It also sends one invite email to that address. A plus-address such as name+tag@example.com is valid and is stored in lower case with the plus tag kept. With BREVO_API_KEY unset, the API logs the message and does not call Brevo. A set key sends POST https://api.brevo.com/v3/smtp/email. Sending failure does not roll back the account. A duplicate email does not send another message.",
     security: "none",
     requestBody: {
       contentType: "application/json",

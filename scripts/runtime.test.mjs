@@ -250,6 +250,10 @@ describe("local runtime", () => {
     assert.match(apiExample, /^AWS_ACCESS_KEY_ID=factrove-local$/m);
     assert.match(apiExample, /^AWS_SECRET_ACCESS_KEY=factrove-local-secret$/m);
     assert.match(apiExample, /Plain http:\/\/ is accepted only for localhost, 127\.0\.0\.1, and ::1/);
+    assert.match(apiExample, /^BREVO_API_KEY=$/m);
+    assert.match(apiExample, /^BREVO_SENDER_EMAIL=support@factrove\.app$/m);
+    assert.match(apiExample, /^BREVO_SENDER_NAME=Factrove$/m);
+    assert.equal(/^BREVO_API_KEY=\S/m.test(apiExample), false);
 
     const cliExample = readFileSync(join(repoRoot, "apps/cli/.env.example"), "utf8");
     assert.match(cliExample, /^# FACTROVE_API_URL=http:\/\/localhost:3001$/m);
