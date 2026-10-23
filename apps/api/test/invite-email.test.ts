@@ -237,6 +237,14 @@ describe("invite email", () => {
     expect(message.html).toContain("#858bee");
     expect(message.html).toContain("#5e64d6");
     expect(message.html).toContain("prefers-color-scheme: dark");
+    expect(wrapsLongText(cellByClass(message.html, "welcome"))).toBe(true);
+    expect(wrapsLongText(cellByClass(message.html, "fallback"))).toBe(true);
+    expect(wrapsLongText(cellByClass(message.html, "footer"))).toBe(true);
+    const dark = darkModeBlock(message.html);
+    expect(dark).toContain(".link { color: #858bee !important;");
+    expect(message.html).toContain(`<a class="link" href="${signInUrl}"`);
+    expect(message.html).toContain('class="link" href="mailto:support@factrove.app"');
+    expect(message.html).toContain('class="link" href="https://factrove.app"');
     expect(message.html).toContain("mailto:support@factrove.app");
     expect(message.html).toContain('href="https://factrove.app"');
     expect(message.html).not.toContain("<img");
@@ -580,6 +588,21 @@ describe("sign-up invite", () => {
     expect(invited).toHaveLength(1);
   });
 });
+
+function cellByClass(html: string, className: string): string {
+  const start = html.indexOf(`class="pad muted ${className}"`);
+  return html.slice(start, html.indexOf("</td>", start));
+}
+
+function wrapsLongText(cell: string): boolean {
+  return cell.includes("word-break:break-word") && cell.includes("overflow-wrap:anywhere");
+}
+
+function darkModeBlock(html: string): string {
+  const start = html.indexOf("@media (prefers-color-scheme: dark)");
+  const rule = html.indexOf(".link {", start);
+  return html.slice(start, html.indexOf("}", rule));
+}
 
 function sampleEmail(): OutboundEmail {
   return buildInviteEmail({

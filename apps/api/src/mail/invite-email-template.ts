@@ -11,6 +11,8 @@ export const INVITE_EMAIL_SUBJECT = "Welcome to Factrove";
 export const FACTROVE_SITE_URL = "https://factrove.app";
 
 const FONT = "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
+const WRAP = "word-break:break-word; overflow-wrap:anywhere;";
+const LINK_DARK = "#858bee";
 
 export type InviteEmailTemplateInput = {
   recipientEmail: string;
@@ -75,6 +77,7 @@ function renderHtml(input: {
     "<style>",
     `:root { color-scheme: light dark; supported-color-schemes: light dark; }`,
     `body, table, td, a { font-family: ${FONT}; }`,
+    ".welcome, .fallback, .footer, .welcome a, .fallback a, .footer a { word-break: break-word !important; overflow-wrap: anywhere !important; }",
     "@media only screen and (max-width: 620px) {",
     "  .container { width: 100% !important; }",
     "  .pad { padding-left: 20px !important; padding-right: 20px !important; }",
@@ -88,6 +91,7 @@ function renderHtml(input: {
     "  .wordmark-t { color: #f5f6fc !important; }",
     "  .btn { background-color: #858bee !important; }",
     "  .btn a { color: #1b2037 !important; }",
+    `  .link { color: ${LINK_DARK} !important; }`,
     "}",
     "</style>",
     "</head>",
@@ -104,7 +108,7 @@ function renderHtml(input: {
     `<td class="pad ink" style="padding:16px 40px 0 40px; font-family:${FONT}; font-size:28px; line-height:1.15; font-weight:800; letter-spacing:-0.045em; color:#1b2037;">Welcome to Factrove</td>`,
     "</tr>",
     "<tr>",
-    `<td class="pad muted" style="padding:16px 40px 0 40px; font-family:${FONT}; font-size:16px; line-height:1.55; color:#4a4f6a;">${welcome}</td>`,
+    `<td class="pad muted welcome" style="padding:16px 40px 0 40px; font-family:${FONT}; font-size:16px; line-height:1.55; color:#4a4f6a; ${WRAP}">${welcome}</td>`,
     "</tr>",
     "<tr>",
     '<td class="pad" align="left" style="padding:28px 40px 8px 40px;">',
@@ -118,10 +122,10 @@ function renderHtml(input: {
     "</td>",
     "</tr>",
     "<tr>",
-    `<td class="pad muted" style="padding:8px 40px 28px 40px; font-family:${FONT}; font-size:14px; line-height:1.55; color:#4a4f6a;">Or open this link:<br><a href="${signInUrl}" style="color:#5e64d6; word-break:break-all;">${signInUrl}</a></td>`,
+    `<td class="pad muted fallback" style="padding:8px 40px 28px 40px; font-family:${FONT}; font-size:14px; line-height:1.55; color:#4a4f6a; ${WRAP}">Or open this link:<br><a class="link" href="${signInUrl}" style="color:#5e64d6; ${WRAP}">${signInUrl}</a></td>`,
     "</tr>",
     "<tr>",
-    `<td class="pad muted" style="padding:0 40px 32px 40px; font-family:${FONT}; font-size:13px; line-height:1.55; color:#4a4f6a;">You received this email because an account was created for this address.<br>Contact <a href="mailto:${supportEmail}" style="color:#5e64d6;">${supportEmail}</a> if you need help.<br><a href="${siteUrl}" style="color:#5e64d6;">Factrove</a></td>`,
+    `<td class="pad muted footer" style="padding:0 40px 32px 40px; font-family:${FONT}; font-size:13px; line-height:1.55; color:#4a4f6a; ${WRAP}">You received this email because an account was created for this address.<br>Contact <a class="link" href="mailto:${supportEmail}" style="color:#5e64d6; ${WRAP}">${supportEmail}</a> if you need help.<br><a class="link" href="${siteUrl}" style="color:#5e64d6; ${WRAP}">Factrove</a></td>`,
     "</tr>",
     "</table>",
     "</td>",
