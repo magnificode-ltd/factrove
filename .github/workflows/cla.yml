@@ -21,8 +21,65 @@ jobs:
       !contains(fromJSON('["tommagni","dependabot[bot]","cursor[bot]","cursoragent"]'), github.event.issue.user.login)
     runs-on: ubuntu-latest
     steps:
+      # v2.6.1 reads commits(first: 100) once and only the first page of comments.
+      - name: Reject pull requests the CLA action cannot fully read
+        if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          number="${PR_NUMBER:-}"
+          if [ -z "${number}" ]; then
+            number="${ISSUE_NUMBER:-}"
+          fi
+          case "${number}" in
+            ''|*[!0-9]*)
+              printf '%s\n' 'CLA check needs a numeric pull request number.'
+              exit 1
+              ;;
+          esac
+          if [[ ! "${REPO}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            printf '%s\n' 'CLA check needs an owner/repository name.'
+            exit 1
+          fi
+          counts="$(gh api --jq '.commits, .comments' "repos/${REPO}/pulls/${number}")"
+          commits="${counts%%$'\n'*}"
+          comments="${counts#*$'\n'}"
+          if [ "${commits}" = "${counts}" ]; then
+            printf '%s\n' 'CLA check could not read the commit and comment counts.'
+            exit 1
+          fi
+          case "${commits}" in
+            ''|*[!0-9]*)
+              printf '%s\n' 'CLA check could not read the commit count.'
+              exit 1
+              ;;
+          esac
+          case "${comments}" in
+            ''|*[!0-9]*)
+              printf '%s\n' 'CLA check could not read the comment count.'
+              exit 1
+              ;;
+          esac
+          if [ "$((10#${commits}))" -gt 100 ] || [ "$((10#${comments}))" -gt 30 ]; then
+            commit_label="commits"
+            comment_label="comments"
+            if [ "$((10#${commits}))" -eq 1 ]; then
+              commit_label="commit"
+            fi
+            if [ "$((10#${comments}))" -eq 1 ]; then
+              comment_label="comment"
+            fi
+            printf '::error::This pull request has %s %s and %s %s. CLA Assistant Lite only reads the first 100 commits and the first 30 comments, so this check cannot see every author or signature. A maintainer must verify CLA status manually, or the contributor should split the pull request.\n' \
+              "${commits}" "${commit_label}" "${comments}" "${comment_label}"
+            exit 1
+          fi
       - name: CLA Assistant
         if: >-
+          success() &&
           (github.event_name == 'pull_request_target' || github.event.issue.pull_request) &&
           (
             github.event_name == 'pull_request_target' ||
