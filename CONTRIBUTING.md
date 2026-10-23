@@ -4,12 +4,10 @@ Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyri
 
 ## Sign the agreement
 
-A pull request from someone who is not allowlisted needs a signature. CLA Assistant Lite comments on the pull request and links to the agreement. To sign, comment this sentence on the pull request:
+Pull requests opened by the GitHub accounts `tommagni`, `dependabot[bot]`, `cursor[bot]`, and `cursoragent` skip the check. The workflow matches the account that opened the pull request. A git commit author name does not skip it. Every other pull request needs a signature. CLA Assistant Lite comments on the pull request and links to the agreement. To sign, comment this sentence on the pull request:
 
 ```text
 I have read the CLA Document and I hereby sign the CLA
 ```
 
-The check runs again after that comment. Comment `recheck` if you need the bot to look again. Signatures are stored in `signatures/version1/cla.json` on the `cla-signatures` branch. That branch is created for the bot and should not be protected, so the workflow can commit signatures with `GITHUB_TOKEN`. Do not add the signature file by hand. After a pull request is merged, the bot locks the conversation so the signature comment stays.
-
-`tommagni`, `dependabot[bot]`, `cursor[bot]`, and `cursoragent` are allowlisted and do not sign.
+The check runs again after that comment. Comment `recheck` if you need the bot to look again. Signatures are stored in `signatures/version1/cla.json` on the `cla-signatures` branch. That file is already on the branch and starts as `{"signedContributors":[]}`. CLA Assistant Lite v2.6.1 does not create the file when it is missing, so leave it in place. The branch should not be protected, so the workflow can commit new signatures with `GITHUB_TOKEN`. After a signed pull request is merged, the bot locks the conversation so the signature comment stays.
