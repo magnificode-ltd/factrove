@@ -87,9 +87,15 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
-| `BREVO_API_KEY` | no | Transactional key for invite email. Empty logs the message. The API does not call `GET /v3/account` |
-| `BREVO_SENDER_EMAIL` | no | Sender address. Default `support@factrove.app` |
-| `BREVO_SENDER_NAME` | no | Sender name. Default `Factrove` |
+| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes the invite to the API log and does not send it |
+| `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
+| `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
+| `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
+| `SMTP_PORT` | when transport is `smtp` | Port from 1 to 65535. `587` is the usual STARTTLS port |
+| `SMTP_SECURE` | when transport is `smtp` | `true` for implicit TLS, usually port 465. `false` for STARTTLS, usually port 587 |
+| `SMTP_USER` | no | SMTP username. Set it with `SMTP_PASSWORD`, or leave both empty when the server has no AUTH |
+| `SMTP_PASSWORD` | no | SMTP password. Do not commit it. On Brevo's relay this is the SMTP key, which is not `BREVO_API_KEY` |
+| `BREVO_API_KEY` | when transport is `brevo` | Brevo HTTP API key. Ignored for `log` and `smtp`. The API does not call `GET /v3/account` |
 | `MARKDOWN_CONVERSION_CONCURRENCY` | no | Markdown workers at once. Default `2`, then clamped to 1–4 |
 | `MARKDOWN_CONVERSION_QUEUE` | no | Conversions that may wait. Default `2`, then clamped to 0–8. A full queue is `503 CONVERSION_UNAVAILABLE` |
 
@@ -417,7 +423,9 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | Invite email. Empty key logs the message. Sender defaults are `support@factrove.app` and `Factrove` |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user and password, which are both set or both empty |
+| `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
 | `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `S3_ALLOW_INSECURE_HTTP` | Garage on the host is `http://127.0.0.1:3900` with path style. Leave the insecure-HTTP flag unset for loopback and for AWS |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Set both, or neither. The Garage example pair is `factrove-local` / `factrove-local-secret` |
@@ -450,11 +458,56 @@ pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 
 Creating an account sends one invite email to that address. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts. There is no organization-member invite route.
 
-`BREVO_API_KEY` empty logs the message. A transactional key sends `POST https://api.brevo.com/v3/smtp/email`. The verified sender is Factrove `<support@factrove.app>`, which is the default for `BREVO_SENDER_NAME` and `BREVO_SENDER_EMAIL`. Switching to a real key is those variables only. The API does not call `GET /v3/account`. Do not commit the key.
+The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
+
+`EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
 
 Plus-addresses are valid. The stored address is lower case and the plus tag is kept, so `Magnificode+Factrove@Mail.Grokbot.com` is the same account as `magnificode+factrove@mail.grokbot.com`. Send the body as JSON. A form body would turn `+` into a space.
 
-Copy `apps/api/.env.example` to `apps/api/.env` when that file is missing. Set `BREVO_API_KEY` there for a live send. Leave the sender lines as the example. `BETTER_AUTH_SECRET` in the example is long enough for local use.
+Copy `apps/api/.env.example` to `apps/api/.env` when that file is missing. Put one of these blocks in that file before you start the API. `BETTER_AUTH_SECRET` in the example is long enough for local use. Do not commit `BREVO_API_KEY` or `SMTP_PASSWORD`.
+
+Log, which is also the default when `EMAIL_TRANSPORT` is unset:
+
+```bash
+EMAIL_TRANSPORT=log
+EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_NAME=Factrove
+```
+
+Any SMTP server. Leave `SMTP_USER` and `SMTP_PASSWORD` empty together when that server has no AUTH. `SMTP_SECURE=true` is implicit TLS, usually port 465. `SMTP_SECURE=false` is STARTTLS, usually port 587.
+
+```bash
+EMAIL_TRANSPORT=smtp
+EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_NAME=Factrove
+SMTP_HOST=mail.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=mailer
+SMTP_PASSWORD=replace-with-the-smtp-password
+```
+
+Brevo's SMTP relay. The login and the SMTP key come from the Brevo SMTP settings. They are not `BREVO_API_KEY`.
+
+```bash
+EMAIL_TRANSPORT=smtp
+EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_NAME=Factrove
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-brevo-smtp-login
+SMTP_PASSWORD=replace-with-the-brevo-smtp-key
+```
+
+Brevo's HTTP API:
+
+```bash
+EMAIL_TRANSPORT=brevo
+EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_NAME=Factrove
+BREVO_API_KEY=replace-with-a-transactional-key
+```
 
 From the repository root, with the API stopped:
 
@@ -486,9 +539,9 @@ send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
 
 A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
 
-- `Invite email sent to <address> messageId=<id>` means Brevo accepted the message.
-- `Brevo API key is unset. Invite email was not sent.` means the key was empty. The following lines are the message that would have been sent.
-- `Invite email failed for <address>.` means the key was set and Brevo or the network rejected it. The account still exists.
+- `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message.
+- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected. The following lines are From, To, Subject, and the text.
+- `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY` or `SMTP_PASSWORD`.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
 

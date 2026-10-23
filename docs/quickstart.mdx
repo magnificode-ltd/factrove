@@ -48,7 +48,7 @@ pnpm dev
 
 ## 2. Create an account and an API key
 
-Open `http://localhost:3000/signup`, then create a key at `/account/api-keys`. The secret is shown once. Creating the account sends an invite email. With `BREVO_API_KEY` empty, the API logs that message. A plus-address is a valid invitee. The commands that send through a real key, with the address as a parameter, are in [Invite email](/guides/self-hosting#invite-email). A copyable sign-in and key-creation request is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+Open `http://localhost:3000/signup`, then create a key at `/account/api-keys`. The secret is shown once. Creating the account sends an invite email. With `EMAIL_TRANSPORT` unset or `log`, the API logs that message and does not send it. A plus-address is a valid invitee. The commands for the log, SMTP, and Brevo transports, with the address as a parameter, are in [Invite email](/guides/self-hosting#invite-email). A copyable sign-in and key-creation request is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
 
 In a second terminal, from the repository root:
 

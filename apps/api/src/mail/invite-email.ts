@@ -1,4 +1,4 @@
-import type { TransactionalEmail } from "./brevo-client.js";
+import type { OutboundEmail } from "./email-sender.js";
 
 export const INVITE_EMAIL_SUBJECT = "You're invited to Factrove";
 
@@ -9,22 +9,21 @@ export type InviteRecipient = {
 
 export function buildInviteEmail(input: {
   recipient: InviteRecipient;
-  sender: { email: string; name: string };
   signInUrl: string;
-}): TransactionalEmail {
+}): OutboundEmail {
   const email = input.recipient.email.trim();
   const displayName = oneLine(input.recipient.name);
   const greeting = displayName.length > 0
     ? `${displayName}, you are invited to Factrove.`
     : "You are invited to Factrove.";
-  const textContent = [
+  const text = [
     greeting,
     "",
     `An account is ready for ${email}. Sign in at ${input.signInUrl}.`,
     "",
     "This message was sent because an account was created for this address.",
   ].join("\n");
-  const htmlContent = [
+  const html = [
     "<!DOCTYPE html>",
     "<html><body>",
     `<p>${escapeHtml(greeting)}</p>`,
@@ -33,11 +32,10 @@ export function buildInviteEmail(input: {
     "</body></html>",
   ].join("");
   return {
-    sender: input.sender,
-    to: { email, name: displayName.length > 0 ? displayName : email },
+    to: email,
     subject: INVITE_EMAIL_SUBJECT,
-    textContent,
-    htmlContent,
+    html,
+    text,
   };
 }
 

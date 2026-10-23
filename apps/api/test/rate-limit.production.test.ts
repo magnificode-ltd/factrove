@@ -36,9 +36,11 @@ const config: ApiConfig = {
   authCookieDomain: null,
   trustedProxies: [],
   shareTokenKey: null,
+  emailTransport: "log",
+  emailFromAddress: "support@factrove.app",
+  emailFromName: "Factrove",
   brevoApiKey: null,
-  brevoSenderEmail: "support@factrove.app",
-  brevoSenderName: "Factrove",
+  smtp: null,
 };
 
 class UnusedBlobStore implements BlobStore {

@@ -16,14 +16,28 @@ export type ApiConfig = {
   trustedProxies: readonly string[];
   // HKDF input for share-token encryption. Null derives the key from authSecret.
   shareTokenKey: string | null;
-  // Null selects the logging Brevo client. A value sends through the transactional API.
+  emailTransport: EmailTransport;
+  emailFromAddress: string;
+  emailFromName: string;
+  // Set only when emailTransport is brevo. Other transports leave this null.
   brevoApiKey: string | null;
-  brevoSenderEmail: string;
-  brevoSenderName: string;
+  // Set only when emailTransport is smtp. Other transports leave this null.
+  smtp: SmtpConfig | null;
 };
 
-export const DEFAULT_BREVO_SENDER_EMAIL = "support@factrove.app";
-export const DEFAULT_BREVO_SENDER_NAME = "Factrove";
+export type EmailTransport = "log" | "smtp" | "brevo";
+
+export type SmtpConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string | null;
+  password: string | null;
+};
+
+export const DEFAULT_EMAIL_FROM_ADDRESS = "support@factrove.app";
+export const DEFAULT_EMAIL_FROM_NAME = "Factrove";
+export const EMAIL_TRANSPORTS = ["log", "smtp", "brevo"] as const;
 
 const DEFAULT_WEB_ORIGIN = "http://localhost:3000";
 const DEFAULT_API_ORIGIN = "http://localhost:3001";
@@ -43,9 +57,7 @@ export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin, publicBaseUrl),
     trustedProxies: readTrustedProxies(env.TRUSTED_PROXIES),
     shareTokenKey: readShareTokenKey(env.SHARE_TOKEN_KEY),
-    brevoApiKey: readBrevoApiKey(env.BREVO_API_KEY),
-    brevoSenderEmail: readBrevoSenderEmail(env.BREVO_SENDER_EMAIL),
-    brevoSenderName: readBrevoSenderName(env.BREVO_SENDER_NAME),
+    ...readEmailConfig(env),
   };
 }
 
@@ -97,31 +109,126 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readBrevoApiKey(value: string | undefined): string | null {
-  const key = value?.trim() ?? "";
-  return key.length === 0 ? null : key;
+function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTransport" | "emailFromAddress" | "emailFromName" | "brevoApiKey" | "smtp"> {
+  const emailTransport = readEmailTransport(env.EMAIL_TRANSPORT);
+  const emailFromAddress = readEmailFromAddress(env.EMAIL_FROM_ADDRESS);
+  const emailFromName = readEmailFromName(env.EMAIL_FROM_NAME);
+  if (emailTransport === "brevo") {
+    return {
+      emailTransport,
+      emailFromAddress,
+      emailFromName,
+      brevoApiKey: readRequiredBrevoApiKey(env.BREVO_API_KEY),
+      smtp: null,
+    };
+  }
+  if (emailTransport === "smtp") {
+    return {
+      emailTransport,
+      emailFromAddress,
+      emailFromName,
+      brevoApiKey: null,
+      smtp: readSmtpConfig(env),
+    };
+  }
+  return {
+    emailTransport,
+    emailFromAddress,
+    emailFromName,
+    brevoApiKey: null,
+    smtp: null,
+  };
 }
 
-function readBrevoSenderEmail(value: string | undefined): string {
+function readEmailTransport(value: string | undefined): EmailTransport {
+  const transport = value?.trim().toLowerCase() ?? "";
+  if (transport.length === 0 || transport === "log") {
+    return "log";
+  }
+  if (transport === "smtp" || transport === "brevo") {
+    return transport;
+  }
+  throw new Error("EMAIL_TRANSPORT must be log, smtp, or brevo.");
+}
+
+function readEmailFromAddress(value: string | undefined): string {
   const email = value?.trim() ?? "";
   if (email.length === 0) {
-    return DEFAULT_BREVO_SENDER_EMAIL;
+    return DEFAULT_EMAIL_FROM_ADDRESS;
   }
   if (!isEmailAddress(email)) {
-    throw new Error("BREVO_SENDER_EMAIL must be an email address.");
+    throw new Error("EMAIL_FROM_ADDRESS must be an email address.");
   }
   return email;
 }
 
-function readBrevoSenderName(value: string | undefined): string {
+function readEmailFromName(value: string | undefined): string {
   const name = value?.trim() ?? "";
   if (name.length === 0) {
-    return DEFAULT_BREVO_SENDER_NAME;
+    return DEFAULT_EMAIL_FROM_NAME;
   }
   if (name.length > 70 || /[\r\n]/.test(name)) {
-    throw new Error("BREVO_SENDER_NAME must be one line of 1 to 70 characters.");
+    throw new Error("EMAIL_FROM_NAME must be one line of 1 to 70 characters.");
   }
   return name;
+}
+
+function readRequiredBrevoApiKey(value: string | undefined): string {
+  const key = value?.trim() ?? "";
+  if (key.length === 0) {
+    throw new Error("BREVO_API_KEY is required when EMAIL_TRANSPORT is brevo.");
+  }
+  return key;
+}
+
+function readSmtpConfig(env: NodeJS.ProcessEnv): SmtpConfig {
+  const missing = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE"].filter((name) => {
+    const value = env[name]?.trim() ?? "";
+    return value.length === 0;
+  });
+  if (missing.length > 0) {
+    throw new Error(`Set ${missing.join(", ")} when EMAIL_TRANSPORT is smtp.`);
+  }
+  const host = env.SMTP_HOST?.trim() ?? "";
+  if (/[\s/]/.test(host)) {
+    throw new Error("SMTP_HOST must be a hostname or IP address.");
+  }
+  const user = env.SMTP_USER?.trim() ?? "";
+  const password = env.SMTP_PASSWORD ?? "";
+  const passwordPresent = password.trim().length > 0;
+  if ((user.length === 0) !== !passwordPresent) {
+    throw new Error("Set SMTP_USER and SMTP_PASSWORD together when EMAIL_TRANSPORT is smtp.");
+  }
+  return {
+    host,
+    port: readRequiredPort(env.SMTP_PORT, "SMTP_PORT"),
+    secure: readSmtpSecure(env.SMTP_SECURE),
+    user: user.length > 0 ? user : null,
+    password: passwordPresent ? password : null,
+  };
+}
+
+function readSmtpSecure(value: string | undefined): boolean {
+  const raw = value?.trim().toLowerCase() ?? "";
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error("SMTP_SECURE must be true or false.");
+}
+
+function readRequiredPort(value: string | undefined, name: string): number {
+  const raw = value?.trim() ?? "";
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`${name} must be an integer from 1 to 65535.`);
+  }
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${name} must be an integer from 1 to 65535.`);
+  }
+  return port;
 }
 
 function isEmailAddress(value: string): boolean {

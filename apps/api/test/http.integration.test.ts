@@ -66,9 +66,11 @@ const config: ApiConfig = {
   authCookieDomain: null,
   trustedProxies: [],
   shareTokenKey: null,
+  emailTransport: "log",
+  emailFromAddress: "support@factrove.app",
+  emailFromName: "Factrove",
   brevoApiKey: null,
-  brevoSenderEmail: "support@factrove.app",
-  brevoSenderName: "Factrove",
+  smtp: null,
 };
 
 let ownerApiKey = "";
@@ -200,9 +202,11 @@ describe("API configuration", () => {
     expect(defaults.authCookieDomain).toBeNull();
     expect(defaults.trustedProxies).toEqual([]);
     expect(defaults.shareTokenKey).toBeNull();
+    expect(defaults.emailTransport).toBe("log");
+    expect(defaults.emailFromAddress).toBe("support@factrove.app");
+    expect(defaults.emailFromName).toBe("Factrove");
     expect(defaults.brevoApiKey).toBeNull();
-    expect(defaults.brevoSenderEmail).toBe("support@factrove.app");
-    expect(defaults.brevoSenderName).toBe("Factrove");
+    expect(defaults.smtp).toBeNull();
   });
 
   it("accepts a parent domain that covers both origins", () => {

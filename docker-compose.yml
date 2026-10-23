@@ -79,9 +79,15 @@ services:
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
       SHARE_TOKEN_KEY: ${SHARE_TOKEN_KEY:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-log}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-support@factrove.app}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Factrove}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
-      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-support@factrove.app}
-      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME:-Factrove}
       S3_BUCKET: ${S3_BUCKET:-factrove}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ENDPOINT: http://garage:3900

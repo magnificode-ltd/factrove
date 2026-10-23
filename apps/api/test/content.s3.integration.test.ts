@@ -68,9 +68,11 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       authCookieDomain: null,
       trustedProxies: [],
       shareTokenKey: null,
+      emailTransport: "log",
+      emailFromAddress: "support@factrove.app",
+      emailFromName: "Factrove",
       brevoApiKey: null,
-      brevoSenderEmail: "support@factrove.app",
-      brevoSenderName: "Factrove",
+      smtp: null,
     };
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(API_CONFIG)
