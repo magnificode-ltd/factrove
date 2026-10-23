@@ -156,10 +156,12 @@ describe("local runtime", () => {
         NEXT_PUBLIC_API_URL: "http://localhost:3001",
         FACTROVE_API_URL: "http://localhost:3001",
         DATABASE_URL: "postgresql://from-file",
+        SOURCE_CODE_URL: "https://git.example.com/from-file",
       },
     );
 
     assert.equal(env.NEXT_PUBLIC_API_URL, "http://localhost:3001");
+    assert.equal(env.SOURCE_CODE_URL, undefined);
     assert.equal(env.DATABASE_URL, undefined);
     assert.equal(env.BASE_URL, undefined);
     assert.equal(env.AWS_PROFILE, undefined);
@@ -174,8 +176,12 @@ describe("local runtime", () => {
   });
 
   it("keeps an explicit web origin and reports missing API settings", async () => {
-    const env = webLaunchEnv({ NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001" }, { NEXT_PUBLIC_API_URL: "http://localhost:3001" });
+    const env = webLaunchEnv(
+      { NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001", SOURCE_CODE_URL: "https://git.example.com/fork" },
+      { NEXT_PUBLIC_API_URL: "http://localhost:3001" },
+    );
     assert.equal(env.NEXT_PUBLIC_API_URL, "http://127.0.0.1:3001");
+    assert.equal(env.SOURCE_CODE_URL, "https://git.example.com/fork");
     assert.equal(legacyRootEnvWarning(join(repoRoot, ".env-does-not-exist")), "");
     const legacyDir = await mkdtemp(join(tmpdir(), "factrove-legacy-env-"));
     const legacyFile = join(legacyDir, ".env");
@@ -272,7 +278,7 @@ describe("local runtime", () => {
     assert.equal(launcher.includes("FACTROVE_API_URL"), false);
     assert.equal(launcher.includes("loadCliEnv"), false);
     const cliPackage = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
-    assert.deepEqual(cliPackage.files, ["dist"]);
+    assert.deepEqual(cliPackage.files, ["dist", "LICENSE", "NOTICE"]);
     const cliMain = readFileSync(join(repoRoot, "apps/cli/src/main.ts"), "utf8");
     assert.equal(cliMain.includes("loadCliEnv"), false);
     const devScript = readFileSync(join(repoRoot, "scripts/dev.mjs"), "utf8");
@@ -372,6 +378,36 @@ describe("local runtime", () => {
     assert.match(stderr, /local S3 stand-in/);
     assert.match(stderr, /real AWS bucket/);
     assert.equal(stderr.includes("docker"), false);
+  });
+
+  it("licenses the workspace under AGPL-3.0-or-later and ships that text with the CLI", () => {
+    const rootLicense = readFileSync(join(repoRoot, "LICENSE"), "utf8");
+    assert.equal(readFileSync(join(repoRoot, "apps/cli/LICENSE"), "utf8"), rootLicense);
+    assert.match(rootLicense, /GNU AFFERO GENERAL PUBLIC LICENSE/);
+    assert.match(rootLicense, /Copyright \(C\) 2007 Free Software Foundation, Inc\./);
+    const notice = readFileSync(join(repoRoot, "NOTICE"), "utf8");
+    assert.equal(readFileSync(join(repoRoot, "apps/cli/NOTICE"), "utf8"), notice);
+    assert.match(notice, /Copyright \(C\) 2026 Magnificode LTD/);
+    assert.match(notice, /any later version/);
+    const packages = [
+      "package.json",
+      "apps/api/package.json",
+      "apps/web/package.json",
+      "apps/cli/package.json",
+      "packages/api-client/package.json",
+      "packages/contracts/package.json",
+    ];
+    for (const file of packages) {
+      const manifest = JSON.parse(readFileSync(join(repoRoot, file), "utf8"));
+      assert.equal(manifest.license, "AGPL-3.0-or-later", file);
+    }
+    const cli = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
+    assert.equal(cli.files.includes("LICENSE"), true);
+    assert.equal(cli.files.includes("NOTICE"), true);
+    const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    assert.match(compose, /SOURCE_CODE_URL: \$\{SOURCE_CODE_URL:-https:\/\/github\.com\/magnificode-ltd\/factrove\}/);
+    const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
+    assert.match(apiExample, /^# SOURCE_CODE_URL=https:\/\/github\.com\/magnificode-ltd\/factrove$/m);
   });
 
   it("copies only NEXT_PUBLIC_API_URL from the application env file", async () => {

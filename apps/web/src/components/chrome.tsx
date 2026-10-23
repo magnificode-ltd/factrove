@@ -1,8 +1,12 @@
 import type { ReactNode } from "react";
+import { SourceCodeLink } from "@/components/source-code-link";
 import { Wordmark } from "@/components/wordmark";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LibraryView } from "@/library/load-library";
+
+const sourceLinkClass =
+  "shrink-0 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-ink hover:underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d";
 
 export function AppBar({ children, clear = false }: { children?: ReactNode; clear?: boolean }) {
   return (
@@ -17,6 +21,7 @@ export function AppBar({ children, clear = false }: { children?: ReactNode; clea
       <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3 sm:px-8">
         <Wordmark />
         {children}
+        <SourceCodeLink className={cn(sourceLinkClass, "ml-auto")} />
       </div>
     </header>
   );
@@ -47,6 +52,7 @@ export function ViewerBar({
         </h1>
         {meta}
         {tools}
+        <SourceCodeLink className={sourceLinkClass} />
       </div>
     </header>
   );

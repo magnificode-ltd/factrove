@@ -1,9 +1,12 @@
 const DEFAULT_PUBLIC_API_URL = "http://localhost:3001";
 
+export const DEFAULT_SOURCE_CODE_URL = "https://github.com/magnificode-ltd/factrove";
+
 type RuntimeEnv = {
   BROWSER_API_URL?: string;
   INTERNAL_API_URL?: string;
   NEXT_PUBLIC_API_URL?: string;
+  SOURCE_CODE_URL?: string;
 };
 
 export function readPublicApiOrigin(value: string | undefined): string | undefined {
@@ -27,6 +30,37 @@ export function readPublicApiOrigin(value: string | undefined): string | undefin
     return undefined;
   }
   return url.origin;
+}
+
+export function readSourceCodeUrl(value: string | undefined): string | undefined {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return undefined;
+  }
+  if (url.username !== "" || url.password !== "") {
+    return undefined;
+  }
+  return url.href;
+}
+
+// URL of the Source code link. Read when a page renders so a fork can set
+// SOURCE_CODE_URL without rebuilding the web app.
+export function sourceCodeUrl(env?: RuntimeEnv): string {
+  const source = runtimeEnv(env);
+  const override = readSourceCodeUrl(source.SOURCE_CODE_URL);
+  if (source.SOURCE_CODE_URL?.trim() && !override) {
+    console.warn("SOURCE_CODE_URL must be an absolute http(s) URL without a username or password.");
+  }
+  return override ?? DEFAULT_SOURCE_CODE_URL;
 }
 
 // Origin the Next.js server uses for its own fetches. INTERNAL_API_URL and BROWSER_API_URL

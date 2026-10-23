@@ -129,6 +129,7 @@ services:
       HOSTNAME: 0.0.0.0
       BROWSER_API_URL: ${BROWSER_API_URL:-http://localhost:3001}
       INTERNAL_API_URL: http://api:3001
+      SOURCE_CODE_URL: ${SOURCE_CODE_URL:-https://github.com/magnificode-ltd/factrove}
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:

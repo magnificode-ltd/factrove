@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { browserApiUrl, publicConfigScript, readPublicApiOrigin, serverApiUrl } from "../src/public-config";
+import {
+  browserApiUrl,
+  DEFAULT_SOURCE_CODE_URL,
+  publicConfigScript,
+  readPublicApiOrigin,
+  readSourceCodeUrl,
+  serverApiUrl,
+  sourceCodeUrl,
+} from "../src/public-config";
 
-const keys = ["BROWSER_API_URL", "INTERNAL_API_URL", "NEXT_PUBLIC_API_URL"] as const;
+const keys = ["BROWSER_API_URL", "INTERNAL_API_URL", "NEXT_PUBLIC_API_URL", "SOURCE_CODE_URL"] as const;
 
 afterEach(() => {
   for (const key of keys) {
@@ -49,6 +57,19 @@ describe("public API origin", () => {
     expect(publicConfigScript({ BROWSER_API_URL: "https://api.example.com/library" })).toBe(
       "window.__FACTROVE_PUBLIC__=window.__FACTROVE_PUBLIC__||{}",
     );
+  });
+
+  it("uses the Factrove repository unless SOURCE_CODE_URL is an absolute http(s) URL", () => {
+    expect(readSourceCodeUrl(" https://github.com/example/fork ")).toBe("https://github.com/example/fork");
+    expect(readSourceCodeUrl("https://git.example.com/factrove/")).toBe("https://git.example.com/factrove/");
+    expect(readSourceCodeUrl("http://user:secret@git.example.com/factrove")).toBeUndefined();
+    expect(readSourceCodeUrl("javascript:alert(1)")).toBeUndefined();
+    expect(readSourceCodeUrl("")).toBeUndefined();
+    expect(sourceCodeUrl({})).toBe(DEFAULT_SOURCE_CODE_URL);
+    expect(sourceCodeUrl({ SOURCE_CODE_URL: "https://git.example.com/fork" })).toBe("https://git.example.com/fork");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sourceCodeUrl({ SOURCE_CODE_URL: "not a url" })).toBe(DEFAULT_SOURCE_CODE_URL);
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it("prefers the injected browser origin over the baked value", () => {

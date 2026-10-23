@@ -39,4 +39,6 @@ The current HTML object key and its content revision are stored on the artifact 
 
 When adding an environment variable, add that key to the committed example for the process that reads it. Application settings for the API and the web app belong in `apps/api/.env.example`. CLI settings belong in `apps/cli/.env.example`. Do not commit real secrets.
 
+The project is licensed under AGPL-3.0-or-later. New packages must set `"license": "AGPL-3.0-or-later"` in package.json.
+
 Every new CLI feature, and every change to CLI commands, flags, or output, ships in the same PR as the matching docs. Update the CLI guide pages under `docs/` (Mintlify reads that folder), regenerate the CLI reference with `pnpm docs:cli`, and update README CLI examples when they are affected. When the API changes, regenerate the OpenAPI reference with `pnpm docs:openapi`. A PR that adds a CLI feature without those docs is incomplete. See [DOCUMENTATION.md](DOCUMENTATION.md).

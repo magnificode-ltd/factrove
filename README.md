@@ -251,7 +251,7 @@ docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
 
 Set `FACTROVE_MIGRATE=1` on the API container only when that container should migrate before it listens. Any other value leaves startup as it is.
 
-`BROWSER_API_URL` is the origin the browser uses to call the API. The web server injects it when it renders a page, so one image works for any host. It must match the host and port you publish for the API. `INTERNAL_API_URL` is `http://api:3001` on this Compose network, which is the origin the Next.js server uses for its own requests. Changing either value does not require a rebuild. `pnpm build` and `next start` still keep `NEXT_PUBLIC_API_URL` from the build.
+`BROWSER_API_URL` is the origin the browser uses to call the API. The web server injects it when it renders a page, so one image works for any host. It must match the host and port you publish for the API. `INTERNAL_API_URL` is `http://api:3001` on this Compose network, which is the origin the Next.js server uses for its own requests. Changing either value does not require a rebuild. `pnpm build` and `next start` still keep `NEXT_PUBLIC_API_URL` from the build. `SOURCE_CODE_URL` is the URL of the Source code link. It defaults to `https://github.com/magnificode-ltd/factrove`. The web server reads it when it renders a page. Set it on the web process, or in `.env.docker` for Compose, when a fork should point at its own repository.
 
 Garage is `http://garage:3900` on the Compose network, and it creates the bucket named by `S3_BUCKET` when it starts. The API sets `S3_ALLOW_INSECURE_HTTP=true` so that private-network HTTP endpoint is accepted. The access key is sent in cleartext. Leave the flag unset for localhost and for AWS.
 
@@ -313,3 +313,9 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Shared MVP contract](prd/mvp_contract.md): API, package interfaces, and local configuration.
 - [Docs site maintenance](DOCUMENTATION.md): regenerate Mintlify references and preview locally. The pages themselves are the user documentation above.
 - [Agent orientation](AGENTS.md): a concise guide to the codebase and its documentation.
+
+## License
+
+Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository.
+
+Contributors keep their copyright and license their contributions to Magnificode LTD under the [contributor license agreement](CLA.md), which includes the right to relicense those contributions. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
