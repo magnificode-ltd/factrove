@@ -180,6 +180,7 @@ describe("email configuration", () => {
       host: "mail.example.com",
       port: 587,
       secure: false,
+      requireTls: true,
       user: null,
       password: null,
     });
@@ -197,9 +198,24 @@ describe("email configuration", () => {
       host: "smtp-relay.brevo.com",
       port: 465,
       secure: true,
+      requireTls: false,
       user: "login",
       password: `  ${SMTP_PASSWORD}  `,
     });
+    expect(readApiConfig(authEnv({
+      EMAIL_TRANSPORT: "smtp",
+      SMTP_HOST: "mail.example.com",
+      SMTP_PORT: "587",
+      SMTP_SECURE: "false",
+      SMTP_REQUIRE_TLS: "false",
+    })).smtp?.requireTls).toBe(false);
+    expect(() => readApiConfig(authEnv({
+      EMAIL_TRANSPORT: "smtp",
+      SMTP_HOST: "mail.example.com",
+      SMTP_PORT: "587",
+      SMTP_SECURE: "false",
+      SMTP_REQUIRE_TLS: "yes",
+    }))).toThrow("SMTP_REQUIRE_TLS must be true or false.");
   });
 });
 
@@ -333,7 +349,7 @@ describe("email transport selection", () => {
     let transports = 0;
     const sender = createEmailSender(apiConfig({
       emailTransport: "smtp",
-      smtp: { host: "mail.example.com", port: 587, secure: false, user: null, password: null },
+      smtp: { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: null, password: null },
     }), {
       createTransport: () => {
         transports += 1;
@@ -405,6 +421,28 @@ describe("Brevo email sender", () => {
     await expect(failed.send(sampleEmail())).rejects.toThrow(/\[redacted\]/);
     await expect(failed.send(sampleEmail())).rejects.not.toThrow(new RegExp(FAKE_KEY));
   });
+
+  it("redacts a key that crosses the logged error length", async () => {
+    const key = `xkeysib-${"k".repeat(40)}`;
+    const message = `${"a".repeat(190)}${key} tail`;
+    // A 200-character cut through this body keeps the start of the key.
+    const leakedPrefix = message.slice(0, 200).slice(190);
+    const sender = new BrevoEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      key,
+      async () => new Response(JSON.stringify({ message }), { status: 401 }),
+    );
+    let detail = "";
+    try {
+      await sender.send(sampleEmail());
+    } catch (error) {
+      detail = error instanceof Error ? error.message : "";
+    }
+    expect(detail).toContain("[redacted]");
+    expect(detail).not.toContain(key);
+    expect(detail).not.toContain(leakedPrefix);
+    expect(leakedPrefix.startsWith("xkeysib-")).toBe(true);
+  });
 });
 
 describe("SMTP email sender", () => {
@@ -414,7 +452,7 @@ describe("SMTP email sender", () => {
     let verified = 0;
     const sender = new SmtpEmailSender(
       { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
-      { host: "smtp-relay.brevo.com", port: 587, secure: false, user: "login", password: SMTP_PASSWORD },
+      { host: "smtp-relay.brevo.com", port: 587, secure: false, requireTls: true, user: "login", password: SMTP_PASSWORD },
       (options) => {
         seen.push(options);
         return {
@@ -441,6 +479,7 @@ describe("SMTP email sender", () => {
       host: "smtp-relay.brevo.com",
       port: 587,
       secure: false,
+      requireTLS: true,
       auth: { user: "login", pass: SMTP_PASSWORD },
       connectionTimeout: 10_000,
       greetingTimeout: 10_000,
@@ -451,12 +490,13 @@ describe("SMTP email sender", () => {
     expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
   });
 
-  it("omits AUTH when the server has no credentials and redacts the password from errors", async () => {
+  it("omits AUTH when the server has no credentials and redacts the user and password from errors", async () => {
     const open = new SmtpEmailSender(
       { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
-      { host: "mail.example.com", port: 25, secure: false, user: null, password: null },
+      { host: "mail.example.com", port: 25, secure: false, requireTls: true, user: null, password: null },
       (options) => {
         expect(options.auth).toBeUndefined();
+        expect(options.requireTLS).toBe(true);
         return { async sendMail() { return {}; } };
       },
       () => {},
@@ -465,15 +505,19 @@ describe("SMTP email sender", () => {
 
     const failed = new SmtpEmailSender(
       { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
-      { host: "mail.example.com", port: 587, secure: true, user: "mailer", password: SMTP_PASSWORD },
-      () => ({
-        async sendMail() {
-          throw new Error(`535 auth ${SMTP_PASSWORD}`);
-        },
-      }),
+      { host: "mail.example.com", port: 587, secure: true, requireTls: false, user: "smtp-user-not-real", password: SMTP_PASSWORD },
+      (options) => {
+        expect(options.requireTLS).toBe(false);
+        return {
+          async sendMail() {
+            throw new Error(`535 auth smtp-user-not-real ${SMTP_PASSWORD}`);
+          },
+        };
+      },
     );
     await expect(failed.send(sampleEmail())).rejects.toThrow(/SMTP invite email failed/);
     await expect(failed.send(sampleEmail())).rejects.toThrow(/\[redacted\]/);
+    await expect(failed.send(sampleEmail())).rejects.not.toThrow(/smtp-user-not-real/);
     await expect(failed.send(sampleEmail())).rejects.not.toThrow(new RegExp(SMTP_PASSWORD));
   });
 });
@@ -502,7 +546,7 @@ describe("invite mailer", () => {
   it("logs a failure without secrets and still resolves", async () => {
     const mailer = new InviteMailer({
       async send() {
-        throw new Error(`rejected key ${FAKE_KEY} password ${SMTP_PASSWORD}`);
+        throw new Error(`rejected key ${FAKE_KEY} password ${SMTP_PASSWORD} user smtp-user-not-real`);
       },
     }, apiConfig({
       emailTransport: "smtp",
@@ -511,16 +555,42 @@ describe("invite mailer", () => {
         host: "mail.example.com",
         port: 587,
         secure: false,
-        user: "mailer",
+        requireTls: true,
+        user: "smtp-user-not-real",
         password: SMTP_PASSWORD,
       },
     }));
-    const lines = await captureLogs(() => mailer.sendInvite({ email: PLUS_EMAIL, name: "Invite Check" }));
+    const lines = await captureLogs(async () => {
+      await mailer.sendInvite({ email: PLUS_EMAIL, name: "Invite Check" });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
     expect(lines).toEqual([
-      `Invite email failed for ${PLUS_EMAIL}. rejected key [redacted] password [redacted]`,
+      `Invite email failed for ${PLUS_EMAIL}. rejected key [redacted] password [redacted] user [redacted]`,
     ]);
     expect(lines.join("\n")).not.toContain(FAKE_KEY);
     expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
+    expect(lines.join("\n")).not.toContain("smtp-user-not-real");
+  });
+
+  it("returns while the provider send is still pending", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mailer = new InviteMailer({
+      send: () => gate,
+    }, apiConfig({}));
+    try {
+      const result = await Promise.race([
+        mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" }).then(() => "done"),
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve("waited"), 200);
+        }),
+      ]);
+      expect(result).toBe("done");
+    } finally {
+      release();
+    }
   });
 
   it("skips a blank address", async () => {
@@ -588,6 +658,39 @@ describe("sign-up invite", () => {
     const duplicate = await auth.handler(signUpRequest(PLUS_EMAIL));
     expect(duplicate.ok).toBe(false);
     expect(invited).toHaveLength(1);
+  });
+
+  it("responds while the invite send is still pending", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const auth = createAuth({
+      prisma: {} as PrismaClient,
+      database: memoryAdapter({
+        user: [],
+        session: [],
+        account: [],
+        verification: [],
+        apikey: [],
+      }),
+      baseURL: "http://localhost:3001",
+      secret: TEST_AUTH_SECRET,
+      trustedOrigins: ["http://localhost:3000"],
+      cookieDomain: null,
+      onUserCreated: () => gate,
+    });
+    const created = await Promise.race([
+      auth.handler(signUpRequest("pending+factrove@mail.grokbot.com")),
+      new Promise<Response>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("sign-up waited on the invite")), 200);
+      }),
+    ]);
+    try {
+      expect(created.status).toBe(200);
+    } finally {
+      release();
+    }
   });
 });
 

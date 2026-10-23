@@ -58,15 +58,18 @@ export class BrevoEmailSender implements EmailSender {
 
 async function brevoErrorDetail(response: Response, apiKey: string): Promise<string> {
   const text = await response.text().catch(() => "");
-  const message = redactSecrets(readBrevoMessage(text), [apiKey]);
+  const message = readBrevoMessage(text, apiKey);
   return message.length === 0 ? "" : ` ${message}`;
 }
 
-function readBrevoMessage(text: string): string {
+function readBrevoMessage(text: string, apiKey: string): string {
   try {
     const body = JSON.parse(text) as { message?: unknown };
     if (typeof body.message === "string") {
-      return body.message.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
+      const flat = body.message.replace(/[\r\n]+/g, " ").trim();
+      // Redact before the length cap. A cut through the key would leave a prefix
+      // that no longer matches the secret.
+      return redactSecrets(flat, [apiKey]).slice(0, 200);
     }
   } catch {
     return "";

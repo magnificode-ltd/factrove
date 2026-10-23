@@ -10,6 +10,7 @@ export type SmtpTransportOptions = {
   host: string;
   port: number;
   secure: boolean;
+  requireTLS: boolean;
   auth?: { user: string; pass: string };
   connectionTimeout: number;
   greetingTimeout: number;
@@ -43,6 +44,7 @@ export class SmtpEmailSender implements EmailSender {
       host: this.smtp.host,
       port: this.smtp.port,
       secure: this.smtp.secure,
+      requireTLS: this.smtp.requireTls,
       ...(this.smtp.user !== null && this.smtp.password !== null
         ? { auth: { user: this.smtp.user, pass: this.smtp.password } }
         : {}),
@@ -65,7 +67,7 @@ export class SmtpEmailSender implements EmailSender {
       this.log(`Invite email sent to ${message.to}${suffix}`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "request failed";
-      throw new Error(`SMTP invite email failed. ${redactSecrets(detail, [this.smtp.password])}`);
+      throw new Error(`SMTP invite email failed. ${redactSecrets(detail, [this.smtp.password, this.smtp.user])}`);
     }
   }
 }

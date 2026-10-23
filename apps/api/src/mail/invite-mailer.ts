@@ -23,12 +23,17 @@ export class InviteMailer {
       supportEmail: this.config.emailFromAddress,
       logoUrl: this.config.emailLogoUrl,
     });
-    try {
-      await this.email.send(message);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "request failed";
-      const redacted = redactSecrets(detail, [this.config.brevoApiKey, this.config.smtp?.password]);
-      this.logger.error(`Invite email failed for ${email}. ${redacted}`);
-    }
+    // The provider call stays in the background. Sign-up already returned.
+    void Promise.resolve()
+      .then(() => this.email.send(message))
+      .catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : "request failed";
+        const redacted = redactSecrets(detail, [
+          this.config.brevoApiKey,
+          this.config.smtp?.password,
+          this.config.smtp?.user,
+        ]);
+        this.logger.error(`Invite email failed for ${email}. ${redacted}`);
+      });
   }
 }

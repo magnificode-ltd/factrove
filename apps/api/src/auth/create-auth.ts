@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH } from "@factrove/contracts";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
@@ -99,10 +100,17 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
             if (email.length === 0) {
               return;
             }
-            await input.onUserCreated({
-              email,
-              name: user.name.trim(),
-            });
+            // Sign-up must not wait on the mail provider. The .then also catches
+            // a synchronous throw, so the detached promise cannot reject unhandled.
+            void Promise.resolve()
+              .then(() => input.onUserCreated({
+                email,
+                name: user.name.trim(),
+              }))
+              .catch((error: unknown) => {
+                const detail = error instanceof Error ? error.message : "request failed";
+                new Logger("Auth").error(`Invite email failed for ${email}. ${detail}`);
+              });
           },
         },
       },

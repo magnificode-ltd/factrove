@@ -94,6 +94,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
 | `SMTP_PORT` | when transport is `smtp` | Port from 1 to 65535. `587` is the usual STARTTLS port |
 | `SMTP_SECURE` | when transport is `smtp` | `true` for implicit TLS, usually port 465. `false` for STARTTLS, usually port 587 |
+| `SMTP_REQUIRE_TLS` | no | Unset requires STARTTLS when `SMTP_SECURE` is `false`. `false` allows plaintext. The password and the message are then visible on the network |
 | `SMTP_USER` | no | SMTP username. Set it with `SMTP_PASSWORD`, or leave both empty when the server has no AUTH |
 | `SMTP_PASSWORD` | no | SMTP password. Do not commit it. On Brevo's relay this is the SMTP key, which is not `BREVO_API_KEY` |
 | `BREVO_API_KEY` | when transport is `brevo` | Brevo HTTP API key. Ignored for `log` and `smtp`. The API does not call `GET /v3/account` |
@@ -425,7 +426,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
 | `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user and password, which are both set or both empty |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user, password, and `SMTP_REQUIRE_TLS`. User and password are both set or both empty. Unset `SMTP_REQUIRE_TLS` requires STARTTLS when `SMTP_SECURE` is `false` |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
 | `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `S3_ALLOW_INSECURE_HTTP` | Garage on the host is `http://127.0.0.1:3900` with path style. Leave the insecure-HTTP flag unset for loopback and for AWS |
@@ -483,7 +484,7 @@ EMAIL_FROM_ADDRESS=support@factrove.app
 EMAIL_FROM_NAME=Factrove
 ```
 
-Any SMTP server. Leave `SMTP_USER` and `SMTP_PASSWORD` empty together when that server has no AUTH. `SMTP_SECURE=true` is implicit TLS, usually port 465. `SMTP_SECURE=false` is STARTTLS, usually port 587.
+Any SMTP server. Leave `SMTP_USER` and `SMTP_PASSWORD` empty together when that server has no AUTH. `SMTP_SECURE=true` is implicit TLS, usually port 465. `SMTP_SECURE=false` is STARTTLS, usually port 587. Leave `SMTP_REQUIRE_TLS` unset so a plain connection must upgrade. `SMTP_REQUIRE_TLS=false` allows plaintext: the password and the message are visible on the network. Use that only on a private network.
 
 ```bash
 EMAIL_TRANSPORT=smtp
@@ -528,17 +529,18 @@ pnpm --filter "@factrove/api..." build
 pnpm --filter @factrove/api start
 ```
 
-`pnpm infra:up` starts PostgreSQL. `pnpm db:migrate` applies the committed migrations. The API listens on `http://127.0.0.1:3001`. In a second terminal, from the repository root, the invitee address is the first argument:
+`pnpm infra:up` starts PostgreSQL. `pnpm db:migrate` applies the committed migrations. The API listens on `http://127.0.0.1:3001`. In a second terminal, from the repository root, the invitee address is the first argument. `WEB_ORIGIN` is the Origin header and must be the same value the API was started with. The default matches `apps/api/.env.example`.
 
 ```bash
 send_factrove_invite() {
   invitee_email="${1:?Pass the invitee email. Example: magnificode+factrove@mail.grokbot.com}"
   invitee_password="${2:-local-invite-check-1}"
+  web_origin="${WEB_ORIGIN:-http://localhost:3000}"
   payload=$(node --input-type=module -e 'process.stdout.write(JSON.stringify({name:"Ada Lovelace",email:process.argv[1],password:process.argv[2]}))' -- "$invitee_email" "$invitee_password")
   curl -sS -D - -o /tmp/factrove-signup.json \
     -X POST http://127.0.0.1:3001/api/auth/sign-up/email \
     -H 'Content-Type: application/json' \
-    -H 'Origin: http://localhost:3000' \
+    -H "Origin: ${web_origin}" \
     --data-binary "$payload"
   printf '\n'
 }
@@ -550,7 +552,7 @@ A 200 response creates the account. The saved body is `/tmp/factrove-signup.json
 
 - `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message.
 - `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected. The following lines are From, To, Subject, and the text.
-- `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY` or `SMTP_PASSWORD`.
+- `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
 

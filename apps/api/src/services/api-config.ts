@@ -33,6 +33,8 @@ export type SmtpConfig = {
   host: string;
   port: number;
   secure: boolean;
+  // False allows a plaintext session. The default is true when secure is false.
+  requireTls: boolean;
   user: string | null;
   password: string | null;
 };
@@ -225,13 +227,29 @@ function readSmtpConfig(env: NodeJS.ProcessEnv): SmtpConfig {
   if ((user.length === 0) !== !passwordPresent) {
     throw new Error("Set SMTP_USER and SMTP_PASSWORD together when EMAIL_TRANSPORT is smtp.");
   }
+  const secure = readSmtpSecure(env.SMTP_SECURE);
   return {
     host,
     port: readRequiredPort(env.SMTP_PORT, "SMTP_PORT"),
-    secure: readSmtpSecure(env.SMTP_SECURE),
+    secure,
+    requireTls: readSmtpRequireTls(env.SMTP_REQUIRE_TLS, secure),
     user: user.length > 0 ? user : null,
     password: passwordPresent ? password : null,
   };
+}
+
+function readSmtpRequireTls(value: string | undefined, secure: boolean): boolean {
+  const raw = value?.trim().toLowerCase() ?? "";
+  if (raw.length === 0) {
+    return !secure;
+  }
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error("SMTP_REQUIRE_TLS must be true or false.");
 }
 
 function readSmtpSecure(value: string | undefined): boolean {
