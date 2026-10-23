@@ -1,8 +1,9 @@
 {
   "name": "@factrove/cli",
   "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
   "private": true,
-  "files": ["dist"],
+  "files": ["dist", "LICENSE", "NOTICE"],
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",

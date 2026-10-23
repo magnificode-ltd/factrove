@@ -12,6 +12,8 @@ keywords:
 
 Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. Images are built from this repository. This repository does not publish them to a registry.
 
+Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
+
 `compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](/quickstart) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
 
 ## Prerequisites
@@ -82,6 +84,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `API_PUBLIC_ORIGIN` | no | Origin the API writes into absolute API URLs, and the Better Auth base URL. Default `http://localhost:3001` |
 | `PUBLIC_BASE_URL` | set it whenever the web origin is not `http://localhost:3000` | Origin for viewer URLs and public share links. An empty value becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN` |
 | `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
+| `SOURCE_CODE_URL` | no | Source code link in the web app. Default `https://github.com/magnificode-ltd/factrove`. Read when a page is rendered |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
@@ -422,6 +425,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `WEB_ORIGIN`, `API_PUBLIC_ORIGIN`, `PUBLIC_BASE_URL` | Same origin shape as the Compose stack. An empty `PUBLIC_BASE_URL` uses `WEB_ORIGIN`. The Compose file substitutes `http://localhost:3000` instead |
 | `NEXT_PUBLIC_API_URL` | Origin baked into the web client at `pnpm build`. Default `http://localhost:3001` |
 | `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
+| `SOURCE_CODE_URL` | Optional URL for the Source code link. Default `https://github.com/magnificode-ltd/factrove`. The web process reads it when rendering a page |
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
@@ -437,7 +441,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 
 `BASE_URL` is read by `pnpm db:seed` and by auth schema generation. The API process uses `API_PUBLIC_ORIGIN` instead.
 
-`pnpm dev` does not copy `BROWSER_API_URL` or `INTERNAL_API_URL` out of `apps/api/.env`. For a production web process, export them in the environment or set `NEXT_PUBLIC_API_URL` before the build.
+`pnpm dev` does not copy `BROWSER_API_URL`, `INTERNAL_API_URL`, or `SOURCE_CODE_URL` out of `apps/api/.env`. For a production web process, export them in the environment. Set `NEXT_PUBLIC_API_URL` before the build when you are not using `BROWSER_API_URL`. `SOURCE_CODE_URL` is read when a page renders, including under `next start`.
 
 <Warning>
 `pnpm build` and `next build` fix `NEXT_PUBLIC_API_URL` into the client bundle. `next start` cannot change that baked origin. `BROWSER_API_URL` on the web process replaces it for pages rendered after you set the variable.
