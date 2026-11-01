@@ -318,4 +318,6 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 
 Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository.
 
+Factrove is not accepting outside pull requests yet; issues, bug reports, and feedback are welcome; outside pull requests will be closed without merging.
+
 Contributors keep their copyright and license their contributions to Magnificode LTD under the [contributor license agreement](CLA.md), which includes the right to relicense those contributions. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).

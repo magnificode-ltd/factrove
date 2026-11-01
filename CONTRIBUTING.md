@@ -1,5 +1,7 @@
 # Contributing
 
+Factrove stays licensed under AGPL-3.0-or-later. Outside contributions are not accepted for now. Issues, bug reports, and feedback are welcome. Outside pull requests will be closed without merging.
+
 Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright notice is in [NOTICE](NOTICE). By contributing, you agree to the [contributor license agreement](CLA.md). You keep the copyright in your work. The agreement gives Magnificode LTD a license to use and relicense contributions, including under proprietary terms.
 
 ## Sign the agreement
