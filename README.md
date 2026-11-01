@@ -243,6 +243,8 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/guides/self-hosting.mdx](docs/guides/self-hosting.mdx).
 
+Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, and `latest` from the default branch. The packages stay private while this repository is private. When the repository is open-sourced, each package is set to public in its package settings. Pulling them needs a token with `read:packages`. The token EC2 uses is stored in AWS Secrets Manager and is created in `factrove-cloud`. Image names, tags, and the pull commands are in [Published images](docs/guides/self-hosting.mdx#published-images).
+
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 
 ```sh
@@ -304,7 +306,7 @@ Stop writers before applying `20261021170000_add_artifact_object_key`. The migra
 User guides and the generated CLI and API references live in [docs/](docs/introduction.mdx).
 
 - [Quickstart](docs/quickstart.mdx): clone, local startup, and a first upload.
-- [Self-hosting](docs/guides/self-hosting.mdx): Docker Compose install, configuration, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
+- [Self-hosting](docs/guides/self-hosting.mdx): Docker Compose install, published GHCR images, configuration, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
 - [CLI](docs/guides/cli.mdx): commands, precedence, and a copyable agent workflow.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
