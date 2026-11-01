@@ -76,7 +76,7 @@ docker pull ghcr.io/magnificode-ltd/factrove-api:latest
 docker pull ghcr.io/magnificode-ltd/factrove-web:latest
 ```
 
-Replace `latest` with a full or short commit SHA to pin a build. The token AWS EC2 uses to pull these images is stored in AWS Secrets Manager. That secret is created in `factrove-cloud`, not in this repository.
+Replace `latest` with a full or short commit SHA to pin a build. The token AWS EC2 will use to pull these images will be stored in AWS Secrets Manager, created by `factrove-cloud`.
 
 `docker-compose.yml` still builds `factrove-api:local` and `factrove-web:local` on the machine running Compose. Published tags are `linux/arm64` only. An `amd64` host keeps building from this checkout.
 
