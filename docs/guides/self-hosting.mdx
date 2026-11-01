@@ -8,9 +8,10 @@ keywords:
   - postgresql
   - garage
   - s3
+  - ghcr
 ---
 
-Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. Images are built from this repository. This repository does not publish them to a registry.
+Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/arm64` images for the API and the web app. See [Published images](#published-images).
 
 Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
 
@@ -44,7 +45,40 @@ git clone https://github.com/magnificode-ltd/factrove.git
 cd factrove
 ```
 
-There is no image name to pull for the API or the web app. `docker compose up --build` builds `factrove-api:local` and `factrove-web:local` from the `Dockerfile`. The same Dockerfile is what CI builds, tagged `factrove-api:ci` and `factrove-web:ci`, without pushing.
+`docker compose up --build` builds `factrove-api:local` and `factrove-web:local` from the `Dockerfile`. Pull requests build those same targets as `factrove-api:ci` and `factrove-web:ci` for that check. The images you can pull are in [Published images](#published-images).
+
+## Published images
+
+`.github/workflows/image.yml` publishes two `linux/arm64` images on every push to `main`, and when someone runs that workflow by hand. The runner is `ubuntu-24.04-arm`, which matches Graviton instances such as `t4g` in AWS `us-east-1`. Both images come from the existing `Dockerfile`.
+
+| Image | Target | Role |
+| --- | --- | --- |
+| `ghcr.io/magnificode-ltd/factrove-api` | `api` | API, and `prisma migrate deploy` for the migrate service |
+| `ghcr.io/magnificode-ltd/factrove-web` | `web` | Web app |
+
+Each image has three tags:
+
+| Tag | Meaning |
+| --- | --- |
+| 40-character commit SHA | That commit |
+| 7-character short SHA | That same commit |
+| `latest` | The newest publish from the default branch |
+
+A manual run from another branch publishes that commit's SHA tags and leaves `latest` where it is. Each image carries `org.opencontainers.image.source`, `org.opencontainers.image.revision` (the full commit SHA), and `org.opencontainers.image.licenses=AGPL-3.0-or-later`.
+
+The packages stay private while this repository is private. That is the GitHub Container Registry default. When the repository is open-sourced, set `factrove-api` and `factrove-web` to public in each package's settings. Package visibility is separate from repository visibility. Making a package public is permanent.
+
+Pull a private package with a GitHub account that can read it and a token that has the `read:packages` scope:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+docker pull ghcr.io/magnificode-ltd/factrove-api:latest
+docker pull ghcr.io/magnificode-ltd/factrove-web:latest
+```
+
+Replace `latest` with a full or short commit SHA to pin a build. The token AWS EC2 will use to pull these images will be stored in AWS Secrets Manager, created by `factrove-cloud`.
+
+`docker-compose.yml` still builds `factrove-api:local` and `factrove-web:local` on the machine running Compose. Published tags are `linux/arm64` only. An `amd64` host keeps building from this checkout.
 
 ## Configure
 
