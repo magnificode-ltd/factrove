@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ORGANIZATION_CHANGED_MESSAGE, SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE } from "./index.js";
+import { ARTIFACT_NAME_MESSAGE, ORGANIZATION_CHANGED_MESSAGE, SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE } from "./index.js";
 
 const ARTIFACT_ID = "11111111-1111-4111-8111-111111111111";
 const SHARE_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -110,6 +110,7 @@ const REQUEST_EXAMPLES: Record<string, unknown> = {
   },
   CreateShareRequest: { password: "example-link-password" },
   ShareWithOrganizationRequest: { accessType: "org_shared", organizationId: "org_example" },
+  RenameArtifactRequest: { name: "Launch notes" },
   PublicUnlockRequest: { password: "example-link-password" },
 };
 
@@ -172,6 +173,9 @@ function successExample(operationId: string, schemaName: string | undefined): un
           accessType: "org_shared",
         },
       };
+    }
+    if (operationId === "renameArtifact") {
+      return { artifact: { ...artifact, name: "Launch notes" } };
     }
     return { artifact };
   }
@@ -245,10 +249,16 @@ function errorBody(code: string, description: string): { code: string; message: 
   if (code === "FILE_TOO_LARGE" && /102,400/.test(description)) {
     return { code, message: "The request is too large." };
   }
+  if (code === "CONTENT_CONFLICT" && /eight attempts/i.test(description)) {
+    return { code, message: "Another replace finished first. Delete again to remove the current artifact." };
+  }
   return ERROR_BODIES[code];
 }
 
 function invalidRequestMessage(description: string): string {
+  if (/rename body/i.test(description)) {
+    return ARTIFACT_NAME_MESSAGE;
+  }
   if (/shares a private artifact/i.test(description)) {
     return SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE;
   }

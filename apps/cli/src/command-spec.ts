@@ -1,7 +1,7 @@
 export const ARTIFACT_ID =
   /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/;
 
-export type HelpCommand = "upload" | "get" | "share" | "configure";
+export type HelpCommand = "upload" | "get" | "share" | "list" | "rename" | "delete" | "configure";
 
 export type CliFlagKind = "boolean" | "string" | "enum";
 
@@ -37,8 +37,11 @@ export const TOP_LEVEL_HELP = `Usage: factrove <command> [options]
 Commands:
   upload <file>                    Upload an HTML file as a new artifact and print its id.
   upload <file> --artifactId <id>  Replace the content of an existing artifact.
+  list                             List your artifacts. --view org lists organization-shared ones.
   get <id>                         Print an artifact's content (HTML, or --format markdown).
   share <id>                       Create a public link. Add --password, --remove-password or --revoke.
+  rename <id> --name <name>        Change the name shown in the library.
+  delete <id>                      Delete an artifact. --yes skips the confirmation.
   configure                        Save your API key and API URL.
 
 Global options:
@@ -50,8 +53,11 @@ Examples:
   factrove upload ./hey.html
   factrove upload ./hey.html --name "X launch calendar"
   factrove upload ./hey.html --artifactId <artifact-id>
+  factrove list --json
   factrove get <artifact-id> --format markdown
   factrove share <artifact-id> --password
+  factrove rename <artifact-id> --name "X launch calendar"
+  factrove delete <artifact-id> --yes
   factrove configure
 `;
 
@@ -90,6 +96,37 @@ Options:
   --json             Print one JSON line.
 `;
 
+export const LIST_HELP = `Usage: factrove list [--view mine|org] [--json]
+
+Lists artifacts. The default is the caller's own artifacts. --view org lists
+organization-shared artifacts in the caller's current organization.
+
+Options:
+  --view <mine|org>  Which artifacts to list (default: mine).
+  --json             Print one JSON line.
+`;
+
+export const RENAME_HELP = `Usage: factrove rename <id> --name <name> [--json]
+
+Changes the name shown in the library. The stored HTML is left as it is.
+Quote a name that contains spaces.
+
+Options:
+  --name <name>  Name shown in the library. One line, up to 120 characters.
+  --json         Print one JSON line.
+`;
+
+export const DELETE_HELP = `Usage: factrove delete <id> [--yes | --force] [--json]
+
+Deletes an artifact, its stored HTML, and any public link. A terminal asks
+for confirmation. --yes and --force skip that prompt.
+
+Options:
+  --yes    Delete without a confirmation prompt.
+  --force  Same as --yes.
+  --json   Print one JSON line.
+`;
+
 export const CONFIGURE_HELP = `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
 
 Saves an API key and API URL for a profile.
@@ -105,6 +142,9 @@ export const APPROVED_HELP = {
   upload: UPLOAD_HELP,
   get: GET_HELP,
   share: SHARE_HELP,
+  list: LIST_HELP,
+  rename: RENAME_HELP,
+  delete: DELETE_HELP,
   configure: CONFIGURE_HELP,
 } as const;
 
@@ -116,7 +156,7 @@ export const cliFlags: readonly CliFlagSpec[] = [
     store: "name",
     documented: true,
     description: "Name shown in the library. One line, up to 120 characters.",
-    appliesTo: ["upload"],
+    appliesTo: ["upload", "rename"],
   },
   {
     id: "artifactId",
@@ -146,6 +186,34 @@ export const cliFlags: readonly CliFlagSpec[] = [
     documented: true,
     description: "Content to print (default: html).",
     appliesTo: ["get"],
+  },
+  {
+    id: "view",
+    names: ["--view"],
+    kind: "enum",
+    values: ["mine", "org"],
+    store: "view",
+    documented: true,
+    description: "Which artifacts to list (default: mine).",
+    appliesTo: ["list"],
+  },
+  {
+    id: "yes",
+    names: ["--yes"],
+    kind: "boolean",
+    store: "yes",
+    documented: true,
+    description: "Delete without a confirmation prompt.",
+    appliesTo: ["delete"],
+  },
+  {
+    id: "force",
+    names: ["--force"],
+    kind: "boolean",
+    store: "force",
+    documented: true,
+    description: "Same as --yes. Delete without a confirmation prompt.",
+    appliesTo: ["delete"],
   },
   {
     id: "password",
@@ -190,7 +258,7 @@ export const cliFlags: readonly CliFlagSpec[] = [
     store: "json",
     documented: true,
     description: "Print one JSON line (alias: --output json).",
-    appliesTo: ["upload", "get", "share"],
+    appliesTo: ["upload", "get", "share", "list", "rename", "delete"],
   },
   {
     id: "output",
@@ -200,7 +268,7 @@ export const cliFlags: readonly CliFlagSpec[] = [
     store: "output",
     documented: true,
     description: "Print one JSON line when the value is json. --output text is the plain output.",
-    appliesTo: ["upload", "get", "share"],
+    appliesTo: ["upload", "get", "share", "list", "rename", "delete"],
   },
   {
     id: "apiUrl",
@@ -235,8 +303,9 @@ export const cliFlags: readonly CliFlagSpec[] = [
     kind: "boolean",
     store: "quiet",
     documented: false,
-    description: "Accepted on upload, get, and share. It does not hide their output. Help does not list it. configure rejects it.",
-    appliesTo: ["upload", "get", "share"],
+    description:
+      "Accepted on upload, get, share, list, rename, and delete. It does not hide their output. Help does not list it. configure rejects it.",
+    appliesTo: ["upload", "get", "share", "list", "rename", "delete"],
   },
   {
     id: "help",
@@ -277,6 +346,35 @@ export const cliCommands: readonly CliCommandSpec[] = [
     flags: ["password", "passwordStdin", "removePassword", "revoke", "json", "output", "apiUrl", "profile"],
     helpText: SHARE_HELP,
     docsSlug: "share",
+  },
+  {
+    name: "list",
+    summary: "List your artifacts. --view org lists organization-shared ones.",
+    description:
+      "Lists artifacts. The default is the caller's own artifacts. --view org lists organization-shared artifacts in the caller's current organization.",
+    positionals: [],
+    flags: ["view", "json", "output", "apiUrl", "profile"],
+    helpText: LIST_HELP,
+    docsSlug: "list",
+  },
+  {
+    name: "rename",
+    summary: "Change the name shown in the library.",
+    description: "Changes the name shown in the library. The stored HTML is left as it is. Quote a name that contains spaces.",
+    positionals: [{ name: "id", required: true, description: "Artifact UUID." }],
+    flags: ["name", "json", "output", "apiUrl", "profile"],
+    helpText: RENAME_HELP,
+    docsSlug: "rename",
+  },
+  {
+    name: "delete",
+    summary: "Delete an artifact. --yes skips the confirmation.",
+    description:
+      "Deletes an artifact, its stored HTML, and any public link. A terminal asks for confirmation. --yes and --force skip that prompt.",
+    positionals: [{ name: "id", required: true, description: "Artifact UUID." }],
+    flags: ["yes", "force", "json", "output", "apiUrl", "profile"],
+    helpText: DELETE_HELP,
+    docsSlug: "delete",
   },
   {
     name: "configure",
@@ -339,6 +437,46 @@ export const cliReferenceNotes: Record<string, string> = {
     "",
     "- [Sharing links](/guides/sharing-links)",
     "- [Create or update a public share](/api-reference/shares/create-or-update-a-public-share)",
+  ].join("\n"),
+  list: [
+    "## Behavior",
+    "",
+    "Plain success prints one line per artifact: id, access (`private` or `org_shared`), then the library name. A null name uses the public filename `{id}.html`. An empty list prints nothing. `--json` prints one `{ items }` line.",
+    "",
+    "`--view mine` is the default and lists artifacts the caller created. `--view org` lists organization-shared artifacts in the caller's current organization. With no current organization that list is empty.",
+    "",
+    "The CLI does not keep a local index. List reads the API.",
+    "",
+    "## Related",
+    "",
+    "- [CLI](/guides/cli)",
+    "- [List artifacts for the caller](/api-reference/artifacts/list-artifacts-for-the-caller)",
+  ].join("\n"),
+  rename: [
+    "## Behavior",
+    "",
+    "Plain success prints `Renamed {id}.` `--json` prints one `{ artifact }` line. The stored HTML, access, and any public link stay as they are. There is no way to clear a name.",
+    "",
+    "`--name` uses the same one-line, 120-character rule as upload. Only the owner can rename. Anyone else gets `404 ARTIFACT_NOT_FOUND`, including an organization admin.",
+    "",
+    "## Related",
+    "",
+    "- [CLI](/guides/cli)",
+    "- [Rename an artifact](/api-reference/artifacts/rename-an-artifact)",
+  ].join("\n"),
+  delete: [
+    "## Behavior",
+    "",
+    "Plain success prints `Deleted {id}.` `--json` prints one line, `{\"deleted\":true,\"id\":\"…\"}`. The API response itself is empty.",
+    "",
+    "A terminal asks `Delete artifact {id}?` and continues only for `y` or `yes`. Anything else cancels. When stdin is not a terminal, pass `--yes` or `--force`. Those two flags do the same thing.",
+    "",
+    "Delete removes the artifact row and the current HTML object. A public link stops working. The CLI does not keep a local index such as `factrove.md`, so there is no local file to update. Only the owner can delete. Anyone else gets `404 ARTIFACT_NOT_FOUND`, including an organization admin. A storage failure keeps the artifact row. The stored HTML may already be gone, so retry the delete. If concurrent replaces prevent deletion after eight attempts, the API returns `409 CONTENT_CONFLICT`. Retry the delete.",
+    "",
+    "## Related",
+    "",
+    "- [CLI](/guides/cli)",
+    "- [Delete an artifact](/api-reference/artifacts/delete-an-artifact)",
   ].join("\n"),
   configure: [
     "## Behavior",

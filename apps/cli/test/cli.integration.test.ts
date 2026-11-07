@@ -820,6 +820,93 @@ function created(sizeBytes: number, accessType: "private" | "org_shared" = "priv
   };
 }
 
+describe("factrove list, rename, and delete", () => {
+  it("lists the caller's artifacts and can ask for the organization view", async () => {
+    const body = {
+      items: [
+        {
+          ...created(12).artifact,
+          name: "Launch notes",
+          accessType: "private" as const,
+        },
+      ],
+    };
+    const mine = await startStub(() => ({ status: 200, body }));
+    const listed = await runCli(["list"], { env: { FACTROVE_API_URL: mine.url } });
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toBe(`${artifactId}  private  Launch notes\n`);
+    expect(listed.stderr).toBe("");
+    expect(mine.requests[0]?.method).toBe("GET");
+    expect(mine.requests[0]?.url).toBe("/api/v1/artifacts?view=mine");
+
+    const org = await startStub(() => ({ status: 200, body: { items: [] } }));
+    const empty = await runCli(["list", "--view", "org", "--json"], { env: { FACTROVE_API_URL: org.url } });
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toBe('{"items":[]}\n');
+    expect(org.requests[0]?.url).toBe("/api/v1/artifacts?view=org");
+  });
+
+  it("renames an artifact and prints the id", async () => {
+    const renamed = { artifact: { ...created(12).artifact, name: "Launch notes" } };
+    const stub = await startStub(() => ({ status: 200, body: renamed }));
+    const result = await runCli(["rename", artifactId, "--name", "Launch notes"], {
+      env: { FACTROVE_API_URL: stub.url },
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(`Renamed ${artifactId}.\n`);
+    expect(stub.requests[0]?.method).toBe("PATCH");
+    expect(stub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}/name`);
+    expect(stub.requests[0]?.body.toString("utf8")).toBe(JSON.stringify({ name: "Launch notes" }));
+
+    const json = await runCli(["rename", artifactId, "--name", "Launch notes", "--json"], {
+      env: { FACTROVE_API_URL: stub.url },
+    });
+    expect(json.stdout).toBe(`${JSON.stringify(renamed)}\n`);
+  });
+
+  it("cancels a terminal delete on Ctrl-D and on SIGINT", async () => {
+    const eofStub = await startStub(() => ({ status: 204, body: {} }));
+    const eof = await runCliPty(["delete", artifactId], "eof", { FACTROVE_API_URL: eofStub.url });
+    expect(eof.code).toBe(1);
+    expect(eof.text).toContain("INVALID_INPUT: Delete cancelled.");
+    expect(eofStub.requests).toHaveLength(0);
+
+    const signalStub = await startStub(() => ({ status: 204, body: {} }));
+    const signal = await runCliPty(["delete", artifactId], "sigint", { FACTROVE_API_URL: signalStub.url });
+    expect(signal.code).toBe(1);
+    expect(signal.text).toContain("INVALID_INPUT: Delete cancelled.");
+    expect(signalStub.requests).toHaveLength(0);
+  });
+
+  it("refuses to delete without confirmation when stdin is not a terminal", async () => {
+    const stub = await startStub(() => ({ status: 204, body: {} }));
+    const result = await runCli(["delete", artifactId], { env: { FACTROVE_API_URL: stub.url } });
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      "INVALID_INPUT: Delete needs confirmation. Pass --yes or --force when stdin is not a terminal.\n",
+    );
+    expect(stub.requests).toHaveLength(0);
+  });
+
+  it("deletes with --yes or --force and prints a JSON line when asked", async () => {
+    const yesStub = await startStub(() => ({ status: 204, body: {} }));
+    const yes = await runCli(["delete", artifactId, "--yes"], { env: { FACTROVE_API_URL: yesStub.url } });
+    expect(yes.code).toBe(0);
+    expect(yes.stdout).toBe(`Deleted ${artifactId}.\n`);
+    expect(yesStub.requests[0]?.method).toBe("DELETE");
+    expect(yesStub.requests[0]?.url).toBe(`/api/v1/artifacts/${artifactId}`);
+
+    const forceStub = await startStub(() => ({ status: 204, body: {} }));
+    const forced = await runCli(["delete", artifactId, "--force", "--json"], {
+      env: { FACTROVE_API_URL: forceStub.url },
+    });
+    expect(forced.code).toBe(0);
+    expect(forced.stdout).toBe(`${JSON.stringify({ deleted: true, id: artifactId })}\n`);
+    expect(forceStub.requests[0]?.method).toBe("DELETE");
+  });
+});
+
 describe("factrove configure", () => {
   it("stores a profile from stdin without printing the key", async () => {
     const directory = await makeTemp();
@@ -1069,6 +1156,76 @@ type CliResult = {
   stdout: string;
   stderr: string;
 };
+
+function runCliPty(
+  args: string[],
+  action: "eof" | "sigint",
+  envOverrides?: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; text: string }> {
+  const script = `
+import os, pty, select, time, json, sys
+node, cli, action = sys.argv[1], sys.argv[2], sys.argv[3]
+rest = sys.argv[4:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(node, [node, cli, *rest])
+buf = b""
+acted = False
+code = None
+deadline = time.time() + 8
+while time.time() < deadline and code is None:
+    ready, _, _ = select.select([fd], [], [], 0.2)
+    if ready:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            chunk = b""
+        if chunk:
+            buf += chunk
+            if not acted and b"Delete artifact" in buf:
+                acted = True
+                if action == "eof":
+                    os.write(fd, b"\\x04")
+                else:
+                    os.kill(pid, 2)
+    waited, status = os.waitpid(pid, os.WNOHANG)
+    if waited:
+        code = os.waitstatus_to_exitcode(status)
+text = buf.decode("utf-8", "replace").replace("\\r", "")
+sys.stdout.write(json.dumps({"code": code, "text": text}))
+`;
+  return new Promise((resolve, reject) => {
+    const child = spawn("python3", ["-c", script, process.execPath, cliPath, action, ...args], {
+      env: cliEnv(envOverrides),
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`PTY command timed out: ${args.join(" ")}`));
+    }, 20_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`PTY helper exited ${code}: ${stderr}`));
+        return;
+      }
+      resolve(JSON.parse(stdout) as { code: number | null; text: string });
+    });
+  });
+}
 
 function runCli(args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<CliResult> {
   return runCommand(process.execPath, [cliPath, ...args], options?.cwd ?? repoRoot, options?.env);

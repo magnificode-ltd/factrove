@@ -348,6 +348,18 @@ describe("PostgreSQL artifact persistence", () => {
     await expect(repository.delete(created.id)).rejects.toMatchObject({ code: "P2025" });
   });
 
+  it("renames an artifact without changing content or created_at", async () => {
+    const created = await repository.create(artifactInput({ name: "Original" }));
+    const renamed = await repository.rename(created.id, "Renamed");
+    expect(renamed?.name).toBe("Renamed");
+    expect(renamed?.objectKey).toBe(created.objectKey);
+    expect(renamed?.contentRevision).toBe(created.contentRevision);
+    expect(renamed?.accessType).toBe(created.accessType);
+    expect(renamed?.createdAt.toISOString()).toBe(created.createdAt.toISOString());
+    expect(renamed && renamed.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime());
+    expect(await repository.rename(randomUUID(), "Missing")).toBeNull();
+  });
+
   it("stores a nullable name and changes it only in the revision update that sets it", async () => {
     const column = await prisma.$queryRaw<{ data_type: string; character_maximum_length: number; is_nullable: string }[]>`
       SELECT data_type, character_maximum_length, is_nullable

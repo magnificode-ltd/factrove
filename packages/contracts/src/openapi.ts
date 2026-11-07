@@ -65,7 +65,7 @@ export function buildOpenApiDocument(options?: { version?: string }): OpenApiDoc
     tags: [
       { name: "Health", description: "Process liveness." },
       { name: "Auth", description: "Sessions and API keys." },
-      { name: "Artifacts", description: "Upload, list, detail, and content." },
+      { name: "Artifacts", description: "Upload, list, rename, delete, detail, and content." },
       { name: "Shares", description: "Owner public-link and password controls." },
       { name: "Public", description: "Anonymous share detail, unlock, and HTML." }
     ],

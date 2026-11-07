@@ -8,7 +8,9 @@ import {
   createShareRequestSchema,
   normalizeArtifactName,
   ORGANIZATION_CHANGED_MESSAGE,
+  RENAME_ARTIFACT_REQUEST_MESSAGE,
   SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  renameArtifactRequestSchema,
   shareWithOrganizationRequestSchema,
   publicArtifactSchema,
   publicUnlockRequestSchema,
@@ -56,6 +58,11 @@ import { decideContentPublish } from "./replace-content.js";
 import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStore } from "../storage/index.js";
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
+
+// A replace can commit between the object delete and the conditional row delete.
+// Each attempt reads the row that won and removes that object. Eight is enough for
+// a burst of replaces without spinning if they never stop.
+const DELETE_REPLACE_ATTEMPTS = 8;
 
 const IDENTITY_FIELDS = [
   "creatorUserId",
@@ -197,6 +204,58 @@ export class ArtifactsService {
       throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
     }
     return this.toDto(outcome.record, includeGrant);
+  }
+
+  // Owner only. The name changes. Content, access, organization, and share columns do not.
+  async rename(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
+    const record = await this.requireOwner(request, id);
+    const name = readRenameName(readBody());
+    const updated = await this.artifacts.rename(record.id, name);
+    if (!updated) {
+      throw artifactNotFound();
+    }
+    return this.toDto(updated, !this.actors.hasCredentialHeader(request));
+  }
+
+  // Owner only. The object for the revision that was read is removed first, then the row
+  // is deleted only while that creator, revision, and object key are still current.
+  // A replace that commits in between leaves its row. This request reads that row and tries again.
+  // A missing object still allows the conditional row delete. A storage error keeps the row.
+  // The object may already be gone when that error is reported. Retry DELETE.
+  async deleteArtifact(request: HeaderSource, id: string): Promise<void> {
+    const actor = await this.actors.requireActor(request);
+    let record = await this.artifacts.findById(id);
+    if (!record || actor.user.id !== record.creatorUserId) {
+      throw artifactNotFound();
+    }
+    for (let attempt = 0; attempt < DELETE_REPLACE_ATTEMPTS; attempt += 1) {
+      try {
+        await this.blobs.delete(storedObjectKey(record.id, record.objectKey));
+      } catch (error) {
+        if (!(error instanceof BlobNotFoundError)) {
+          throw error;
+        }
+      }
+      const removed = await this.artifacts.deleteIfUnchanged({
+        id: record.id,
+        creatorUserId: record.creatorUserId,
+        contentRevision: record.contentRevision,
+        objectKey: record.objectKey,
+      });
+      if (removed) {
+        return;
+      }
+      const current = await this.artifacts.findById(record.id);
+      if (!current || current.creatorUserId !== actor.user.id) {
+        return;
+      }
+      record = current;
+    }
+    throw new ApiErrorException(
+      409,
+      "CONTENT_CONFLICT",
+      "Another replace finished first. Delete again to remove the current artifact.",
+    );
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -783,6 +842,22 @@ function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
 
 function unlockBusy(): ApiErrorException {
   return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
+}
+
+function readRenameName(body: unknown): string {
+  const parsed = renameArtifactRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (issue?.path[0] === "name") {
+      throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+    }
+    throw new ApiErrorException(400, "INVALID_REQUEST", RENAME_ARTIFACT_REQUEST_MESSAGE);
+  }
+  const name = normalizeArtifactName(parsed.data.name);
+  if (name === null) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+  }
+  return name;
 }
 
 function readShareWithOrganizationBody(body: unknown): { accessType: "org_shared"; organizationId: string } {

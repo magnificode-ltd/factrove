@@ -3,7 +3,7 @@ title: CLI
 description: Commands, flags, config precedence, and how Factrove differs from aws s3.
 ---
 
-The commands are `upload`, `get`, `share`, and `configure`. Run `factrove --help` for the short list, and `factrove <command> --help` for that command's flags. The generated pages reprint those help texts word for word, then list flags the help text omits.
+The commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Run `factrove --help` for the short list, and `factrove <command> --help` for that command's flags. The generated pages reprint those help texts word for word, then list flags the help text omits.
 
 Help text uses synopsis placeholders such as `<artifact-id>`. In a shell, `<` starts a redirection. Executable examples below use quoted variables.
 
@@ -13,9 +13,12 @@ Plain upload prints only the artifact id on stdout. pnpm writes the script line 
 
 ```bash
 artifact_id=$(pnpm factrove upload ./fixtures/hello.html)
+pnpm factrove list --json
 pnpm factrove get "$artifact_id" --format markdown > artifact.md
+pnpm factrove rename "$artifact_id" --name "X launch calendar"
 pnpm factrove upload ./fixtures/hello.html --artifactId "$artifact_id"
 pnpm factrove share "$artifact_id" --json
+pnpm factrove delete "$artifact_id" --yes
 ```
 
 `--password` prompts twice and needs a terminal. `--password-stdin` reads a pipe and removes one trailing newline. Set `LINK_PASSWORD` in the environment, then:
@@ -28,8 +31,11 @@ printf '%s' "$LINK_PASSWORD" | pnpm factrove share "$artifact_id" --password-std
 factrove upload ./hey.html
 factrove upload ./hey.html --name "X launch calendar"
 factrove upload ./hey.html --artifactId "$artifact_id"
+factrove list --json
 factrove get "$artifact_id" --format markdown
 factrove share "$artifact_id" --password
+factrove rename "$artifact_id" --name "X launch calendar"
+factrove delete "$artifact_id" --yes
 factrove configure
 ```
 
@@ -45,7 +51,13 @@ From this repository the same commands run as `pnpm factrove`. pnpm prints the s
 
 `get <id>` prints the artifact's content. The default is HTML. `--format markdown` asks the API to convert the stored HTML on the way out. Markdown is not saved. The conversion does not run JavaScript and drops scripts, styles, SVG, and MathML. Limits and errors are in [Markdown conversion](/concepts#markdown-conversion). `--json` prints `{ format, mediaType, content }` on one line.
 
+`list` prints the caller's artifacts, one per line: the id, `private` or `org_shared`, then the library name. A null name uses `{id}.html`. An empty list prints nothing. `--view org` lists organization-shared artifacts in the caller's current organization, and is an empty list when the caller has no current organization. `--json` prints the `{ items }` envelope on one line.
+
 `share <id>` creates a public link, or prints the existing one. `--password` prompts twice on a terminal. `--password-stdin` reads a pipe and removes one trailing newline. `--remove-password` keeps the link and clears its password. `--revoke` removes the link and its password. A Factrove link is the public base origin plus `/share/{id}/{token}` and lasts until revoke. It can also carry a password.
+
+`rename <id> --name <name>` changes the library name and leaves the stored HTML, access, and any public link in place. Quote a name that contains spaces. Plain success prints `Renamed {id}.` `--json` prints the `{ artifact }` envelope. There is no way to clear a name. Only the owner can rename. Anyone else, including an organization admin, gets `404 ARTIFACT_NOT_FOUND`.
+
+`delete <id>` removes the artifact, its current HTML object, and any public link. A terminal asks for confirmation and continues only for `y` or `yes`. `--yes` and `--force` skip that prompt. They are the same flag. Use one of them when stdin is not a terminal, which is the usual case for an agent. Plain success prints `Deleted {id}.` `--json` prints `{"deleted":true,"id":"…"}`. The HTTP response is empty. Only the owner can delete. Anyone else, including an organization admin, gets `404 ARTIFACT_NOT_FOUND`. A storage failure keeps the artifact row. The stored HTML may already be gone, so retry the delete. If concurrent replaces prevent deletion after eight attempts, the API returns `409 CONTENT_CONFLICT`. Retry the delete. The CLI does not keep a local index such as `factrove.md`, so delete and rename change only the artifact on the server.
 
 `configure` saves an API key and API URL for a profile. `--api-key` prompts when omitted, so the key stays out of shell history. `--api-url` sets the origin, and `--endpoint-url` is the same option. `--profile` selects the profile. The default profile name is `default`. Create the key in the web app, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). If configure cannot reach the API, see [Troubleshooting](/guides/troubleshooting).
 
@@ -57,7 +69,7 @@ From this repository the same commands run as `pnpm factrove`. pnpm prints the s
 
 `--profile <name>` is accepted on every command. Help lists it on `configure`. An explicit `--profile` uses that profile's key and ignores `FACTROVE_API_KEY`.
 
-`--quiet` is accepted on `upload`, `get`, and `share`. Help does not list it, and it does not hide their output. `configure` rejects it.
+`--quiet` is accepted on `upload`, `get`, `share`, `list`, `rename`, and `delete`. Help does not list it, and it does not hide their output. `configure` rejects it.
 
 Success exits 0. Failure exits 1.
 
@@ -85,7 +97,7 @@ The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profi
 
 Factrove stores an artifact id, a human-readable name, access, a share link, and the current HTML object key with its size. HTTP responses and the CLI omit the object key. There is no etag and no caller-supplied object metadata. New objects use `{artifactId}/{contentId}.html`. Older rows keep `{artifactId}.html`. The public filename is `{artifactId}.html`. The name is a separate field.
 
-`aws s3` commands such as `cp`, `ls`, `rm`, `mv`, `sync`, `mb`, and `rb` are not Factrove commands. `aws s3api` commands such as `put-object` and `get-object` take a caller-supplied object key. The CLI addresses an artifact by id and has no `s3api` surface. It uploads a local HTML file and prints or downloads one artifact. It does not copy between two remote locations, and it does not read an upload from stdin.
+`aws s3` commands such as `cp`, `ls`, `rm`, `mv`, `sync`, `mb`, and `rb` are not Factrove commands. Factrove uses `list`, `rename`, and `delete` for those jobs. `aws s3api` commands such as `put-object` and `get-object` take a caller-supplied object key. The CLI addresses an artifact by id and has no `s3api` surface. It uploads a local HTML file, lists artifacts, and prints or downloads one artifact. It does not copy between two remote locations, and it does not read an upload from stdin.
 
 `share` is the public-link command. An `aws s3 presign` URL is a temporary signed GET and has no password. A Factrove share lasts until `--revoke` and can take a password. The password flags stay on `share`.
 

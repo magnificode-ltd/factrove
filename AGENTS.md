@@ -27,7 +27,7 @@ Documentation follows these roles: README.md provides long-term codebase documen
 
 ## CLI
 
-Commands are `upload`, `get`, `share`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [README.md](README.md), [docs/guides/cli.mdx](docs/guides/cli.mdx), and [prd/mvp_contract.md](prd/mvp_contract.md).
+Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [README.md](README.md), [docs/guides/cli.mdx](docs/guides/cli.mdx), and [prd/mvp_contract.md](prd/mvp_contract.md).
 
 ## Tooling
 

@@ -30,8 +30,11 @@ See [configure](/cli-reference/configure). The key is not printed.
 | --- | --- |
 | [factrove --help](/cli-reference/help) | Top-level help |
 | [upload](/cli-reference/upload) | Create an artifact, or replace one with `--artifactId` |
+| [list](/cli-reference/list) | List your artifacts, or organization-shared ones with `--view org` |
 | [get](/cli-reference/get) | Print stored HTML or converted Markdown |
 | [share](/cli-reference/share) | Create, password-protect, or revoke a public link |
+| [rename](/cli-reference/rename) | Change the library name |
+| [delete](/cli-reference/delete) | Delete an artifact after confirmation, or with `--yes` |
 | [configure](/cli-reference/configure) | Save a profile key and API origin |
 
 `cp` is not a Factrove command. Precedence, `--endpoint-url`, `--output json`, and the differences from `aws s3` are in [CLI](/guides/cli).
@@ -39,9 +42,9 @@ See [configure](/cli-reference/configure). The key is not printed.
 ## Output and errors
 
 - Success exit code is `0`. Any failure is `1`.
-- Plain upload prints only the artifact id. A replace prints the same id. Plain get prints content bytes. Plain share prints the public URL and whether it is password protected.
+- Plain upload prints only the artifact id. A replace prints the same id. Plain get prints content bytes. Plain share prints the public URL and whether it is password protected. Plain list prints one artifact per line. Plain rename prints `Renamed {id}.` Plain delete prints `Deleted {id}.`
 - `--json` and `--output json` print one JSON line on success. Errors then use `{"error":{"code":"...","message":"..."}}` on stderr.
-- `--quiet` is accepted on upload, get, and share. Help does not list it.
+- `--quiet` is accepted on upload, get, share, list, rename, and delete. Help does not list it.
 - `--profile` is accepted on every command. Help lists it on configure.
 - Local codes are `FILE_NOT_FOUND`, `INVALID_INPUT`, and `NETWORK_ERROR`. API codes pass through.
 

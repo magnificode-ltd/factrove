@@ -84,7 +84,7 @@ If a replace returns `500`, GET the artifact before retrying. Prepare the HTML s
 
 Visit `http://localhost:3000`. Use **My artifacts** or **Organization artifacts**, then Refresh after an upload. Organization artifacts stay empty until the account has a membership. Signup and seed do not create one. See [Organization membership](/concepts#organization-membership).
 
-The owner of a private artifact can choose **Share with** the organization name in the viewer. After confirmation, members of that organization can open it. The web app cannot make it private again.
+The owner of a private artifact can choose **Share with** the organization name in the viewer. After confirmation, members of that organization can open it. The web app cannot make it private again. The owner can also **Rename** or **Delete** an artifact from the library and the viewer. Delete asks for confirmation, then removes the artifact, its stored HTML, and any public link.
 
 ## 5. Share a link (optional)
 
@@ -97,9 +97,12 @@ pnpm factrove share "$artifact_id" --json
 ## Useful follow-ups
 
 ```bash
+pnpm factrove list
 pnpm factrove get "$artifact_id" --format markdown > artifact.md
+pnpm factrove rename "$artifact_id" --name "X launch calendar"
 pnpm factrove upload ./fixtures/hello.html --artifactId "$artifact_id"
 pnpm factrove share "$artifact_id" --revoke
+pnpm factrove delete "$artifact_id" --yes
 ```
 
 A copyable agent workflow is in [CLI](/guides/cli#agent-workflow). Help text still uses synopsis placeholders such as `<artifact-id>`. Those are not shell syntax. Executable examples on this site use quoted variables.

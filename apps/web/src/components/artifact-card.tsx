@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type PointerEvent } from "react";
 import type { AccessType, ArtifactDto, ContextEnvelope } from "@factrove/contracts";
+import { ArtifactActions } from "@/components/artifact-actions";
 import { CopyButton } from "@/components/copy-button";
 import { OrgShareControl } from "@/components/org-share-control";
 import { ShareControl } from "@/components/share-control";
@@ -20,6 +21,7 @@ export function ArtifactCard({
   organization?: ContextEnvelope["organization"];
 }) {
   const [accessType, setAccessType] = useState<AccessType>(artifact.accessType);
+  const [name, setName] = useState(artifact.name);
   const [audience, setAudience] = useState(organization);
   useEffect(() => {
     setAudience(organization);
@@ -48,7 +50,7 @@ export function ArtifactCard({
           className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
         >
-          {artifactLabel(artifact)}
+          {artifactLabel({ ...artifact, name })}
         </a>
         <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
           <code className="font-mono text-[13px] tracking-tight text-ink">{artifact.id}</code>
@@ -58,6 +60,20 @@ export function ArtifactCard({
                 artifactId={artifact.id}
                 initial={{ shared: artifact.shared, shareUrl: null, passwordProtected: artifact.passwordProtected }}
                 compact
+              />
+            </span>
+          ) : null}
+          {canShare ? (
+            <span className="pointer-events-auto relative z-10 flex flex-wrap items-center gap-2">
+              <ArtifactActions
+                artifactId={artifact.id}
+                name={name}
+                compact
+                returnTo="/"
+                onRenamed={(next) => setName(next.name)}
+                onDeleted={() => {
+                  window.location.reload();
+                }}
               />
             </span>
           ) : null}

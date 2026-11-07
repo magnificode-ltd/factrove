@@ -3,8 +3,11 @@ import { createFactroveClient, type FactroveClient } from "@factrove/api-client"
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { ConfigureCommand } from "./configure.command.js";
+import { DeleteCommand } from "./delete.command.js";
 import { FACTROVE_CLIENT } from "./factrove-client.token.js";
 import { GetCommand } from "./get.command.js";
+import { ListCommand } from "./list.command.js";
+import { RenameCommand } from "./rename.command.js";
 import { ShareCommand } from "./share.command.js";
 import { UploadCommand } from "./upload.command.js";
 import { UploadFileService } from "./upload-file.service.js";
@@ -16,6 +19,9 @@ import { UploadFileService } from "./upload-file.service.js";
     UploadCommand,
     GetCommand,
     ShareCommand,
+    ListCommand,
+    RenameCommand,
+    DeleteCommand,
     ConfigureCommand,
     {
       provide: FACTROVE_CLIENT,
@@ -46,6 +52,8 @@ function lazyClient(config: CliConfigService): FactroveClient {
     uploadArtifact: (input) => resolve().uploadArtifact(input),
     replaceArtifactContent: (id, input) => resolve().replaceArtifactContent(id, input),
     shareArtifactWithOrganization: (id, organizationId) => resolve().shareArtifactWithOrganization(id, organizationId),
+    renameArtifact: (id, name) => resolve().renameArtifact(id, name),
+    deleteArtifact: (id) => resolve().deleteArtifact(id),
     listArtifacts: (input) => resolve().listArtifacts(input),
     getArtifact: (id) => resolve().getArtifact(id),
     getArtifactContent: (id, input) => resolve().getArtifactContent(id, input),

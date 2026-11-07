@@ -71,6 +71,10 @@ export interface FactroveClient {
   replaceArtifactContent(id: string, input: ReplaceArtifactContentInput): Promise<ArtifactEnvelope>;
   /** Shares a private artifact with the confirmed current organization. Does not change a public share. */
   shareArtifactWithOrganization(id: string, organizationId: string): Promise<ArtifactEnvelope>;
+  /** Sets the library name. Does not change content, access, or the share. */
+  renameArtifact(id: string, name: string): Promise<ArtifactEnvelope>;
+  /** Deletes the artifact and its stored HTML. The response is empty. */
+  deleteArtifact(id: string): Promise<void>;
   listArtifacts(input?: { view?: "mine" | "org" }): Promise<ArtifactListEnvelope>;
   getArtifact(id: string): Promise<ArtifactEnvelope>;
   getArtifactContent(id: string, input?: { format?: ContentFormat }): Promise<ArtifactContent>;
@@ -179,6 +183,25 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
     }
   }
 
+  async function requestEmpty(path: string, init: RequestInit): Promise<void> {
+    const response = await send(path, init);
+    if (response.status === 204) {
+      await response.arrayBuffer().catch(() => undefined);
+      return;
+    }
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) throw parseErrorPayload(payload, response.status, response.headers);
+    throw new FactroveApiError("The API returned an invalid response", {
+      status: response.status,
+      code: "INVALID_RESPONSE"
+    });
+  }
+
   async function requestText(path: string, mediaType: ContentMediaType): Promise<string> {
     const response = await send(path, { method: "GET" });
     if (!response.ok) {
@@ -233,6 +256,17 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
         },
         artifactEnvelopeSchema
       ),
+    renameArtifact: (id, name) =>
+      request(
+        `/artifacts/${encodeURIComponent(id)}/name`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name })
+        },
+        artifactEnvelopeSchema
+      ),
+    deleteArtifact: (id) => requestEmpty(`/artifacts/${encodeURIComponent(id)}`, { method: "DELETE" }),
     listArtifacts: ({ view = "mine" } = {}) => {
       const query = new URLSearchParams({ view });
       return request(`/artifacts?${query.toString()}`, { method: "GET" }, artifactListEnvelopeSchema);

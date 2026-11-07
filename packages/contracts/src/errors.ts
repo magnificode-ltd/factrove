@@ -41,12 +41,14 @@ export const apiErrorCatalog = [
   {
     status: 404,
     code: "ARTIFACT_NOT_FOUND",
-    description: "The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body."
+    description:
+      "The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body."
   },
   {
     status: 409,
     code: "CONTENT_CONFLICT",
-    description: "Another replace of the same artifact revision finished first. Upload again to replace the current content."
+    description:
+      "Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE."
   },
   {
     status: 413,
@@ -82,7 +84,8 @@ export const apiErrorCatalog = [
   {
     status: 503,
     code: "STORAGE_UNAVAILABLE",
-    description: "Object storage failed. A failed upload leaves no artifact row."
+    description:
+      "Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE."
   },
   {
     status: 503,

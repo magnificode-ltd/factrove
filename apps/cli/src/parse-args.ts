@@ -51,12 +51,39 @@ export type ShareInvocation = CommandOptions & {
   removePassword: boolean;
 };
 
+export type ArtifactListView = "mine" | "org";
+
+export type ListInvocation = CommandOptions & {
+  kind: "list";
+  view: ArtifactListView;
+};
+
+export type RenameInvocation = CommandOptions & {
+  kind: "rename";
+  id: string;
+  name: string;
+};
+
+export type DeleteInvocation = CommandOptions & {
+  kind: "delete";
+  id: string;
+  skipConfirm: boolean;
+};
+
 export type HelpInvocation = {
   kind: "help";
   command: HelpCommand | null;
 };
 
-export type CliInvocation = UploadInvocation | GetInvocation | ShareInvocation | ConfigureInvocation | HelpInvocation;
+export type CliInvocation =
+  | UploadInvocation
+  | GetInvocation
+  | ShareInvocation
+  | ListInvocation
+  | RenameInvocation
+  | DeleteInvocation
+  | ConfigureInvocation
+  | HelpInvocation;
 
 const OPTIONS_WITH_VALUES = new Set([
   "--access",
@@ -68,6 +95,7 @@ const OPTIONS_WITH_VALUES = new Set([
   "--format",
   "--output",
   "--profile",
+  "--view",
 ]);
 
 export function helpText(command: HelpCommand | null = null): string {
@@ -95,6 +123,9 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   let profileFlag: string | undefined;
   let artifactId: string | undefined;
   let name: string | undefined;
+  let view: ArtifactListView | undefined;
+  let yes = false;
+  let force = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -138,6 +169,29 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     }
     if (arg === "--remove-password") {
       removePassword = assignOnce(removePassword, true, "--remove-password");
+      continue;
+    }
+    if (arg === "--yes") {
+      if (yes) {
+        throw new CliError("INVALID_INPUT", "--yes was provided more than once.");
+      }
+      yes = true;
+      continue;
+    }
+    if (arg === "--force") {
+      if (force) {
+        throw new CliError("INVALID_INPUT", "--force was provided more than once.");
+      }
+      force = true;
+      continue;
+    }
+    if (arg === "--view" || arg.startsWith("--view=")) {
+      const inline = arg.startsWith("--view=");
+      const value = readOption(argv, arg, "--view", index);
+      if (!inline) {
+        index += 1;
+      }
+      view = assignOnce(view, parseView(value), "--view");
       continue;
     }
     if (arg === "--access" || arg.startsWith("--access=")) {
@@ -255,8 +309,14 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
   if (command !== "upload" && artifactId !== undefined) {
     throw new CliError("INVALID_INPUT", "--artifactId is only valid for the upload command.");
   }
-  if (command !== "upload" && name !== undefined) {
-    throw new CliError("INVALID_INPUT", "--name is only valid for the upload command.");
+  if (command !== "upload" && command !== "rename" && name !== undefined) {
+    throw new CliError("INVALID_INPUT", "--name is only valid for the upload and rename commands.");
+  }
+  if (command !== "list" && view !== undefined) {
+    throw new CliError("INVALID_INPUT", "--view is only valid for the list command.");
+  }
+  if (command !== "delete" && (yes || force)) {
+    throw new CliError("INVALID_INPUT", "--yes and --force are only valid for the delete command.");
   }
   const profile = selectedProfile(profileFlag, env);
   const stored = readStoredProfileSync(profile, env);
@@ -275,7 +335,17 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
     if (args.length > 0) {
       throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
     }
-    if (access !== undefined || format !== undefined || json || outputFlag !== undefined || quiet || revoke !== undefined) {
+    if (
+      access !== undefined
+      || format !== undefined
+      || view !== undefined
+      || json
+      || outputFlag !== undefined
+      || quiet
+      || revoke !== undefined
+      || yes
+      || force
+    ) {
       throw new CliError("INVALID_INPUT", "configure accepts --profile, --api-key, --api-url, and --endpoint-url.");
     }
     return {
@@ -339,6 +409,68 @@ export function parseCliArgs(argv: readonly string[], env: NodeJS.ProcessEnv = p
       throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
     }
     return { kind: "get", id, format: format ?? "html", ...options };
+  }
+  if (command === "list") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
+    if (args.length > 0) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    return { kind: "list", view: view ?? "mine", ...options };
+  }
+  if (command === "rename") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
+    const id = args[0];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove rename <id> --name <name>");
+    }
+    if (args.length > 1) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    if (name === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing --name. Run: factrove rename <id> --name <name>");
+    }
+    return { kind: "rename", id, name, ...options };
+  }
+  if (command === "delete") {
+    if (access !== undefined) {
+      throw new CliError("INVALID_INPUT", "--access is only valid for the upload command.");
+    }
+    if (format !== undefined) {
+      throw new CliError("INVALID_INPUT", "--format is only valid for the get command.");
+    }
+    if (revoke !== undefined) {
+      throw new CliError("INVALID_INPUT", "--revoke is only valid for the share command.");
+    }
+    const id = args[0];
+    if (id === undefined) {
+      throw new CliError("INVALID_INPUT", "Missing artifact id. Run: factrove delete <id>");
+    }
+    if (args.length > 1) {
+      throw new CliError("INVALID_INPUT", "Unexpected extra arguments.");
+    }
+    if (!ARTIFACT_ID.test(id)) {
+      throw new CliError("INVALID_INPUT", "Artifact id must be a UUID.");
+    }
+    return { kind: "delete", id, skipConfirm: yes || force, ...options };
   }
   if (command === "share") {
     if (access !== undefined) {
@@ -474,7 +606,15 @@ function requestedHelp(argv: readonly string[]): HelpInvocation | undefined {
     return undefined;
   }
   const command = positionals[0];
-  if (command === "upload" || command === "get" || command === "share" || command === "configure") {
+  if (
+    command === "upload"
+    || command === "get"
+    || command === "share"
+    || command === "list"
+    || command === "rename"
+    || command === "delete"
+    || command === "configure"
+  ) {
     return { kind: "help", command };
   }
   return { kind: "help", command: null };
@@ -502,6 +642,13 @@ function parseAccess(value: string): AccessType {
     return value;
   }
   throw new CliError("INVALID_INPUT", "access must be private or org_shared.");
+}
+
+function parseView(value: string): ArtifactListView {
+  if (value === "mine" || value === "org") {
+    return value;
+  }
+  throw new CliError("INVALID_INPUT", "view must be mine or org.");
 }
 
 function parseFormat(value: string): ContentFormat {

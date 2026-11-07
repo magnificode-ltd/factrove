@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { artifactNameValueSchema } from "./artifact-name.js";
+import { ARTIFACT_NAME_MESSAGE, artifactNameValueSchema, normalizeArtifactName } from "./artifact-name.js";
 
 export {
   ARTIFACT_NAME_MAX_LENGTH,
@@ -118,6 +118,22 @@ export const shareWithOrganizationRequestSchema = z
   })
   .strict();
 
+// Name only. This is not the organization-share body, and it cannot clear a name.
+export const RENAME_ARTIFACT_REQUEST_MESSAGE =
+  'Send { "name": "<library name>" }. The name is one line of 1 to 120 characters.';
+
+export const renameArtifactRequestSchema = z
+  .object({
+    // Same acceptance rule as upload: NFC, then trim, then 1 to 120 code points.
+    // A raw string can be longer than 120 before that normalization.
+    name: z.string().superRefine((value, ctx) => {
+      if (normalizeArtifactName(value) === null) {
+        ctx.addIssue(ARTIFACT_NAME_MESSAGE);
+      }
+    })
+  })
+  .strict();
+
 export const publicArtifactSchema = z.object({
   id: z.string().uuid(),
   filename: z.string(),
@@ -172,6 +188,7 @@ export type ShareState = z.infer<typeof shareStateSchema>;
 export type ShareEnvelope = z.infer<typeof shareEnvelopeSchema>;
 export type CreateShareRequest = z.infer<typeof createShareRequestSchema>;
 export type ShareWithOrganizationRequest = z.infer<typeof shareWithOrganizationRequestSchema>;
+export type RenameArtifactRequest = z.infer<typeof renameArtifactRequestSchema>;
 export type PublicArtifact = z.infer<typeof publicArtifactSchema>;
 export type PublicArtifactEnvelope = z.infer<typeof publicArtifactEnvelopeSchema>;
 export type PublicUnlockRequest = z.infer<typeof publicUnlockRequestSchema>;

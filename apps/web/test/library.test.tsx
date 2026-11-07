@@ -217,6 +217,12 @@ describe("viewer", () => {
     );
     expect(owner).toContain("Share with Local Organization");
     expect(owner).toContain('aria-haspopup="dialog"');
+    expect(owner).toContain("Rename");
+    expect(owner).toContain("Delete");
+    expect(shared).toContain("Rename");
+    expect(shared).toContain("Delete");
+    expect(reader).not.toContain("Rename");
+    expect(reader).not.toContain("Delete");
     expect(shared).not.toContain("Share with Local Organization");
     expect(shared).toContain("Organization shared");
     expect(reader).not.toContain("Share with Local Organization");

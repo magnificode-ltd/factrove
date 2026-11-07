@@ -93,6 +93,45 @@ describe("Factrove API client", () => {
     expect(capturedInit?.body).toBe(JSON.stringify({ accessType: "org_shared", organizationId: "local-org" }));
   });
 
+  it("patches a library name and deletes an artifact with an empty success response", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const renamed = { ...artifact, name: "Launch notes" };
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse({ artifact: renamed });
+    });
+    const client = createFactroveClient({
+      baseUrl: "http://localhost:3001",
+      apiKey: "ftrv_test",
+      fetch: fetchStub as typeof fetch
+    });
+
+    await expect(client.renameArtifact(artifact.id, "Launch notes")).resolves.toEqual({ artifact: renamed });
+    await expect(client.deleteArtifact(artifact.id)).resolves.toBeUndefined();
+
+    expect(calls[0]?.url).toBe(`http://localhost:3001/api/v1/artifacts/${artifact.id}/name`);
+    expect(calls[0]?.init?.method).toBe("PATCH");
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer ftrv_test");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ name: "Launch notes" }));
+    expect(calls[1]?.url).toBe(`http://localhost:3001/api/v1/artifacts/${artifact.id}`);
+    expect(calls[1]?.init?.method).toBe("DELETE");
+  });
+
+  it("reads a delete error envelope", async () => {
+    const fetchStub = vi.fn(async () =>
+      jsonResponse({ error: { code: "ARTIFACT_NOT_FOUND", message: "Artifact was not found." } }, 404)
+    );
+    const client = createFactroveClient({ baseUrl: "http://localhost:3001", fetch: fetchStub as typeof fetch });
+    await expect(client.deleteArtifact(artifact.id)).rejects.toMatchObject({
+      status: 404,
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found."
+    });
+  });
+
   it("appends /api/v1 once when the origin already includes the prefix", async () => {
     const fetchStub = vi.fn(async () => jsonResponse({ items: [artifact] }));
     const client = createFactroveClient({ baseUrl: "http://localhost:3001/api/v1/", fetch: fetchStub as typeof fetch });
