@@ -84,7 +84,7 @@ export const apiErrorCatalog = [
     status: 503,
     code: "STORAGE_UNAVAILABLE",
     description:
-      "Object storage failed. A failed upload leaves no artifact row. A failed artifact delete leaves the row and its current HTML object in place."
+      "Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE."
   },
   {
     status: 503,

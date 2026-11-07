@@ -83,6 +83,12 @@ class MemoryBlobStore implements BlobStore {
   putError: Error | undefined;
   failGet = false;
   failDelete = false;
+  throwAfterDelete = false;
+  holdNextDelete = false;
+  deleteEntered: Promise<void> = Promise.resolve();
+  private deleteHold: Promise<void> = Promise.resolve();
+  private releaseDeleteHold: (() => void) | null = null;
+  private markDeleteEntered: (() => void) | null = null;
   throwBeforeChunk = false;
   interruptAfterFirstChunk = false;
   pauseAfterFirstByte = false;
@@ -171,11 +177,37 @@ class MemoryBlobStore implements BlobStore {
     };
   }
 
+  armDeleteHold(): void {
+    this.holdNextDelete = true;
+    this.deleteEntered = new Promise((resolve) => {
+      this.markDeleteEntered = resolve;
+    });
+    this.deleteHold = new Promise((resolve) => {
+      this.releaseDeleteHold = resolve;
+    });
+  }
+
+  releaseDelete(): void {
+    this.releaseDeleteHold?.();
+    this.releaseDeleteHold = null;
+  }
+
   async delete(objectKey: string): Promise<void> {
+    if (this.holdNextDelete) {
+      this.holdNextDelete = false;
+      const mark = this.markDeleteEntered;
+      this.markDeleteEntered = null;
+      mark?.();
+      await this.deleteHold;
+    }
     if (this.failDelete) {
       throw new BlobStoreUnavailableError("Object storage is unavailable");
     }
     this.objects.delete(objectKey);
+    if (this.throwAfterDelete) {
+      this.throwAfterDelete = false;
+      throw new BlobStoreUnavailableError("Object storage is unavailable");
+    }
   }
 
   reset(): void {
@@ -185,8 +217,15 @@ class MemoryBlobStore implements BlobStore {
     this.failPut = false;
     this.putThenFail = false;
     this.putError = undefined;
+    this.releaseDelete();
+    this.markDeleteEntered?.();
+    this.markDeleteEntered = null;
     this.failGet = false;
     this.failDelete = false;
+    this.throwAfterDelete = false;
+    this.holdNextDelete = false;
+    this.deleteEntered = Promise.resolve();
+    this.deleteHold = Promise.resolve();
     this.throwBeforeChunk = false;
     this.interruptAfterFirstChunk = false;
     this.pauseAfterFirstByte = false;
@@ -1610,12 +1649,65 @@ describe("HTTP API", () => {
       message: "Artifact was not found.",
     });
 
+    const padded = await ownerFetch(`${baseUrl}/api/v1/artifacts/${shared.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: ` ${"a".repeat(120)} ` }),
+    });
+    expect(padded.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await padded.json()).artifact.name).toBe("a".repeat(120));
+    const decomposed = `${"b".repeat(119)}e\u0301`;
+    const accented = await ownerFetch(`${baseUrl}/api/v1/artifacts/${shared.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: decomposed }),
+    });
+    expect(accented.status).toBe(200);
+    expect(artifactEnvelopeSchema.parse(await accented.json()).artifact.name).toBe(`${"b".repeat(119)}\u00e9`);
+
     const orphaned = await upload(baseUrl, "orphan.html", new TextEncoder().encode("<p>orphan</p>"));
     const orphanRow = await prisma.artifact.findUniqueOrThrow({ where: { id: orphaned.id } });
     store.objects.delete(orphanRow.objectKey);
     const removed = await ownerFetch(`${baseUrl}/api/v1/artifacts/${orphaned.id}`, { method: "DELETE" });
     expect(removed.status).toBe(204);
     expect(await prisma.artifact.findUnique({ where: { id: orphaned.id } })).toBeNull();
+  });
+
+  it("keeps a replacement object when delete and replace overlap", async () => {
+    const artifact = await upload(baseUrl, "race.html", new TextEncoder().encode("<p>before</p>"), { name: "Before" });
+    const previous = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    store.armDeleteHold();
+    const pending = ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    await store.deleteEntered;
+    const replaced = await putContent(baseUrl, artifact.id, "after.html", new TextEncoder().encode("<p>after</p>"));
+    expect(replaced.status).toBe(200);
+    const during = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(during.objectKey).not.toBe(previous.objectKey);
+    expect(during.contentRevision).toBe(previous.contentRevision + 1);
+    expect(store.objects.has(during.objectKey)).toBe(true);
+    store.releaseDelete();
+    const deleted = await pending;
+    expect(deleted.status).toBe(204);
+    expect(await prisma.artifact.findUnique({ where: { id: artifact.id } })).toBeNull();
+    expect(store.objects.has(during.objectKey)).toBe(false);
+    expect([...store.objects.keys()].some((key) => key.startsWith(artifact.id))).toBe(false);
+  });
+
+  it("keeps the row when storage deletes the object and then reports failure", async () => {
+    const artifact = await upload(baseUrl, "ack.html", new TextEncoder().encode("<p>ack</p>"));
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    store.throwAfterDelete = true;
+    const failed = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    expect(failed.status).toBe(503);
+    expect(await errorOf(failed)).toEqual({
+      code: "STORAGE_UNAVAILABLE",
+      message: "Object storage is unavailable.",
+    });
+    expect(await prisma.artifact.findUnique({ where: { id: artifact.id } })).not.toBeNull();
+    expect(store.objects.has(row.objectKey)).toBe(false);
+    const retried = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    expect(retried.status).toBe(204);
+    expect(await prisma.artifact.findUnique({ where: { id: artifact.id } })).toBeNull();
   });
 
   it("returns the same not-found response when replacing a missing artifact", async () => {

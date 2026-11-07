@@ -573,7 +573,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Delete an artifact",
     description:
-      "Owner only. Deletes the artifact row and the current HTML object. The creator is the only caller who can delete. Organization role is not consulted, so an organization admin who did not create the artifact cannot delete it. A missing id and a caller who is not the creator, including a member who can read an org_shared artifact, return the same 404 as an unknown id. The current object is removed before the row. A missing object still deletes the row. A storage failure before the row delete leaves both in place. A public link stops working because the row, including its share token, is gone. Older objects left behind by a failed content replace are not swept. Cookie-authenticated writes need an allowed Origin.",
+      "Owner only. Deletes the artifact row and the current HTML object. The creator is the only caller who can delete. Organization role is not consulted, so an organization admin who did not create the artifact cannot delete it. A missing id and a caller who is not the creator, including a member who can read an org_shared artifact, return the same 404 as an unknown id. The object for the revision that was read is removed first. The row is deleted only while that creator, revision, and object key are still current. A replace that commits in between keeps its row, and this request reads that row and tries again. A missing object still allows that row delete. A storage failure keeps the row. The object may already be gone, so retry DELETE. A public link stops working because the row, including its share token, is gone. Older objects left behind by a failed content replace are not swept. Cookie-authenticated writes need an allowed Origin.",
     security: "owner",
     pathParameters: [artifactIdParam],
     responses: {
@@ -594,7 +594,7 @@ export const httpOperations: HttpOperation[] = [
       },
       "503": {
         description:
-          "Object storage failed before the row was deleted. Code `STORAGE_UNAVAILABLE`. The artifact and its HTML stay in place.",
+          "Object storage failed before the row was deleted. Code `STORAGE_UNAVAILABLE`. The row is kept. The object may already be gone, so retry DELETE.",
         schemaName: "ApiError"
       }
     }

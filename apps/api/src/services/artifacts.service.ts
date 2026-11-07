@@ -59,6 +59,11 @@ import { BLOB_STORE, BlobNotFoundError, BlobStoreUnavailableError, type BlobStor
 import { API_CONFIG, type ApiConfig } from "./api-config.js";
 import { ApiErrorException } from "./api-error.js";
 
+// A replace can commit between the object delete and the conditional row delete.
+// Each attempt reads the row that won and removes that object. Eight is enough for
+// a burst of replaces without spinning if they never stop.
+const DELETE_REPLACE_ATTEMPTS = 8;
+
 const IDENTITY_FIELDS = [
   "creatorUserId",
   "creator_user_id",
@@ -212,27 +217,45 @@ export class ArtifactsService {
     return this.toDto(updated, !this.actors.hasCredentialHeader(request));
   }
 
-  // Owner only. The current object is removed first. A missing object still deletes the row.
-  // Storage failure before that delete leaves the row and the object in place.
-  // A row delete that fails after the object is gone stays a 500 so the caller can retry.
+  // Owner only. The object for the revision that was read is removed first, then the row
+  // is deleted only while that creator, revision, and object key are still current.
+  // A replace that commits in between leaves its row. This request reads that row and tries again.
+  // A missing object still allows the conditional row delete. A storage error keeps the row.
+  // The object may already be gone when that error is reported. Retry DELETE.
   async deleteArtifact(request: HeaderSource, id: string): Promise<void> {
-    const record = await this.requireOwner(request, id);
-    const objectKey = storedObjectKey(record.id, record.objectKey);
-    try {
-      await this.blobs.delete(objectKey);
-    } catch (error) {
-      if (!(error instanceof BlobNotFoundError)) {
-        throw error;
-      }
+    const actor = await this.actors.requireActor(request);
+    let record = await this.artifacts.findById(id);
+    if (!record || actor.user.id !== record.creatorUserId) {
+      throw artifactNotFound();
     }
-    try {
-      await this.artifacts.delete(record.id);
-    } catch (error) {
-      if (isMissingArtifactRow(error)) {
+    for (let attempt = 0; attempt < DELETE_REPLACE_ATTEMPTS; attempt += 1) {
+      try {
+        await this.blobs.delete(storedObjectKey(record.id, record.objectKey));
+      } catch (error) {
+        if (!(error instanceof BlobNotFoundError)) {
+          throw error;
+        }
+      }
+      const removed = await this.artifacts.deleteIfUnchanged({
+        id: record.id,
+        creatorUserId: record.creatorUserId,
+        contentRevision: record.contentRevision,
+        objectKey: record.objectKey,
+      });
+      if (removed) {
         return;
       }
-      throw error;
+      const current = await this.artifacts.findById(record.id);
+      if (!current || current.creatorUserId !== actor.user.id) {
+        return;
+      }
+      record = current;
     }
+    throw new ApiErrorException(
+      409,
+      "CONTENT_CONFLICT",
+      "Another replace finished first. Delete again to remove the current artifact.",
+    );
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -835,10 +858,6 @@ function readRenameName(body: unknown): string {
     throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
   }
   return name;
-}
-
-function isMissingArtifactRow(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "P2025";
 }
 
 function readShareWithOrganizationBody(body: unknown): { accessType: "org_shared"; organizationId: string } {

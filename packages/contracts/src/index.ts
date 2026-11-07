@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { artifactNameValueSchema } from "./artifact-name.js";
+import { ARTIFACT_NAME_MESSAGE, artifactNameValueSchema, normalizeArtifactName } from "./artifact-name.js";
 
 export {
   ARTIFACT_NAME_MAX_LENGTH,
@@ -124,7 +124,13 @@ export const RENAME_ARTIFACT_REQUEST_MESSAGE =
 
 export const renameArtifactRequestSchema = z
   .object({
-    name: artifactNameValueSchema()
+    // Same acceptance rule as upload: NFC, then trim, then 1 to 120 code points.
+    // A raw string can be longer than 120 before that normalization.
+    name: z.string().superRefine((value, ctx) => {
+      if (normalizeArtifactName(value) === null) {
+        ctx.addIssue(ARTIFACT_NAME_MESSAGE);
+      }
+    })
   })
   .strict();
 

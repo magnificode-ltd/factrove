@@ -38,14 +38,28 @@ async function confirmDelete(id: string): Promise<void> {
     );
   }
   const reader = createInterface({ input: process.stdin, output: process.stderr });
+  const abort = new AbortController();
+  const cancel = (): void => {
+    abort.abort();
+  };
+  reader.on("close", cancel);
+  process.on("SIGINT", cancel);
   try {
-    const answer = (await reader.question(`Delete artifact ${id}? This removes the stored HTML and any public link. [y/N] `))
-      .trim()
-      .toLowerCase();
-    if (answer !== "y" && answer !== "yes") {
+    const answer = await reader.question(
+      `Delete artifact ${id}? This removes the stored HTML and any public link. [y/N] `,
+      { signal: abort.signal },
+    );
+    const normalized = answer.trim().toLowerCase();
+    if (normalized !== "y" && normalized !== "yes") {
       throw new CliError("INVALID_INPUT", "Delete cancelled.");
     }
+  } catch (error) {
+    if (error instanceof CliError) {
+      throw error;
+    }
+    throw new CliError("INVALID_INPUT", "Delete cancelled.");
   } finally {
+    process.off("SIGINT", cancel);
     reader.close();
   }
 }

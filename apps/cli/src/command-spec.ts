@@ -471,7 +471,7 @@ export const cliReferenceNotes: Record<string, string> = {
     "",
     "A terminal asks `Delete artifact {id}?` and continues only for `y` or `yes`. Anything else cancels. When stdin is not a terminal, pass `--yes` or `--force`. Those two flags do the same thing.",
     "",
-    "Delete removes the artifact row and the current HTML object. A public link stops working. The CLI does not keep a local index such as `factrove.md`, so there is no local file to update. Only the owner can delete. Anyone else gets `404 ARTIFACT_NOT_FOUND`, including an organization admin. A storage failure leaves the artifact in place.",
+    "Delete removes the artifact row and the current HTML object. A public link stops working. The CLI does not keep a local index such as `factrove.md`, so there is no local file to update. Only the owner can delete. Anyone else gets `404 ARTIFACT_NOT_FOUND`, including an organization admin. A storage failure keeps the artifact row. The stored HTML may already be gone, so retry the delete.",
     "",
     "## Related",
     "",

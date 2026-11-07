@@ -180,6 +180,25 @@ export class ArtifactsRepository {
     return toArtifactRecord(row);
   }
 
+  // Removes the row only while the revision and object key read by the caller are still current.
+  // A replace that committed a new object returns false and leaves that row in place.
+  async deleteIfUnchanged(input: {
+    id: string;
+    creatorUserId: string;
+    contentRevision: number;
+    objectKey: string;
+  }): Promise<boolean> {
+    const deleted = await this.prisma.artifact.deleteMany({
+      where: {
+        id: input.id,
+        creatorUserId: input.creatorUserId,
+        contentRevision: input.contentRevision,
+        objectKey: input.objectKey,
+      },
+    });
+    return deleted.count === 1;
+  }
+
   async findById(id: string): Promise<ArtifactRecord | null> {
     const row = await this.prisma.artifact.findUnique({ where: { id } });
     return row ? toArtifactRecord(row) : null;
