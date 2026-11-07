@@ -81,7 +81,9 @@ describe("CLI argument parsing", () => {
     expect(failure(["upload", file, "--name", "   "], {}).message).toBe("Missing value for --name.");
     expect(failure(["upload", file, "--name"], {}).message).toBe("Missing value for --name.");
     expect(failure(["upload", file, "--name", "One", "--name", "Two"], {}).message).toMatch(/more than once/);
-    expect(failure(["get", artifactId, "--name", "Nope"], {}).message).toBe("--name is only valid for the upload command.");
+    expect(failure(["get", artifactId, "--name", "Nope"], {}).message).toBe(
+      "--name is only valid for the upload and rename commands.",
+    );
   });
 
   it("accepts org_shared, json, and flags around the path", () => {
@@ -113,7 +115,7 @@ describe("CLI argument parsing", () => {
 
   it("rejects incomplete and unknown invocations", () => {
     expect(failure([], {}).message).toMatch(/Missing command/);
-    expect(failure(["list"], {}).message).toMatch(/Unknown command/);
+    expect(failure(["widgets"], {}).message).toMatch(/Unknown command/);
     expect(failure(["upload"], {}).message).toMatch(/Missing file path/);
     expect(failure(["upload", file, "extra.html"], {}).message).toMatch(/extra arguments/);
     expect(failure(["upload", file, "--access"], {}).message).toMatch(/Missing value for --access/);
@@ -352,6 +354,43 @@ describe("endpoint and output flags", () => {
     expect(failure(["upload", file, "--query", "id"], {}).message).toMatch(/Unknown option/);
     expect(parseCliArgs(["upload", "--", "-"], isolated)).toMatchObject({ kind: "upload", path: "-" });
   });
+
+  it("parses list, rename, and delete", () => {
+    expect(parseCliArgs(["list"], isolated)).toMatchObject({ kind: "list", view: "mine", json: false });
+    expect(parseCliArgs(["list", "--view", "org", "--json"], isolated)).toMatchObject({
+      kind: "list",
+      view: "org",
+      json: true,
+    });
+    expect(parseCliArgs(["list", "--view=mine"], isolated)).toMatchObject({ kind: "list", view: "mine" });
+    expect(parseCliArgs(["rename", artifactId, "--name", "  Launch notes  "], isolated)).toEqual({
+      kind: "rename",
+      id: artifactId,
+      name: "Launch notes",
+      json: false,
+      ...plainCommand(),
+    });
+    expect(parseCliArgs(["delete", artifactId, "--yes"], isolated)).toMatchObject({
+      kind: "delete",
+      id: artifactId,
+      skipConfirm: true,
+    });
+    expect(parseCliArgs(["delete", artifactId, "--force"], isolated)).toMatchObject({ skipConfirm: true });
+    expect(parseCliArgs(["delete", artifactId], isolated)).toMatchObject({ skipConfirm: false });
+    expect(parseCliArgs(["list", "--help"], isolated)).toEqual({ kind: "help", command: "list" });
+    expect(parseCliArgs(["rename", "--help"], isolated)).toEqual({ kind: "help", command: "rename" });
+    expect(parseCliArgs(["delete", "-h"], isolated)).toEqual({ kind: "help", command: "delete" });
+    expect(failure(["list", "--view", "public"], {}).message).toBe("view must be mine or org.");
+    expect(failure(["list", "extra"], {}).message).toMatch(/extra arguments/);
+    expect(failure(["upload", file, "--view", "mine"], {}).message).toBe("--view is only valid for the list command.");
+    expect(failure(["rename", artifactId], {}).message).toMatch(/Missing --name/);
+    expect(failure(["rename", "not-a-uuid", "--name", "Notes"], {}).message).toBe("Artifact id must be a UUID.");
+    expect(failure(["delete"], {}).message).toMatch(/Missing artifact id/);
+    expect(failure(["get", artifactId, "--yes"], {}).message).toBe(
+      "--yes and --force are only valid for the delete command.",
+    );
+    expect(failure(["delete", artifactId, "--yes", "--yes"], {}).message).toMatch(/more than once/);
+  });
 });
 
 function plainCommand() {
@@ -370,6 +409,9 @@ describe("approved help text", () => {
     expect(helpText("upload")).toBe(TOM_APPROVED_HELP.upload);
     expect(helpText("get")).toBe(TOM_APPROVED_HELP.get);
     expect(helpText("share")).toBe(TOM_APPROVED_HELP.share);
+    expect(helpText("list")).toBe(TOM_APPROVED_HELP.list);
+    expect(helpText("rename")).toBe(TOM_APPROVED_HELP.rename);
+    expect(helpText("delete")).toBe(TOM_APPROVED_HELP.delete);
     expect(helpText("configure")).toBe(TOM_APPROVED_HELP.configure);
     expect(APPROVED_HELP).toEqual(TOM_APPROVED_HELP);
   });
@@ -380,6 +422,9 @@ describe("approved help text", () => {
     expect(helpFence(pages.upload)).toBe(TOM_APPROVED_HELP.upload);
     expect(helpFence(pages.get)).toBe(TOM_APPROVED_HELP.get);
     expect(helpFence(pages.share)).toBe(TOM_APPROVED_HELP.share);
+    expect(helpFence(pages.list)).toBe(TOM_APPROVED_HELP.list);
+    expect(helpFence(pages.rename)).toBe(TOM_APPROVED_HELP.rename);
+    expect(helpFence(pages.delete)).toBe(TOM_APPROVED_HELP.delete);
     expect(helpFence(pages.configure)).toBe(TOM_APPROVED_HELP.configure);
     expect(pages.upload).toContain("--api-url");
     expect(pages.upload).toContain("CONTENT_CONFLICT");
@@ -393,8 +438,11 @@ const TOM_APPROVED_HELP = {
 Commands:
   upload <file>                    Upload an HTML file as a new artifact and print its id.
   upload <file> --artifactId <id>  Replace the content of an existing artifact.
+  list                             List your artifacts. --view org lists organization-shared ones.
   get <id>                         Print an artifact's content (HTML, or --format markdown).
   share <id>                       Create a public link. Add --password, --remove-password or --revoke.
+  rename <id> --name <name>        Change the name shown in the library.
+  delete <id>                      Delete an artifact. --yes skips the confirmation.
   configure                        Save your API key and API URL.
 
 Global options:
@@ -406,8 +454,11 @@ Examples:
   factrove upload ./hey.html
   factrove upload ./hey.html --name "X launch calendar"
   factrove upload ./hey.html --artifactId <artifact-id>
+  factrove list --json
   factrove get <artifact-id> --format markdown
   factrove share <artifact-id> --password
+  factrove rename <artifact-id> --name "X launch calendar"
+  factrove delete <artifact-id> --yes
   factrove configure
 `,
   upload: `Usage: factrove upload <file> [--name <name>] [--artifactId <id>] [--access private|org_shared] [--json]
@@ -441,6 +492,34 @@ Options:
   --remove-password  Keep the link and remove its password.
   --revoke           Remove the public link and its password.
   --json             Print one JSON line.
+`,
+  list: `Usage: factrove list [--view mine|org] [--json]
+
+Lists artifacts. The default is the caller's own artifacts. --view org lists
+organization-shared artifacts in the caller's current organization.
+
+Options:
+  --view <mine|org>  Which artifacts to list (default: mine).
+  --json             Print one JSON line.
+`,
+  rename: `Usage: factrove rename <id> --name <name> [--json]
+
+Changes the name shown in the library. The stored HTML is left as it is.
+Quote a name that contains spaces.
+
+Options:
+  --name <name>  Name shown in the library. One line, up to 120 characters.
+  --json         Print one JSON line.
+`,
+  delete: `Usage: factrove delete <id> [--yes | --force] [--json]
+
+Deletes an artifact, its stored HTML, and any public link. A terminal asks
+for confirmation. --yes and --force skip that prompt.
+
+Options:
+  --yes    Delete without a confirmation prompt.
+  --force  Same as --yes.
+  --json   Print one JSON line.
 `,
   configure: `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
 

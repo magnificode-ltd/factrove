@@ -11,8 +11,11 @@ Usage: factrove <command> [options]
 Commands:
   upload <file>                    Upload an HTML file as a new artifact and print its id.
   upload <file> --artifactId <id>  Replace the content of an existing artifact.
+  list                             List your artifacts. --view org lists organization-shared ones.
   get <id>                         Print an artifact's content (HTML, or --format markdown).
   share <id>                       Create a public link. Add --password, --remove-password or --revoke.
+  rename <id> --name <name>        Change the name shown in the library.
+  delete <id>                      Delete an artifact. --yes skips the confirmation.
   configure                        Save your API key and API URL.
 
 Global options:
@@ -24,8 +27,11 @@ Examples:
   factrove upload ./hey.html
   factrove upload ./hey.html --name "X launch calendar"
   factrove upload ./hey.html --artifactId <artifact-id>
+  factrove list --json
   factrove get <artifact-id> --format markdown
   factrove share <artifact-id> --password
+  factrove rename <artifact-id> --name "X launch calendar"
+  factrove delete <artifact-id> --yes
   factrove configure
 ```
 

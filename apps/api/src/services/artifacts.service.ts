@@ -8,7 +8,9 @@ import {
   createShareRequestSchema,
   normalizeArtifactName,
   ORGANIZATION_CHANGED_MESSAGE,
+  RENAME_ARTIFACT_REQUEST_MESSAGE,
   SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  renameArtifactRequestSchema,
   shareWithOrganizationRequestSchema,
   publicArtifactSchema,
   publicUnlockRequestSchema,
@@ -197,6 +199,40 @@ export class ArtifactsService {
       throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
     }
     return this.toDto(outcome.record, includeGrant);
+  }
+
+  // Owner only. The name changes. Content, access, organization, and share columns do not.
+  async rename(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
+    const record = await this.requireOwner(request, id);
+    const name = readRenameName(readBody());
+    const updated = await this.artifacts.rename(record.id, name);
+    if (!updated) {
+      throw artifactNotFound();
+    }
+    return this.toDto(updated, !this.actors.hasCredentialHeader(request));
+  }
+
+  // Owner only. The current object is removed first. A missing object still deletes the row.
+  // Storage failure before that delete leaves the row and the object in place.
+  // A row delete that fails after the object is gone stays a 500 so the caller can retry.
+  async deleteArtifact(request: HeaderSource, id: string): Promise<void> {
+    const record = await this.requireOwner(request, id);
+    const objectKey = storedObjectKey(record.id, record.objectKey);
+    try {
+      await this.blobs.delete(objectKey);
+    } catch (error) {
+      if (!(error instanceof BlobNotFoundError)) {
+        throw error;
+      }
+    }
+    try {
+      await this.artifacts.delete(record.id);
+    } catch (error) {
+      if (isMissingArtifactRow(error)) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
@@ -783,6 +819,26 @@ function tooManyPasswordAttempts(retryAfterSeconds = 1): ApiErrorException {
 
 function unlockBusy(): ApiErrorException {
   return new ApiErrorException(503, "UNLOCK_UNAVAILABLE", "Password verification is busy. Try again.", 1);
+}
+
+function readRenameName(body: unknown): string {
+  const parsed = renameArtifactRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (issue?.path[0] === "name") {
+      throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+    }
+    throw new ApiErrorException(400, "INVALID_REQUEST", RENAME_ARTIFACT_REQUEST_MESSAGE);
+  }
+  const name = normalizeArtifactName(parsed.data.name);
+  if (name === null) {
+    throw new ApiErrorException(400, "INVALID_REQUEST", ARTIFACT_NAME_MESSAGE);
+  }
+  return name;
+}
+
+function isMissingArtifactRow(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2025";
 }
 
 function readShareWithOrganizationBody(body: unknown): { accessType: "org_shared"; organizationId: string } {

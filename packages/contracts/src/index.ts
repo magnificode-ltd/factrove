@@ -118,6 +118,16 @@ export const shareWithOrganizationRequestSchema = z
   })
   .strict();
 
+// Name only. This is not the organization-share body, and it cannot clear a name.
+export const RENAME_ARTIFACT_REQUEST_MESSAGE =
+  'Send { "name": "<library name>" }. The name is one line of 1 to 120 characters.';
+
+export const renameArtifactRequestSchema = z
+  .object({
+    name: artifactNameValueSchema()
+  })
+  .strict();
+
 export const publicArtifactSchema = z.object({
   id: z.string().uuid(),
   filename: z.string(),
@@ -172,6 +182,7 @@ export type ShareState = z.infer<typeof shareStateSchema>;
 export type ShareEnvelope = z.infer<typeof shareEnvelopeSchema>;
 export type CreateShareRequest = z.infer<typeof createShareRequestSchema>;
 export type ShareWithOrganizationRequest = z.infer<typeof shareWithOrganizationRequestSchema>;
+export type RenameArtifactRequest = z.infer<typeof renameArtifactRequestSchema>;
 export type PublicArtifact = z.infer<typeof publicArtifactSchema>;
 export type PublicArtifactEnvelope = z.infer<typeof publicArtifactEnvelopeSchema>;
 export type PublicUnlockRequest = z.infer<typeof publicUnlockRequestSchema>;

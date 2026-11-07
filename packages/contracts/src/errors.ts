@@ -41,7 +41,8 @@ export const apiErrorCatalog = [
   {
     status: 404,
     code: "ARTIFACT_NOT_FOUND",
-    description: "The artifact id is unknown, the caller cannot read it, or the public share token is not active. Those cases share this body."
+    description:
+      "The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body."
   },
   {
     status: 409,
@@ -82,7 +83,8 @@ export const apiErrorCatalog = [
   {
     status: 503,
     code: "STORAGE_UNAVAILABLE",
-    description: "Object storage failed. A failed upload leaves no artifact row."
+    description:
+      "Object storage failed. A failed upload leaves no artifact row. A failed artifact delete leaves the row and its current HTML object in place."
   },
   {
     status: 503,

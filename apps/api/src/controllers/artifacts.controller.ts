@@ -77,6 +77,20 @@ export class ArtifactsController {
     return { artifact: artifactDtoSchema.parse(artifact) };
   }
 
+  // Owner only. Changes the library name. Content, access, and share columns stay put.
+  @Patch(":id/name")
+  async rename(@Req() request: JsonRequest, @Param("id") id: string): Promise<ArtifactEnvelope> {
+    const artifact = await this.artifacts.rename(request, parseArtifactId(id), () => jsonBody(request));
+    return { artifact: artifactDtoSchema.parse(artifact) };
+  }
+
+  // Owner only. Removes the row and the current HTML object. A missing object still removes the row.
+  @Delete(":id")
+  @HttpCode(204)
+  async remove(@Req() request: HeaderRequest, @Param("id") id: string): Promise<void> {
+    await this.artifacts.deleteArtifact(request, parseArtifactId(id));
+  }
+
   // Owner only. private -> org_shared in the caller's current organization. Share columns stay put.
   @Patch(":id")
   async shareWithOrganization(@Req() request: JsonRequest, @Param("id") id: string): Promise<ArtifactEnvelope> {

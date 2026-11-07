@@ -5,6 +5,7 @@ import type { AccessType, ContextEnvelope } from "@factrove/contracts";
 import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
+import { ArtifactActions } from "@/components/artifact-actions";
 import { CopyButton } from "@/components/copy-button";
 import { OrgShareControl } from "@/components/org-share-control";
 import { ShareControl } from "@/components/share-control";
@@ -15,12 +16,13 @@ import type { ViewerModel } from "@/viewer/load-artifact";
 export function ViewerScreen({ state }: { state: ViewerModel }) {
   const initialAccess = state.status === "ready" ? state.artifact.accessType : "private";
   const [accessType, setAccessType] = useState<AccessType>(initialAccess);
+  const [name, setName] = useState<string | null>(state.status === "ready" ? state.artifact.name : null);
   const [organization, setOrganization] = useState<ContextEnvelope["organization"]>(
     state.status === "ready" ? state.organization ?? null : null
   );
   const title =
     state.status === "ready"
-      ? artifactLabel(state.artifact)
+      ? artifactLabel({ ...state.artifact, name })
       : state.status === "missing"
         ? "Artifact not found"
         : state.status === "signed-out"
@@ -37,8 +39,10 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
               state={state}
               accessType={accessType}
               organization={organization}
+              name={name}
               onShared={(next) => setAccessType(next)}
               onAudienceChange={setOrganization}
+              onRenamed={(next) => setName(next.name)}
             />
           ) : null
         }
@@ -85,14 +89,18 @@ function ViewerTools({
   state,
   accessType,
   organization,
+  name,
   onShared,
-  onAudienceChange
+  onAudienceChange,
+  onRenamed
 }: {
   state: Extract<ViewerModel, { status: "ready" }>;
   accessType: AccessType;
   organization: ContextEnvelope["organization"];
+  name: string | null;
   onShared: (accessType: AccessType) => void;
   onAudienceChange: (organization: ContextEnvelope["organization"]) => void;
+  onRenamed: (artifact: { name: string | null }) => void;
 }) {
   const { artifact } = state;
   const share = state.share ?? null;
@@ -106,6 +114,16 @@ function ViewerTools({
           organizationName={organization.name}
           onShared={(next) => onShared(next.accessType)}
           onAudienceChange={onAudienceChange}
+        />
+      ) : null}
+      {state.owner === true ? (
+        <ArtifactActions
+          artifactId={artifact.id}
+          name={name}
+          onRenamed={onRenamed}
+          onDeleted={() => {
+            window.location.assign("/");
+          }}
         />
       ) : null}
       {share ? (

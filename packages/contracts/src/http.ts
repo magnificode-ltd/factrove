@@ -14,7 +14,9 @@ import {
   contextEnvelopeSchema,
   createShareRequestSchema,
   healthEnvelopeSchema,
+  RENAME_ARTIFACT_REQUEST_MESSAGE,
   SHARE_WITH_ORGANIZATION_REQUEST_MESSAGE,
+  renameArtifactRequestSchema,
   shareWithOrganizationRequestSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
@@ -205,6 +207,7 @@ export const namedSchemas: Record<string, z.ZodType> = {
   ShareEnvelope: shareEnvelopeSchema,
   CreateShareRequest: createShareRequestSchema,
   ShareWithOrganizationRequest: shareWithOrganizationRequestSchema,
+  RenameArtifactRequest: renameArtifactRequestSchema,
   PublicArtifactEnvelope: publicArtifactEnvelopeSchema,
   PublicUnlockRequest: publicUnlockRequestSchema,
   PublicUnlockEnvelope: publicUnlockEnvelopeSchema,
@@ -520,6 +523,80 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "500": apiErrorResponse
+    }
+  },
+  {
+    operationId: "renameArtifact",
+    method: "patch",
+    path: "/api/v1/artifacts/{id}/name",
+    tags: ["Artifacts"],
+    summary: "Rename an artifact",
+    description:
+      "Owner only. Changes the library name and leaves the HTML object, content revision, access, organization, and share columns unchanged. The creator is the only caller who can rename. Organization role is not consulted, so an organization admin who did not create the artifact cannot rename it. A missing id and a caller who is not the creator, including a member who can read an org_shared artifact, return the same 404 as an unknown id. Cookie-authenticated writes need an allowed Origin.",
+    security: "owner",
+    pathParameters: [artifactIdParam],
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: "The new library name. This route does not change access or content, and it cannot clear a name.",
+      schema: renameArtifactRequestSchema,
+      schemaName: "RenameArtifactRequest"
+    },
+    responses: {
+      "200": {
+        description: "The same artifact with the new name.",
+        schema: artifactEnvelopeSchema,
+        schemaName: "ArtifactEnvelope"
+      },
+      "400": {
+        description: `The rename body must be { "name": "<library name>" } and nothing else. An invalid name is NFC-normalized, then rejected when it contains U+0000–U+001F, U+007F–U+009F, U+2028, or U+2029 before trimming, or when the trimmed value is not 1 to 120 Unicode code points. That response is \`400 INVALID_REQUEST\` with message \`${ARTIFACT_NAME_MESSAGE}\` A JSON array or any other object shape is \`400 INVALID_REQUEST\` with message \`${RENAME_ARTIFACT_REQUEST_MESSAGE}\` Malformed JSON, null, and JSON primitives are \`400 INVALID_REQUEST\` with message \`The request is invalid.\` A body whose media type is not application/json is \`400 INVALID_REQUEST\` with message \`Send JSON with Content-Type application/json.\` A path id that fails UUID validation is also \`400 INVALID_REQUEST\`. A body larger than 102,400 bytes is \`413 FILE_TOO_LARGE\` with message \`The request is too large.\``,
+        schemaName: "ApiError"
+      },
+      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": {
+        description:
+          "Unknown artifact, or the caller is not the owner. An organization admin or another member who can read the artifact gets this same body. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "413": {
+        description: "The JSON body is larger than 102,400 bytes. Code `FILE_TOO_LARGE` with message `The request is too large.`",
+        schemaName: "ApiError"
+      },
+      "500": apiErrorResponse
+    }
+  },
+  {
+    operationId: "deleteArtifact",
+    method: "delete",
+    path: "/api/v1/artifacts/{id}",
+    tags: ["Artifacts"],
+    summary: "Delete an artifact",
+    description:
+      "Owner only. Deletes the artifact row and the current HTML object. The creator is the only caller who can delete. Organization role is not consulted, so an organization admin who did not create the artifact cannot delete it. A missing id and a caller who is not the creator, including a member who can read an org_shared artifact, return the same 404 as an unknown id. The current object is removed before the row. A missing object still deletes the row. A storage failure before the row delete leaves both in place. A public link stops working because the row, including its share token, is gone. Older objects left behind by a failed content replace are not swept. Cookie-authenticated writes need an allowed Origin.",
+    security: "owner",
+    pathParameters: [artifactIdParam],
+    responses: {
+      "204": {
+        description: "The artifact row and its current HTML object are gone. The response has no body."
+      },
+      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": {
+        description:
+          "Unknown artifact, or the caller is not the owner. An organization admin or another member who can read the artifact gets this same body. Code `ARTIFACT_NOT_FOUND`.",
+        schemaName: "ApiError"
+      },
+      "500": {
+        description:
+          "The row delete failed after the current object was removed. Retry the delete. A missing object is treated as already removed. Code `INTERNAL_ERROR`.",
+        schemaName: "ApiError"
+      },
+      "503": {
+        description:
+          "Object storage failed before the row was deleted. Code `STORAGE_UNAVAILABLE`. The artifact and its HTML stay in place.",
+        schemaName: "ApiError"
+      }
     }
   },
   {

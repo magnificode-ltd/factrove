@@ -149,6 +149,18 @@ export class ArtifactsRepository {
     });
   }
 
+  // Sets the library name only. Content, access, organization, and share columns stay as they are.
+  async rename(id: string, name: string): Promise<ArtifactRecord | null> {
+    const updated = await this.prisma.artifact.updateMany({
+      where: { id },
+      data: { name },
+    });
+    if (updated.count !== 1) {
+      return null;
+    }
+    return this.findById(id);
+  }
+
   async update(id: string, input: UpdateArtifactInput): Promise<ArtifactRecord> {
     const row = await this.prisma.artifact.update({
       where: { id },

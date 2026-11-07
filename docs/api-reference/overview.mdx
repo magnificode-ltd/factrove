@@ -87,6 +87,23 @@ curl -sS -X PATCH "$api/api/v1/artifacts/$artifact_id" \
 
 `name` is the library label. `POST /api/v1/artifacts` accepts an optional multipart field `name` (one line, 1 to 120 characters). When it is omitted, the API stores the file name without `.html` or `.htm` when that stem is one line of 1 to 120 characters. An empty stem, a stem longer than 120 characters, or a stem that is not one line stores null, and the upload still succeeds. `PUT /api/v1/artifacts/{id}/content` accepts the same field. The name is set in that same content revision update when the request sends one. Omitting it leaves the column unchanged. A `409` does not change the name. A content commit whose acknowledgement is lost can still land the new HTML and the new name together. An acknowledged or successfully reconciled update returns 200 even when a later replace has landed since. The 200 shows the artifact's current state, which may already include a later replace. An invalid name is `400 INVALID_REQUEST`. List, detail, upload, replace, and public detail responses include `name`, which is null when the artifact has none. `filename` stays `{id}.html`.
 
+`PATCH /api/v1/artifacts/{id}/name` with `{ "name": "<library name>" }` changes that label and leaves the HTML object, content revision, access, organization, and share columns unchanged. It cannot clear a name. Only the creator can call it. Organization role is not consulted, so an organization admin who did not create the artifact cannot rename it. A missing id and any caller who is not the creator, including a member who can already read an `org_shared` artifact, get the same `404 ARTIFACT_NOT_FOUND` as an unknown id. No credentials is `401 UNAUTHENTICATED`. `403 FORBIDDEN` stays the cookie-origin failure and is not used for this authorization check.
+
+`DELETE /api/v1/artifacts/{id}` removes the artifact row and the current HTML object. Success is `204` with no body. The same owner rule applies: an organization admin who is not the creator gets `404 ARTIFACT_NOT_FOUND`. The current object is removed before the row. A missing object still deletes the row. `503 STORAGE_UNAVAILABLE` means storage failed before the row delete, and both the row and the object stay. A public link stops working because the share token lived on the row. Older objects left behind by a failed content replace are not swept.
+
+```bash
+api=http://localhost:3001
+artifact_id=11111111-1111-4111-8111-111111111111
+
+curl -sS -X PATCH "$api/api/v1/artifacts/$artifact_id/name" \
+  -H "Authorization: Bearer $FACTROVE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Launch notes"}'
+
+curl -sS -X DELETE "$api/api/v1/artifacts/$artifact_id" \
+  -H "Authorization: Bearer $FACTROVE_API_KEY"
+```
+
 ## Public shares
 
 Anonymous detail, unlock, and HTML are under `/api/v1/public/artifacts/{id}/{token}`. Send an unlock grant in `X-Factrove-Share-Grant`. See [Sharing links](/guides/sharing-links).

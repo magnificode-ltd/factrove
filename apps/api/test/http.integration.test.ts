@@ -82,6 +82,7 @@ class MemoryBlobStore implements BlobStore {
   putThenFail = false;
   putError: Error | undefined;
   failGet = false;
+  failDelete = false;
   throwBeforeChunk = false;
   interruptAfterFirstChunk = false;
   pauseAfterFirstByte = false;
@@ -171,6 +172,9 @@ class MemoryBlobStore implements BlobStore {
   }
 
   async delete(objectKey: string): Promise<void> {
+    if (this.failDelete) {
+      throw new BlobStoreUnavailableError("Object storage is unavailable");
+    }
     this.objects.delete(objectKey);
   }
 
@@ -182,6 +186,7 @@ class MemoryBlobStore implements BlobStore {
     this.putThenFail = false;
     this.putError = undefined;
     this.failGet = false;
+    this.failDelete = false;
     this.throwBeforeChunk = false;
     this.interruptAfterFirstChunk = false;
     this.pauseAfterFirstByte = false;
@@ -1447,6 +1452,170 @@ describe("HTTP API", () => {
     expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from(original));
     const sharedContent = await ownerFetch(`${baseUrl}/api/v1/artifacts/${shared.id}/content`);
     expect(new TextDecoder().decode(await sharedContent.arrayBuffer())).toBe("<p>org</p>");
+  });
+
+  it("renames and deletes an artifact for the owner and refuses everyone else", async () => {
+    const bytes = new TextEncoder().encode("<p>keep-html</p>");
+    const artifact = await upload(baseUrl, "keep.html", bytes, { name: "Original name" });
+    const before = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const renamed = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "  Renamed calendar  " }),
+    });
+    expect(renamed.status).toBe(200);
+    const renamedBody = artifactEnvelopeSchema.parse(await renamed.json());
+    expect(renamedBody.artifact.name).toBe("Renamed calendar");
+    expect(renamedBody.artifact.id).toBe(artifact.id);
+    const afterRename = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(afterRename.name).toBe("Renamed calendar");
+    expect(afterRename.objectKey).toBe(before.objectKey);
+    expect(afterRename.contentRevision).toBe(before.contentRevision);
+    expect(afterRename.accessType).toBe(before.accessType);
+    expect(afterRename.createdAt.toISOString()).toBe(before.createdAt.toISOString());
+    expect(afterRename.updatedAt.getTime()).toBeGreaterThanOrEqual(before.updatedAt.getTime());
+    expect(store.objects.has(afterRename.objectKey)).toBe(true);
+    const content = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`);
+    expect(await content.text()).toBe("<p>keep-html</p>");
+
+    const invalidName = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "hello\n" }),
+    });
+    expect(invalidName.status).toBe(400);
+    expect(await errorOf(invalidName)).toEqual({
+      code: "INVALID_REQUEST",
+      message: "name must be one line of 1 to 120 characters.",
+    });
+    const extraField = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Nope", accessType: "org_shared" }),
+    });
+    expect(extraField.status).toBe(400);
+    expect((await errorOf(extraField)).code).toBe("INVALID_REQUEST");
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).name).toBe("Renamed calendar");
+
+    const stranger = await createUserWithApiKey(prisma, {
+      email: "rename-stranger@example.invalid",
+      name: "Stranger",
+      keyName: "rename-stranger",
+    });
+    const missingId = "00000000-0000-4000-8000-000000000099";
+    const deniedRename = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${stranger.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Stolen" }),
+    });
+    const missingRename = await ownerFetch(`${baseUrl}/api/v1/artifacts/${missingId}/name`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${stranger.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Missing" }),
+    });
+    expect(deniedRename.status).toBe(404);
+    expect(missingRename.status).toBe(404);
+    expect(await errorOf(deniedRename)).toEqual(await errorOf(missingRename));
+
+    const shared = await upload(baseUrl, "org.html", new TextEncoder().encode("<p>org</p>"), {
+      accessType: "org_shared",
+      name: "Org notes",
+    });
+    const member = await createUserWithApiKey(prisma, {
+      email: "rename-member@example.invalid",
+      name: "Member",
+      keyName: "rename-member",
+    });
+    await addMembership(prisma, member.userId, localOrganizationFixture.id);
+    const admin = await createUserWithApiKey(prisma, {
+      email: "rename-admin@example.invalid",
+      name: "Admin",
+      keyName: "rename-admin",
+    });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: localOrganizationFixture.id,
+        userId: admin.userId,
+        role: "admin",
+        createdAt: new Date(),
+      },
+    });
+    const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${shared.id}`, {
+      headers: { authorization: `Bearer ${member.apiKey}` },
+    });
+    expect(readable.status).toBe(200);
+    for (const apiKey of [member.apiKey, admin.apiKey]) {
+      const memberRename = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${shared.id}/name`, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Not mine" }),
+      });
+      const memberDelete = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${shared.id}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${apiKey}` },
+      });
+      expect(memberRename.status).toBe(404);
+      expect(memberDelete.status).toBe(404);
+      expect(await errorOf(memberRename)).toEqual({
+        code: "ARTIFACT_NOT_FOUND",
+        message: "Artifact was not found.",
+      });
+      expect(await errorOf(memberDelete)).toEqual({
+        code: "ARTIFACT_NOT_FOUND",
+        message: "Artifact was not found.",
+      });
+    }
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: shared.id } })).name).toBe("Org notes");
+
+    const anonymous = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Anon" }),
+    });
+    expect(anonymous.status).toBe(401);
+    expect(await errorOf(anonymous)).toEqual({
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
+    });
+    const anonymousDelete = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    expect(anonymousDelete.status).toBe(401);
+
+    store.failDelete = true;
+    const blocked = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    expect(blocked.status).toBe(503);
+    expect(await errorOf(blocked)).toEqual({
+      code: "STORAGE_UNAVAILABLE",
+      message: "Object storage is unavailable.",
+    });
+    expect(await prisma.artifact.findUnique({ where: { id: artifact.id } })).not.toBeNull();
+    expect(store.objects.has(afterRename.objectKey)).toBe(true);
+    store.failDelete = false;
+
+    const share = shareEnvelopeSchema.parse(
+      await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, { method: "POST" })).json(),
+    );
+    const token = share.share.shareUrl?.split("/").pop();
+    expect(token).toBeTruthy();
+    const deleted = await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(204);
+    expect(deleted.headers.get("content-type")).toBeNull();
+    expect(await deleted.text()).toBe("");
+    expect(await prisma.artifact.findUnique({ where: { id: artifact.id } })).toBeNull();
+    expect(store.objects.has(afterRename.objectKey)).toBe(false);
+    const publicRead = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}`);
+    expect(publicRead.status).toBe(404);
+    expect(await errorOf(publicRead)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    const orphaned = await upload(baseUrl, "orphan.html", new TextEncoder().encode("<p>orphan</p>"));
+    const orphanRow = await prisma.artifact.findUniqueOrThrow({ where: { id: orphaned.id } });
+    store.objects.delete(orphanRow.objectKey);
+    const removed = await ownerFetch(`${baseUrl}/api/v1/artifacts/${orphaned.id}`, { method: "DELETE" });
+    expect(removed.status).toBe(204);
+    expect(await prisma.artifact.findUnique({ where: { id: orphaned.id } })).toBeNull();
   });
 
   it("returns the same not-found response when replacing a missing artifact", async () => {

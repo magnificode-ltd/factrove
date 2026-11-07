@@ -53,6 +53,9 @@
               "cli-reference/upload",
               "cli-reference/get",
               "cli-reference/share",
+              "cli-reference/list",
+              "cli-reference/rename",
+              "cli-reference/delete",
               "cli-reference/configure"
             ]
           }
