@@ -47,7 +47,8 @@ export const apiErrorCatalog = [
   {
     status: 409,
     code: "CONTENT_CONFLICT",
-    description: "Another replace of the same artifact revision finished first. Upload again to replace the current content."
+    description:
+      "Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE."
   },
   {
     status: 413,

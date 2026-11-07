@@ -249,6 +249,9 @@ function errorBody(code: string, description: string): { code: string; message: 
   if (code === "FILE_TOO_LARGE" && /102,400/.test(description)) {
     return { code, message: "The request is too large." };
   }
+  if (code === "CONTENT_CONFLICT" && /eight attempts/i.test(description)) {
+    return { code, message: "Another replace finished first. Delete again to remove the current artifact." };
+  }
   return ERROR_BODIES[code];
 }
 
