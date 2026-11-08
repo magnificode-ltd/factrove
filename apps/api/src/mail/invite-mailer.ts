@@ -173,7 +173,7 @@ export class InviteMailer implements OnApplicationShutdown {
         this.config.brevoApiKey,
         this.config.smtp?.password,
         this.config.smtp?.user,
-      ]);
+      ]).replace(/https?:\/\/\S+/g, "[url]");
       message = `${purpose} failed for ${email}. ${redacted}`;
     } catch {
       message = `${purpose} failed for ${email}.`;
