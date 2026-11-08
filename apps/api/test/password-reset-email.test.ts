@@ -161,6 +161,7 @@ function authInput(sendPasswordResetEmail: (message: { email: string; name: stri
     webOrigin: WEB_ORIGIN,
     onUserCreated: async () => {},
     sendPasswordResetEmail,
+    sendVerificationEmail: async () => {},
   };
 }
 

@@ -10,6 +10,10 @@ import {
   PASSWORD_RESET_REQUEST_WINDOW_SECONDS,
   PASSWORD_RESET_SUBMIT_MAX,
   PASSWORD_RESET_SUBMIT_WINDOW_SECONDS,
+  EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+  EMAIL_VERIFICATION_REQUEST_MAX,
+  EMAIL_VERIFICATION_REQUEST_WINDOW_SECONDS,
+  emailVerificationUrl,
   passwordResetUrl,
 } from "../mail/password-reset-link.js";
 import { logWithoutThrowing } from "../mail/safe-log.js";
@@ -27,6 +31,12 @@ export type PasswordResetEmail = {
   resetUrl: string;
 };
 
+export type VerificationEmail = {
+  email: string;
+  name: string;
+  verifyUrl: string;
+};
+
 export type CreateAuthInput = {
   prisma: PrismaClient;
   baseURL: string;
@@ -36,6 +46,7 @@ export type CreateAuthInput = {
   webOrigin: string;
   onUserCreated: (account: CreatedAccount) => Promise<void>;
   sendPasswordResetEmail: (message: PasswordResetEmail) => Promise<void>;
+  sendVerificationEmail: (message: VerificationEmail) => Promise<void>;
   // Runtime auth uses Prisma. Tests pass the memory adapter.
   database?: BetterAuthOptions["database"];
 };
@@ -100,6 +111,28 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
           });
       },
     },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      expiresIn: EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+      sendVerificationEmail: async ({ user, token }) => {
+        const verifyUrl = emailVerificationUrl(input.webOrigin, token);
+        const email = user.email.trim();
+        if (verifyUrl === null || email.length === 0) {
+          return;
+        }
+        // Signup already signs the person in. Do not wait on the provider.
+        void Promise.resolve()
+          .then(() => input.sendVerificationEmail({
+            email,
+            name: user.name.trim(),
+            verifyUrl,
+          }))
+          .catch((error: unknown) => {
+            logAuthFailure("Verification email failed", email, error);
+          });
+      },
+    },
     telemetry: { enabled: false },
     rateLimit: {
       enabled: true,
@@ -115,6 +148,10 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
         "/reset-password": {
           window: PASSWORD_RESET_SUBMIT_WINDOW_SECONDS,
           max: PASSWORD_RESET_SUBMIT_MAX,
+        },
+        "/send-verification-email": {
+          window: EMAIL_VERIFICATION_REQUEST_WINDOW_SECONDS,
+          max: EMAIL_VERIFICATION_REQUEST_MAX,
         },
       },
     },

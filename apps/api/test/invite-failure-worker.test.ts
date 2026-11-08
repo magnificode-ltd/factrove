@@ -64,6 +64,7 @@ describe("invite failure process", () => {
           throw new Error("hook exploded");
         },
         sendPasswordResetEmail: async () => {},
+        sendVerificationEmail: async () => {},
       });
       const response = await auth.handler(new Request("http://localhost:3001/api/auth/sign-up/email", {
         method: "POST",

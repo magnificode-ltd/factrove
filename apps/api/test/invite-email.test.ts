@@ -1006,6 +1006,7 @@ describe("sign-up invite", () => {
         invited.push(account);
       },
       sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
     const created = await auth.handler(signUpRequest("Magnificode+Factrove@Mail.Grokbot.com"));
     expect(created.status).toBe(200);
@@ -1037,6 +1038,7 @@ describe("sign-up invite", () => {
       webOrigin: "http://localhost:3000",
       onUserCreated: () => gate,
       sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
     const created = await Promise.race([
       auth.handler(signUpRequest("pending+factrove@mail.grokbot.com")),

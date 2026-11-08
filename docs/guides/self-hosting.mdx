@@ -505,19 +505,19 @@ pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 
 ### Invite email
 
-Creating an account sends one invite email to that address. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts. There is no organization-member invite route.
+Creating an account sends one email to that address. It welcomes the person and asks them to confirm the address. Sign-in is not blocked. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts, and API keys are unchanged. People who already have an account are not emailed. There is no organization-member invite route.
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
 `EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
 
-The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready. A "Sign in to Factrove" button links to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
+The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready and asks them to confirm it. A "Confirm email" button links to `WEB_ORIGIN/verify-email?token=...`. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words.
 
-Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
+Set `WEB_ORIGIN` to the public URL of the web app before you send mail. Confirmation links and password-reset links start with that origin. The default `http://localhost:3000` only works for a browser on the same machine.
 
-Sign-up does not wait for the provider. The API sends at most four auth emails at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Invite email skipped for <address>. The send queue is full.` and that invite is not sent. A password reset past the limit logs `Password reset email skipped for <address>. The send queue is full.` On shutdown the API waits up to 10 seconds for queued and in-flight auth email, then logs `Auth email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
+Sign-up does not wait for the provider. The API sends at most four auth emails at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Verification email skipped for <address>. The send queue is full.` and that message is not sent. A password reset past the limit logs `Password reset email skipped for <address>. The send queue is full.` On shutdown the API waits up to 10 seconds for queued and in-flight auth email, then logs `Auth email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
 
-The HTML and plain-text layout live in `apps/api/src/mail/invite-email-template.ts`. Edit that file, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
+The signup wording lives in `apps/api/src/mail/verification-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
 
 This install needs Node.js 24 (`>=24.7.0 <25`; 24.16.0 is pinned). A ready API answers `GET /api/v1/health`.
 
@@ -599,10 +599,10 @@ send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
 
 A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
 
-- `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message. `messageId` is omitted when the provider id contains a secret or is not a normal id.
-- `Auth email shutdown left N send(s) unfinished:` means the process stopped before queued invite or password-reset sends finished. The account still exists.
-- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected for an invite. A password reset uses the same shape with `Password reset email was not sent.` The following lines are From, To, Subject, and the text.
-- `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
+- `Verification email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the signup message. `messageId` is omitted when the provider id contains a secret or is not a normal id. A password reset uses `Password reset email sent to <address>`.
+- `Auth email shutdown left N send(s) unfinished:` means the process stopped before queued verification or password-reset sends finished. The account still exists.
+- `EMAIL_TRANSPORT is log. Verification email was not sent.` means the log transport is selected for signup. A password reset uses `Password reset email was not sent.` The following lines are From, To, Subject, and the text.
+- `Verification email failed for <address>.` means the signup send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
 
@@ -617,6 +617,14 @@ A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...
 Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`.
 
 The wording lives in `apps/api/src/mail/password-reset-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API.
+
+### Email verification
+
+Signup sends the verification email described above instead of a separate welcome. One message avoids two emails at once. The body still says the account is ready. The link is `WEB_ORIGIN/verify-email?token=...` and expires in one hour. `/verify-email` shows a confirmed state or an expired state.
+
+`requireEmailVerification` stays false and `autoSignIn` stays true. A new account can sign in, use the library, and call the API with a key before the address is confirmed. The CLI is unchanged. Signing in does not send another email. Accounts that already exist are not emailed and are not forced through verification.
+
+A signed-in person whose address is not confirmed sees a small notice, "Verify your email." They can dismiss it for that browser session or choose Resend. Resend calls `POST /api/auth/send-verification-email`, which Better Auth limits to 3 requests per 60 seconds per client address. The same `EMAIL_TRANSPORT`, from address, from name, and logo are used. No new variable is required.
 
 Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#point-the-cli-at-this-install). Health, library, and share checks are the same, against the host ports.
 

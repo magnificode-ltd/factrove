@@ -3,6 +3,7 @@ import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
 import { EMAIL_SENDER, emailPurpose, redactSecrets, type EmailSender, type OutboundEmail } from "./email-sender.js";
 import { buildInviteEmail, type InviteRecipient } from "./invite-email.js";
 import { buildPasswordResetEmail } from "./password-reset-email.js";
+import { buildVerificationEmail } from "./verification-email.js";
 import { logWithoutThrowing } from "./safe-log.js";
 
 export const INVITE_SEND_CONCURRENCY = 4;
@@ -19,6 +20,12 @@ export type PasswordResetMessage = {
   email: string;
   name: string;
   resetUrl: string;
+};
+
+export type VerificationMessage = {
+  email: string;
+  name: string;
+  verifyUrl: string;
 };
 
 @Injectable()
@@ -59,6 +66,19 @@ export class InviteMailer implements OnApplicationShutdown {
     this.enqueue(buildPasswordResetEmail({
       recipient: { email, name: message.name },
       resetUrl: message.resetUrl,
+      supportEmail: this.config.emailFromAddress,
+      logoUrl: this.config.emailLogoUrl,
+    }));
+  }
+
+  async sendVerification(message: VerificationMessage): Promise<void> {
+    const email = message.email.trim();
+    if (email.length === 0) {
+      return;
+    }
+    this.enqueue(buildVerificationEmail({
+      recipient: { email, name: message.name },
+      verifyUrl: message.verifyUrl,
       supportEmail: this.config.emailFromAddress,
       logoUrl: this.config.emailLogoUrl,
     }));
