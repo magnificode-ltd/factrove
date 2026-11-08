@@ -452,7 +452,7 @@
 
 @keyframes ft-type {
   to {
-    width: 25ch;
+    width: calc(var(--ft-chars, 25) * 1ch);
   }
 }
 

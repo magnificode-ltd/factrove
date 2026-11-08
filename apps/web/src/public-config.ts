@@ -88,6 +88,20 @@ export function serverApiUrl(env?: RuntimeEnv): string {
   return readPublicApiOrigin(process.env.NEXT_PUBLIC_API_URL) ?? DEFAULT_PUBLIC_API_URL;
 }
 
+// Origin a CLI on the user's machine should call. This is the browser API origin,
+// not the address the Next.js server uses inside a private network.
+export function cliApiOrigin(env?: RuntimeEnv): string {
+  const source = runtimeEnv(env);
+  const browser = readPublicApiOrigin(source.BROWSER_API_URL);
+  if (source.BROWSER_API_URL?.trim() && !browser) {
+    warnInvalid("BROWSER_API_URL");
+  }
+  if (browser) {
+    return browser;
+  }
+  return readPublicApiOrigin(process.env.NEXT_PUBLIC_API_URL) ?? DEFAULT_PUBLIC_API_URL;
+}
+
 // Origin the browser uses. A value injected by the root layout wins over the build-time origin.
 export function browserApiUrl(): string {
   if (typeof window !== "undefined") {
