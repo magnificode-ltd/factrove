@@ -3,7 +3,7 @@ import { CliError } from "./cli-error.js";
 import { ARTIFACT_ID, helpPage, type HelpCommand } from "./command-spec.js";
 import { readStoredProfileSync, resolveApiKey, selectedProfile } from "./credentials.js";
 
-export const DEFAULT_API_URL = "http://localhost:3001";
+export const DEFAULT_API_URL = "https://api.factrove.app";
 
 export type AccessType = "private" | "org_shared";
 export type ContentFormat = "html" | "markdown";

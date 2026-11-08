@@ -1,0 +1,129 @@
+name: Publish CLI
+
+# Publishes the public npm package `factrove` from a generated manifest.
+# The workspace package stays `@factrove/cli` and private.
+# This workflow runs only when someone dispatches it. It does not run on push or on tags.
+# dry-run defaults to true, so a dispatch packs and smoke-tests without publishing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish. Leave empty to use apps/cli/package.json."
+        required: false
+        type: string
+      dry-run:
+        description: "Pack and smoke-test without publishing"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-factrove-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Pack and publish factrove
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @factrove/cli... build
+
+      - name: Test the CLI
+        run: pnpm --filter @factrove/cli test
+
+      - name: Show dispatch inputs
+        env:
+          PUBLISH_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          echo "version input: ${PUBLISH_VERSION:-<apps/cli/package.json>}"
+          echo "dry-run: ${DRY_RUN}"
+
+      - name: Prepare the npm package
+        env:
+          FACTROVE_PUBLISH_VERSION: ${{ inputs.version }}
+        run: node scripts/pack-cli.mjs
+
+      - name: List packed files
+        working-directory: apps/cli/npm
+        run: npm pack --dry-run
+
+      - name: Fail if this version is already on npm
+        working-directory: apps/cli/npm
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          echo "Checking npm for factrove@${version}"
+          set +e
+          view="$(npm view "factrove@${version}" version 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error::factrove@${version} is already published on npm. Refusing to publish. Bump apps/cli/package.json or pass a new version."
+            printf '%s\n' "$view"
+            exit 1
+          fi
+          if ! printf '%s\n' "$view" | grep -q 'E404'; then
+            echo "::error::Could not check whether factrove@${version} exists on npm."
+            printf '%s\n' "$view"
+            exit 1
+          fi
+          echo "factrove@${version} is not on npm."
+
+      - name: Smoke-test the packed tarball
+        working-directory: apps/cli/npm
+        run: |
+          set -euo pipefail
+          destination="${RUNNER_TEMP}/factrove-pack"
+          mkdir -p "$destination"
+          filename="$(npm pack --json --pack-destination "$destination" | node --input-type=module -e 'let raw = ""; process.stdin.on("data", (chunk) => { raw += chunk; }); process.stdin.on("end", () => { const info = JSON.parse(raw); const name = info[0] && info[0].filename; if (!name) { process.stderr.write("npm pack --json did not return a tarball name\n"); process.exit(1); } process.stdout.write(name.split(/[\\/]/).pop()); });')"
+          tarball="${destination}/${filename}"
+          test -f "$tarball"
+          prefix="$(mktemp -d)"
+          npm install --global --prefix "$prefix" "$tarball"
+          echo "Installed bins:"
+          ls -l "$prefix/bin"
+          "$prefix/bin/factrove" --help
+          "$prefix/bin/ftrv" --help
+          test ! -e "$prefix/lib/node_modules/factrove/node_modules/@factrove"
+          echo "Smoke test passed: factrove --help and ftrv --help"
+
+      - name: Publish to npm
+        working-directory: apps/cli/npm
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" != "false" ]; then
+            echo "Dry run. Skipping npm publish. Dispatch again with dry-run set to false to publish."
+            exit 0
+          fi
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN repository secret is missing. Add a granular npm automation token with read and write access limited to the factrove package."
+            exit 1
+          fi
+          printf '%s\n' "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "${HOME}/.npmrc"
+          npm publish --access public --provenance

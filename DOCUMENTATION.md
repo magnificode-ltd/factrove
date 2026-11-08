@@ -17,6 +17,8 @@ pnpm docs:cli
 
 `pnpm docs:openapi` builds `@factrove/contracts` and writes `docs/api-reference/openapi.json` from the Zod schemas and `packages/contracts/src/http.ts`.
 
+Publishing the CLI is [docs/guides/releasing-the-cli.mdx](docs/guides/releasing-the-cli.mdx). That workflow is manual. It does not run from these doc commands.
+
 `pnpm docs:cli` builds the CLI and writes the exact `factrove --help` page plus one MDX page per command in `docs/cli-reference/`. It also writes the CLI navigation group inline into `docs/docs.json`. The generator only reads `apps/cli/src/command-spec.ts`. After a CLI help or flag change, update that spec and re-run the script. Do not edit the generated pages by hand.
 
 `pnpm docs:check` fails when the committed OpenAPI spec, CLI pages, or `docs.json` CLI group differ from a fresh generation, when a stale generated page is left behind, when `docs.json` is missing the CLI reference tab or has more than one, or when a relative link in repo markdown outside `docs/` points at a missing file. Extra hand-written pages are allowed. `pnpm test` includes that check.

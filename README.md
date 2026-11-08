@@ -4,6 +4,21 @@ Factrove is a self-hostable home for artifacts created by people and agents. Its
 
 This repository contains the product: frontend, backend, CLI, and shared packages. It is private initially and intended for a future open-source release. A separate `factrove-cloud` repository is planned for proprietary managed-hosting capabilities.
 
+## Install the CLI
+
+The published npm package is `factrove`. It provides the `factrove` and `ftrv` commands. Both run the same program. Node.js must be at least 24.7.0 and below 25.
+
+```sh
+npm install --global factrove
+factrove --help
+ftrv --help
+npx factrove --help
+```
+
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. `factrove configure`, `--api-url`, and `FACTROVE_API_URL` override that origin. Publishing is a manual GitHub Actions dispatch, described in [docs/guides/releasing-the-cli.mdx](docs/guides/releasing-the-cli.mdx). It does not run on push.
+
+From this repository, `pnpm factrove` runs the CLI in the checkout. That is the command the local setup below uses. It is not a substitute for the published package.
+
 ## Repository layout
 
 | Path | Responsibility |
@@ -160,7 +175,7 @@ cp apps/cli/.env.example apps/cli/.env
 
 `apps/api/.env` is the application environment. The API loads it on startup and keeps variables that are already set. `pnpm dev` reads `NEXT_PUBLIC_API_URL` from that file and passes it to the web app when the variable is unset. `pnpm build` and `next build` read the same value when it is unset and Next.js fixes it in the client bundle. `next start` cannot change that origin, so run the build again after changing it. Only `NEXT_PUBLIC_API_URL` is copied from that file. Database, storage, and auth-secret settings stay on the API process.
 
-`apps/cli/.env` is read by `pnpm factrove` for local development. `node apps/cli/dist/main.js` does not read it. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set an API key. `FACTROVE_CLI_ENV_FILE` selects a different file. That name is read from the process environment, and the file itself cannot set it. The example leaves `FACTROVE_API_URL` commented because the built-in default is already `http://localhost:3001`. Omit the file and the CLI still uses that default.
+`apps/cli/.env` is read by `pnpm factrove` for local development. `node apps/cli/dist/main.js` and the published `factrove` command do not read it. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set an API key. `FACTROVE_CLI_ENV_FILE` selects a different file. That name is read from the process environment, and the file itself cannot set it. The example sets `FACTROVE_API_URL=http://localhost:3001` so `pnpm factrove` talks to the local API. The built-in default, used when that file and the profile have no URL, is `https://api.factrove.app`.
 
 Edit `apps/api/.env` before uploading:
 
@@ -171,7 +186,7 @@ Edit `apps/api/.env` before uploading:
 
 `NEXT_PUBLIC_API_URL` in `apps/api/.env` is the origin the browser uses for the API. It defaults to `http://localhost:3001`. A production bundle from `pnpm build` keeps the origin from the build. The Docker web image reads `BROWSER_API_URL` when it renders a page, so that origin can change without a rebuild. `INTERNAL_API_URL` is the origin the Next.js server uses to reach the API. Leave both unset for `pnpm dev`.
 
-CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `--endpoint-url` and `--api-url` set the API origin for one command. They must agree when both are present. Then `FACTROVE_API_URL` from the process environment, then `FACTROVE_ENDPOINT_URL` when that is unset. Then the selected profile's `api_url` in `~/.factrove/config`, or `endpoint_url` in that profile when `api_url` is absent. `pnpm factrove` uses a URL from `apps/cli/.env` only when the environment and the profile have no URL. The built-in default is `http://localhost:3001`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials` and ignores `FACTROVE_API_KEY`. `factrove configure` writes those files mode 0600 and stores the origin as `api_url`. `apps/cli/.env` does not supply a key or `FACTROVE_ENDPOINT_URL`. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted, and `pnpm factrove` can fill that name from `apps/cli/.env` when the variable is unset. The API key is not printed. Commands, config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
+CLI resolution follows the AWS CLI: flags, then environment variables, then profile files. `--endpoint-url` and `--api-url` set the API origin for one command. They must agree when both are present. Then `FACTROVE_API_URL` from the process environment, then `FACTROVE_ENDPOINT_URL` when that is unset. Then the selected profile's `api_url` in `~/.factrove/config`, or `endpoint_url` in that profile when `api_url` is absent. `pnpm factrove` uses a URL from `apps/cli/.env` only when the environment and the profile have no URL. The built-in default is `https://api.factrove.app`. `FACTROVE_API_KEY` supplies the key when `--profile` is omitted. An explicit `--profile` uses that profile's `factrove_api_key` in `~/.factrove/credentials` and ignores `FACTROVE_API_KEY`. `factrove configure` writes those files mode 0600 and stores the origin as `api_url`. `apps/cli/.env` does not supply a key or `FACTROVE_ENDPOINT_URL`. `FACTROVE_PROFILE` selects a profile when `--profile` is omitted, and `pnpm factrove` can fill that name from `apps/cli/.env` when the variable is unset. The API key is not printed. Commands, config precedence, the dev env file, and the differences from `aws s3` are in [docs/guides/cli.mdx](docs/guides/cli.mdx).
 
 The session cookie is for the API host. On localhost that cookie is sent to both ports. When the web app and API use different hosts, set `AUTH_COOKIE_DOMAIN` in `apps/api/.env` to the narrowest parent of both, such as `factrove.example.com` for `app.factrove.example.com` and `api.factrove.example.com`. The browser sends that cookie to every subdomain of the value. Startup rejects an IP address, a public suffix, and a domain that does not cover both origins. Set `TRUSTED_PROXIES` to the IP addresses or CIDR ranges of reverse proxies that may send `X-Forwarded-For`. Leave it unset when the API sees the client socket directly. Sign-in limits follow that client address, and an incoming `X-Forwarded-For` from an untrusted peer does not choose the bucket.
 
@@ -222,7 +237,7 @@ pnpm factrove delete <artifact-id>
 pnpm factrove delete <artifact-id> --yes
 ```
 
-Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. An empty My artifacts page shows `npm i -g factrove`, `factrove configure --api-url` for the app's API origin, and `factrove upload`. The npm package is not published yet. `--access org_shared` requires an existing organization membership. Signup and `pnpm db:seed` do not create one. Plain `upload` success prints only the artifact id. `--json` prints the `{ artifact }` envelope on one line. `upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. Failures go to stderr and the process exits 1. Success exits 0. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
+Open `http://localhost:3000`, choose My artifacts or Organization artifacts, and use Refresh after an upload. An empty My artifacts page shows `npm i -g factrove`, `npx factrove`, the `ftrv` alias, `factrove configure --api-url` for the app's API origin, and `factrove upload`. `--access org_shared` requires an existing organization membership. Signup and `pnpm db:seed` do not create one. Plain `upload` success prints only the artifact id. `--json` prints the `{ artifact }` envelope on one line. `upload <file> --artifactId <id>` replaces that artifact's content and prints the same id. Failures go to stderr and the process exits 1. Success exits 0. pnpm prints the script line it runs to stderr, prefixed with `$ `. A relative upload path uses the CLI process directory. `pnpm factrove` sets that directory to the one where you ran `pnpm`. Direct `node apps/cli/dist/main.js` uses its own directory and ignores `INIT_CWD`.
 
 `pnpm factrove get <id>` prints that artifact's content. The default format is HTML, the same bytes stored for the artifact. `--format markdown` asks the API to convert that stored HTML on the way out; Markdown is not saved. Plain get success prints the content and nothing else. `--json` prints one line with `format`, `mediaType`, and `content`.
 
@@ -289,7 +304,7 @@ pnpm e2e
 - **`pnpm e2e` reports a taken port.** That command uses `127.0.0.1:5433` for PostgreSQL, `127.0.0.1:3910` for Garage, `127.0.0.1:3100` for the web app, and `127.0.0.1:3101` for the API. Stop the other process and run `pnpm e2e` again. The dev ports 5432, 3900, 3000, and 3001 stay with `pnpm infra:up` and `pnpm dev`.
 - **The API stops on `BETTER_AUTH_SECRET`.** The value is missing or shorter than 32 characters. Set a local placeholder in `apps/api/.env`, then run `pnpm dev`.
 - **Upload returns `STORAGE_UNAVAILABLE`.** The API could not write the object, and the failed upload leaves no artifact row. For Garage, run `pnpm infra:up` and match `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_FORCE_PATH_STYLE`, and the access key in `apps/api/.env` to [compose.yaml](compose.yaml). For AWS, set `S3_BUCKET`, `S3_REGION`, and the credential chain, and leave `S3_ENDPOINT` unset. `S3_BUCKET=your-bucket` is an old placeholder.
-- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--endpoint-url` or `--api-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `http://localhost:3001`.
+- **The CLI reports `NETWORK_ERROR`.** The API origin is wrong or `pnpm dev` is not running. Precedence is `--endpoint-url` or `--api-url`, then `FACTROVE_API_URL`, then `FACTROVE_ENDPOINT_URL`, then the selected profile's `api_url` or `endpoint_url`, then a URL from `apps/cli/.env` when you use `pnpm factrove`, then `https://api.factrove.app`.
 - **The library says the API is unavailable.** The web app is using a different origin from the running API. Set `NEXT_PUBLIC_API_URL` in `apps/api/.env` or the environment, then restart `pnpm dev`. A production bundle from `pnpm build` keeps the origin from the build, so run `pnpm build` again after changing it. On the Docker web image, set `BROWSER_API_URL` to the origin the browser uses and `INTERNAL_API_URL` to the origin the Next.js server can reach. Those two are read at request time.
 
 ## Development
@@ -315,6 +330,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Quickstart](docs/quickstart.mdx): clone, local startup, and a first upload.
 - [Self-hosting](docs/guides/self-hosting.mdx): Docker Compose install, published GHCR images, configuration, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
 - [CLI](docs/guides/cli.mdx): commands, precedence, and a copyable agent workflow.
+- [Release the CLI](docs/guides/releasing-the-cli.mdx): manual npm publish of the `factrove` package. It does not run on push.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
 - [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.

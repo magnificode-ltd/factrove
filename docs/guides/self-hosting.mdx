@@ -328,7 +328,16 @@ Point both services at the external URL. Encode reserved characters in the passw
 
 ## Point the CLI at this install
 
-There is no published CLI package. Build it from this checkout. Node.js must be at least 24.7.0 and below 25 (24.16.0 is pinned). pnpm is 11.25.0.
+Install the published CLI and point it at this API. Node.js must be at least 24.7.0 and below 25. The package name is `factrove`. `ftrv` is the same command.
+
+```bash
+npm install --global factrove
+factrove configure --api-url http://localhost:3001
+```
+
+`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+
+From a checkout, the same command is `pnpm factrove`. Node.js 24.16.0 and pnpm 11.25.0 match the pins in this repository.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -336,9 +345,7 @@ pnpm --filter @factrove/cli... build
 pnpm factrove configure --api-url http://localhost:3001
 ```
 
-`--api-url` is the API origin this machine can reach. With the default publish, that is `http://localhost:3001` or `http://127.0.0.1:3001`. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
-
-`factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and stores the origin as `api_url`. It does not print the key. Later commands use that profile. Precedence is in [CLI](/guides/cli). `pnpm factrove` can also read `FACTROVE_API_URL` from `apps/cli/.env` when the process environment and the profile have no URL. `node apps/cli/dist/main.js` does not read that file.
+`factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and stores the origin as `api_url`. It does not print the key. Later commands use that profile. Precedence is in [CLI](/guides/cli). `pnpm factrove` can also read `FACTROVE_API_URL` from `apps/cli/.env` when the process environment and the profile have no URL. The example sets that URL to `http://localhost:3001`. `node apps/cli/dist/main.js` and the published commands do not read that file.
 
 An explicit `--profile` uses that profile's key and ignores `FACTROVE_API_KEY`.
 
@@ -369,7 +376,7 @@ With the stack up and the origins left on localhost:
     Plain upload prints only the artifact id. pnpm writes the script line it runs to stderr, so the substitution above is the id.
   </Step>
   <Step title="Library and viewer">
-    Open `http://localhost:3000`, choose **My artifacts**, and use Refresh if the new row is not listed yet. The viewer is `http://localhost:3000/artifacts/{id}`. An empty My artifacts page shows `npm i -g factrove`, `factrove configure` with the API origin, and `factrove upload`, plus a prompt for a coding agent. The npm package is not published yet. Use the `pnpm factrove` commands on this page until it is. Plain upload prints the artifact id. Add `--json` and open `viewerUrl` from that line.
+    Open `http://localhost:3000`, choose **My artifacts**, and use Refresh if the new row is not listed yet. The viewer is `http://localhost:3000/artifacts/{id}`. An empty My artifacts page shows `npm i -g factrove`, `npx factrove`, the `ftrv` alias, `factrove configure` with the API origin, and `factrove upload`, plus a prompt for a coding agent. The commands on this page use `pnpm factrove` because they run from the checkout. Plain upload prints the artifact id. Add `--json` and open `viewerUrl` from that line.
   </Step>
   <Step title="Share link">
     ```bash

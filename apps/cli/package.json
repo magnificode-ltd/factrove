@@ -1,16 +1,19 @@
 {
   "name": "@factrove/cli",
   "version": "0.1.0",
+  "description": "Command-line client for the Factrove artifact library. The public npm package is generated as factrove.",
   "license": "AGPL-3.0-or-later",
   "private": true,
-  "files": ["dist", "LICENSE", "NOTICE"],
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
   "type": "module",
+  "engines": { "node": ">=24.7.0 <25" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "start": "node dist/main.js",
     "dev": "pnpm build && node dist/main.js",
-    "test": "node ../../scripts/build-cli-if-needed.mjs && vitest run"
+    "test": "node ../../scripts/build-cli-if-needed.mjs && vitest run",
+    "pack:npm": "node ../../scripts/pack-cli.mjs"
   },
   "dependencies": {
     "@factrove/api-client": "workspace:*",

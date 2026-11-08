@@ -126,6 +126,8 @@ describe("library requests", () => {
     expect(mineHtml).toContain("Upload your first artifact");
     expect(mineHtml).toContain("npm i -g factrove");
     expect(mineHtml).toContain("npx factrove");
+    expect(mineHtml).toContain("ftrv");
+    expect(mineHtml).toContain("https://api.factrove.app");
     expect(mineHtml).toContain('href="/account/api-keys"');
     expect(mineHtml).toContain("factrove upload plan.html");
     expect(mineHtml).toContain("Have your agent set it up");

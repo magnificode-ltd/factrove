@@ -36,6 +36,7 @@
             "pages": [
               "guides/self-hosting",
               "guides/cli",
+              "guides/releasing-the-cli",
               "guides/sharing-links",
               "guides/troubleshooting"
             ]
