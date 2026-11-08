@@ -19,7 +19,7 @@ export function artifactReturnPath(id: string): string {
   return `/artifacts/${encodeURIComponent(id)}`;
 }
 
-export function authPageHref(page: "login" | "signup", next: string): string {
+export function authPageHref(page: "login" | "signup" | "forgot-password", next: string): string {
   const safe = safeNextPath(next);
   if (safe === "/") {
     return `/${page}`;

@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, type OnApplicationShutdown } from "@nestjs/common";
 import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
-import { EMAIL_SENDER, redactSecrets, type EmailSender } from "./email-sender.js";
+import { EMAIL_SENDER, emailPurpose, redactSecrets, type EmailSender, type OutboundEmail } from "./email-sender.js";
 import { buildInviteEmail, type InviteRecipient } from "./invite-email.js";
+import { buildPasswordResetEmail } from "./password-reset-email.js";
 import { logWithoutThrowing } from "./safe-log.js";
 
 export const INVITE_SEND_CONCURRENCY = 4;
@@ -10,7 +11,14 @@ export const INVITE_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 type InviteJob = {
   email: string;
+  purpose: string;
   run: () => Promise<void>;
+};
+
+export type PasswordResetMessage = {
+  email: string;
+  name: string;
+  resetUrl: string;
 };
 
 @Injectable()
@@ -32,28 +40,28 @@ export class InviteMailer implements OnApplicationShutdown {
 
   async sendInvite(recipient: InviteRecipient): Promise<void> {
     const email = recipient.email.trim();
-    if (email.length === 0 || this.closed) {
+    if (email.length === 0) {
       return;
     }
-    if (this.waiting.length >= INVITE_QUEUE_LIMIT) {
-      logWithoutThrowing(
-        (line) => this.logger.warn(line),
-        `Invite email skipped for ${email}. The send queue is full.`,
-      );
-      return;
-    }
-    const message = buildInviteEmail({
+    this.enqueue(buildInviteEmail({
       recipient: { email, name: recipient.name },
       signInUrl: `${this.config.webOrigin}/login`,
       supportEmail: this.config.emailFromAddress,
       logoUrl: this.config.emailLogoUrl,
-    });
-    // The provider call stays in the background. Sign-up already returned.
-    this.waiting.push({
-      email,
-      run: () => this.email.send(message),
-    });
-    this.pump();
+    }));
+  }
+
+  async sendPasswordReset(message: PasswordResetMessage): Promise<void> {
+    const email = message.email.trim();
+    if (email.length === 0) {
+      return;
+    }
+    this.enqueue(buildPasswordResetEmail({
+      recipient: { email, name: message.name },
+      resetUrl: message.resetUrl,
+      supportEmail: this.config.emailFromAddress,
+      logoUrl: this.config.emailLogoUrl,
+    }));
   }
 
   async onApplicationShutdown(): Promise<void> {
@@ -84,7 +92,7 @@ export class InviteMailer implements OnApplicationShutdown {
     }
     logWithoutThrowing(
       (line) => this.logger.error(line),
-      `Invite email shutdown left ${unfinished.length} send(s) unfinished: ${unfinished.join(", ")}.`,
+      `Auth email shutdown left ${unfinished.length} send(s) unfinished: ${unfinished.join(", ")}.`,
     );
   }
 
@@ -103,7 +111,7 @@ export class InviteMailer implements OnApplicationShutdown {
       tracked = Promise.resolve()
         .then(() => job.run())
         .then(() => undefined, (error: unknown) => {
-          this.reportFailure(job.email, error);
+          this.reportFailure(job.email, job.purpose, error);
         })
         .then(() => undefined, () => undefined)
         .finally(() => {
@@ -115,8 +123,30 @@ export class InviteMailer implements OnApplicationShutdown {
     }
   }
 
-  private reportFailure(email: string, error: unknown): void {
-    let message = `Invite email failed for ${email}.`;
+  private enqueue(message: OutboundEmail): void {
+    const email = message.to.trim();
+    const purpose = emailPurpose(message);
+    if (email.length === 0 || this.closed) {
+      return;
+    }
+    if (this.waiting.length >= INVITE_QUEUE_LIMIT) {
+      logWithoutThrowing(
+        (line) => this.logger.warn(line),
+        `${purpose} skipped for ${email}. The send queue is full.`,
+      );
+      return;
+    }
+    // The provider call stays in the background. The request already returned.
+    this.waiting.push({
+      email,
+      purpose,
+      run: () => this.email.send(message),
+    });
+    this.pump();
+  }
+
+  private reportFailure(email: string, purpose: string, error: unknown): void {
+    let message = `${purpose} failed for ${email}.`;
     try {
       const detail = error instanceof Error ? error.message : "request failed";
       const redacted = redactSecrets(detail, [
@@ -124,9 +154,9 @@ export class InviteMailer implements OnApplicationShutdown {
         this.config.smtp?.password,
         this.config.smtp?.user,
       ]);
-      message = `Invite email failed for ${email}. ${redacted}`;
+      message = `${purpose} failed for ${email}. ${redacted}`;
     } catch {
-      message = `Invite email failed for ${email}.`;
+      message = `${purpose} failed for ${email}.`;
     }
     logWithoutThrowing((line) => this.logger.error(line), message);
   }

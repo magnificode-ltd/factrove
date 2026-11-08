@@ -126,10 +126,10 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
-| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes the invite to the API log and does not send it |
+| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it |
 | `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
-| `EMAIL_LOGO_URL` | no | Absolute http(s) logo for the invite. Empty uses the text wordmark |
+| `EMAIL_LOGO_URL` | no | Absolute http(s) logo for auth email. Empty uses the text wordmark |
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
 | `SMTP_PORT` | when transport is `smtp` | Port from 1 to 65535. `587` is the usual STARTTLS port |
 | `SMTP_SECURE` | when transport is `smtp` | `true` for implicit TLS, usually port 465. `false` for STARTTLS, usually port 587 |
@@ -472,7 +472,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up invite and the password reset). Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user, password, and `SMTP_REQUIRE_TLS`. User and password are both set or both empty. Unset `SMTP_REQUIRE_TLS` requires STARTTLS when `SMTP_SECURE` is `false` |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
@@ -515,7 +515,7 @@ The message greets the person with "Hi {name}," or "Hi," when the name is blank,
 
 Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
 
-Sign-up does not wait for the provider. The API sends at most four invites at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Invite email skipped for <address>. The send queue is full.` and that invite is not sent. On shutdown the API waits up to 10 seconds for queued and in-flight invites, then logs `Invite email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
+Sign-up does not wait for the provider. The API sends at most four auth emails at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Invite email skipped for <address>. The send queue is full.` and that invite is not sent. A password reset past the limit logs `Password reset email skipped for <address>. The send queue is full.` On shutdown the API waits up to 10 seconds for queued and in-flight auth email, then logs `Auth email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
 
 The HTML and plain-text layout live in `apps/api/src/mail/invite-email-template.ts`. Edit that file, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
 
@@ -600,13 +600,23 @@ send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
 A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
 
 - `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message. `messageId` is omitted when the provider id contains a secret or is not a normal id.
-- `Invite email shutdown left N send(s) unfinished:` means the process stopped before those sends finished. The account still exists.
-- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected. The following lines are From, To, Subject, and the text.
+- `Auth email shutdown left N send(s) unfinished:` means the process stopped before queued invite or password-reset sends finished. The account still exists.
+- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected for an invite. A password reset uses the same shape with `Password reset email was not sent.` The following lines are From, To, Subject, and the text.
 - `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
 
 The signup form at `http://localhost:3000/signup` sends the same request. `pnpm dev` starts the web app and the API together. Use the curl above when you only need the API.
+
+### Password reset
+
+Forgot password is `/forgot-password`. The sign-in page links to it. The form always shows the same confirmation, so the page does not say whether that address has an account. `POST /api/auth/request-password-reset` does the same: a missing address and a known address both return 200 with the same JSON.
+
+A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...`, not the API origin. The token expires in one hour and works once. `/reset-password` asks for a new password of 8 to 128 characters and rejects a password on the common-password list. An expired or used link shows that state and offers another request. No new environment variable is required. Reset mail uses the same `EMAIL_TRANSPORT`, from address, from name, and logo as the invite.
+
+Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`.
+
+The wording lives in `apps/api/src/mail/password-reset-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API.
 
 Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#point-the-cli-at-this-install). Health, library, and share checks are the same, against the host ports.
 

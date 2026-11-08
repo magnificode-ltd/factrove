@@ -11,7 +11,14 @@ export type OutboundEmail = {
   subject: string;
   html: string;
   text: string;
+  // Log prefix. Invite messages omit it and stay "Invite email".
+  purpose?: string;
 };
+
+export function emailPurpose(message: OutboundEmail): string {
+  const purpose = message.purpose?.replace(/[\r\n]+/g, " ").trim() ?? "";
+  return purpose.length > 0 ? purpose.slice(0, 80) : "Invite email";
+}
 
 export interface EmailSender {
   send(message: OutboundEmail): Promise<void>;
@@ -50,7 +57,7 @@ export class LogEmailSender implements EmailSender {
 
   send(message: OutboundEmail): Promise<void> {
     this.log([
-      "EMAIL_TRANSPORT is log. Invite email was not sent.",
+      `EMAIL_TRANSPORT is log. ${emailPurpose(message)} was not sent.`,
       `From: ${this.from.emailFromName} <${this.from.emailFromAddress}>`,
       `To: ${message.to}`,
       `Subject: ${message.subject}`,

@@ -23,7 +23,9 @@ export class AuthService implements OnModuleInit {
       // Sign-in is trusted on the owner app, the public base URL, and the API origin.
       trustedOrigins: [...new Set([...browserOrigins(this.config.webOrigin, this.config.publicBaseUrl), this.config.apiPublicOrigin])],
       cookieDomain: this.config.authCookieDomain,
+      webOrigin: this.config.webOrigin,
       onUserCreated: (account) => this.invites.sendInvite(account),
+      sendPasswordResetEmail: (message) => this.invites.sendPasswordReset(message),
     });
   }
 

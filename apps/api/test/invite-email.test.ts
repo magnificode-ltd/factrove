@@ -883,7 +883,7 @@ describe("invite mailer", () => {
       await mailer.sendInvite({ email: "other+factrove@mail.grokbot.com", name: "Ada Lovelace" });
       const lines = await captureLogs(() => mailer.onApplicationShutdown());
       expect(lines).toEqual([
-        `Invite email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
+        `Auth email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
       ]);
     } finally {
       release();
@@ -941,7 +941,7 @@ describe("invite mailer", () => {
     try {
       await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
       const lines = await captureLogs(() => moduleRef.close());
-      expect(lines.join("\n")).toContain(`Invite email shutdown left 1 send(s) unfinished: ${PLUS_EMAIL}.`);
+      expect(lines.join("\n")).toContain(`Auth email shutdown left 1 send(s) unfinished: ${PLUS_EMAIL}.`);
     } finally {
       release();
     }
@@ -1001,9 +1001,11 @@ describe("sign-up invite", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: async (account) => {
         invited.push(account);
       },
+      sendPasswordResetEmail: async () => {},
     });
     const created = await auth.handler(signUpRequest("Magnificode+Factrove@Mail.Grokbot.com"));
     expect(created.status).toBe(200);
@@ -1032,7 +1034,9 @@ describe("sign-up invite", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: () => gate,
+      sendPasswordResetEmail: async () => {},
     });
     const created = await Promise.race([
       auth.handler(signUpRequest("pending+factrove@mail.grokbot.com")),

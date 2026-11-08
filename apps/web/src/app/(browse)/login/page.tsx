@@ -60,6 +60,14 @@ function LoginForm() {
           autoComplete="current-password"
           required
         />
+        <p className="text-right text-sm">
+          <a
+            className="font-semibold text-peri-d underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+            href={authPageHref("forgot-password", next)}
+          >
+            Forgot password?
+          </a>
+        </p>
         {error ? (
           <p role="alert" className="text-sm font-medium text-destructive">
             {error}

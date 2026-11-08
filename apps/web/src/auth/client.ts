@@ -4,7 +4,7 @@ import { apiKeyClient } from "@better-auth/api-key/client";
 import { createAuthClient } from "better-auth/react";
 import { browserApiUrl } from "@/public-config";
 
-type AuthError = { message?: string; status?: number } | null;
+type AuthError = { message?: string; status?: number; code?: string } | null;
 
 type AuthCall = {
   error: AuthError;
@@ -18,6 +18,8 @@ export type FactroveAuthClient = {
     email: (input: { name: string; email: string; password: string }) => Promise<AuthCall>;
   };
   signOut: () => Promise<unknown>;
+  requestPasswordReset: (input: { email: string }) => Promise<AuthCall>;
+  resetPassword: (input: { newPassword: string; token: string }) => Promise<AuthCall>;
   apiKey: {
     list: () => Promise<{
       data: { apiKeys: Array<{ id: string; name: string | null; start: string | null }> } | null;
@@ -55,6 +57,8 @@ export const authClient: FactroveAuthClient = {
     email: (input) => client().signUp.email(input),
   },
   signOut: () => client().signOut(),
+  requestPasswordReset: (input) => client().requestPasswordReset(input),
+  resetPassword: (input) => client().resetPassword(input),
   apiKey: {
     list: () => client().apiKey.list(),
     create: (input) => client().apiKey.create(input),
