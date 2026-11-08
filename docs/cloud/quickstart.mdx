@@ -1,0 +1,100 @@
+---
+title: Factrove Cloud quickstart
+sidebarTitle: Quickstart
+description: Sign up for Factrove Cloud, create an API key, install the factrove CLI, and save a profile for the hosted API.
+keywords:
+  - factrove cloud
+  - quickstart
+  - api key
+  - cli
+---
+
+Factrove Cloud is the hosted service. You sign up, create an API key, and use the published CLI against the hosted API. A server you run is the [self-host quickstart](/self-host/quickstart).
+
+<Warning>
+The hosted web app origin is not set in this repository. This page writes it as `https://cloud.factrove.example`. That host is a placeholder until a hosted web origin is published here. Use the origin of the Factrove Cloud site where you sign in, and keep the `/signup` and `/account/api-keys` paths. The API origin `https://api.factrove.app` is the CLI default in code (`DEFAULT_API_URL` in `apps/cli/src/parse-args.ts`).
+</Warning>
+
+Node.js must be at least 24.7 and below 25.
+
+## Sign up
+
+Open the hosted web app and create an account:
+
+```text
+https://cloud.factrove.example/signup
+```
+
+Replace `https://cloud.factrove.example` with the hosted web origin. The form asks for a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in. The same account signs in at `/login` on that origin.
+
+## Create an API key
+
+Open the API keys page on that same origin:
+
+```text
+https://cloud.factrove.example/account/api-keys
+```
+
+Create a key. The secret is shown once. Copy it somewhere you can paste into the CLI prompt. The CLI does not create the key, and `factrove configure` does not print it back.
+
+## Install the CLI
+
+The published npm package is `factrove`. It is the same package a self-hosted server uses.
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm i -g factrove
+    factrove --help
+    ftrv --help
+    ```
+  </Tab>
+  <Tab title="npx">
+    ```bash
+    npx factrove --help
+    ```
+  </Tab>
+</Tabs>
+
+A global install puts `factrove` and `ftrv` on your PATH. They run the same program. `ftrv` is a bin alias inside the `factrove` package. `npx factrove` runs that package without a global install. The name you pass to `npx` is `factrove`.
+
+## Save a profile for the hosted API
+
+`--api-key` prompts when you omit it, so the key stays out of shell history.
+
+```bash
+factrove configure --api-url https://api.factrove.app
+```
+
+`npx factrove configure --api-url https://api.factrove.app` is the same step without a global install. After `npm i -g factrove`, `ftrv configure --api-url https://api.factrove.app` is the same command.
+
+The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and stores the origin as `api_url`. Later commands on that profile call `https://api.factrove.app`.
+
+With no profile and no API URL, `factrove` and `ftrv` already call `https://api.factrove.app`. Saving it on the profile keeps that origin when a shell variable or another profile would otherwise win. Precedence is in [CLI](/guides/cli).
+
+On a terminal, `factrove configure` with no `--api-url` prompts `Factrove API URL [https://api.factrove.app]:` when nothing else has set an origin. Press Enter to accept it, or pass `--api-url` as above. A `FACTROVE_API_URL` already set in the environment is the suggestion instead, so pass `--api-url https://api.factrove.app` when you want the hosted API stored.
+
+<Info>
+If you also run a server of your own, give each one a profile. Configuring the `default` profile again replaces its API origin.
+</Info>
+
+Use a named profile when you also keep a profile for a server you run:
+
+```bash
+factrove configure --profile cloud --api-url https://api.factrove.app
+factrove --profile cloud upload ./page.html
+```
+
+`pnpm factrove` is the command inside a checkout of this repository. Its example env file points at `http://localhost:3001`. Cloud setup uses the published `factrove` command.
+
+## Upload a file
+
+```bash
+factrove upload ./page.html
+```
+
+Replace `./page.html` with a non-empty UTF-8 `.html` or `.htm` file. Plain success prints only the artifact id. `--json` prints one line. That line includes `viewerUrl`, which is the hosted service's public origin plus `/artifacts/{id}`. This repository does not set that public origin.
+
+The library and the viewer are on the hosted web app. Refresh **My artifacts** if the new row is not listed yet.
+
+Command flags are in the [CLI reference](/cli-reference/overview). Share links are in [Sharing links](/guides/sharing-links). A `NETWORK_ERROR` from the CLI means the profile origin or `FACTROVE_API_URL` is not the hosted API. See [Troubleshooting](/guides/troubleshooting).
