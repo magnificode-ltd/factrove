@@ -1134,6 +1134,7 @@ function apiConfig(overrides: Partial<ApiConfig>): ApiConfig {
     emailFromAddress: "support@factrove.app",
     emailFromName: "Factrove",
     emailLogoUrl: null,
+    emailLogFullLinks: false,
     brevoApiKey: null,
     smtp: null,
     ...overrides,

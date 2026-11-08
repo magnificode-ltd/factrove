@@ -9,6 +9,7 @@ import {
   EMAIL_VERIFICATION_REQUEST_MAX,
   emailVerificationUrl,
 } from "../src/mail/password-reset-link.js";
+import { LogEmailSender } from "../src/mail/email-sender.js";
 import { buildVerificationEmail, VERIFICATION_EMAIL_SUBJECT } from "../src/mail/verification-email.js";
 import { TEST_AUTH_SECRET } from "./auth-session.js";
 
@@ -17,7 +18,7 @@ const API_ORIGIN = "http://localhost:3001";
 const PLUS_EMAIL = "magnificode+verify@mail.grokbot.com";
 
 describe("verification email", () => {
-  it("welcomes the person and links to the web app", () => {
+  it("welcomes the person and links to the web app", async () => {
     const verifyUrl = emailVerificationUrl(WEB_ORIGIN, "header.payload.sig");
     expect(new URL(verifyUrl ?? "http://invalid").searchParams.get("token")).toBe("header.payload.sig");
     expect(EMAIL_VERIFICATION_EXPIRES_IN_SECONDS).toBe(3600);
@@ -38,6 +39,21 @@ describe("verification email", () => {
     expect(message.html).toContain("fac<b");
     expect(message.html).not.toContain("<script>");
     expect(message.html).not.toContain(API_ORIGIN);
+
+    const token = "header.payload.sig";
+    const lines: string[] = [];
+    await new LogEmailSender({
+      emailFromAddress: "support@factrove.app",
+      emailFromName: "Factrove",
+      emailLogFullLinks: false,
+    }, (line) => lines.push(line)).send(message);
+    const logged = lines.join("\n");
+    expect(logged).toContain(`To: ${PLUS_EMAIL}`);
+    expect(logged).toContain("Verification email was not sent.");
+    expect(logged).toContain(`${WEB_ORIGIN}/verify-email?[redacted]`);
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain("token=");
+    expect(logged).not.toContain("payload");
   });
 
   it("sends one verification email on signup, signs the person in, and does not send again on sign-in", async () => {
