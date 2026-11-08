@@ -510,7 +510,7 @@ Creating an account sends one invite email to that address. The signup page and 
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
-`EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
+`EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
 
 The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready. A "Sign in to Factrove" button links to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
 

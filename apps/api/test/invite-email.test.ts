@@ -635,6 +635,54 @@ describe("invite mailer", () => {
     expect(lines.join("\n")).not.toContain("smtp-user-not-real");
   });
 
+  it("strips a reset link from an SMTP failure log", async () => {
+    const token = "smtp-reset-token-must-stay-out";
+    const resetUrl = `http://localhost:3000/reset-password?token=${token}`;
+    const mailer = new InviteMailer(new SmtpEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: null, password: null },
+      () => ({
+        async sendMail(mail) {
+          throw new Error(`550 rejected ${mail.text}`);
+        },
+      }),
+    ), apiConfig({}));
+    const lines = await captureLogs(async () => {
+      await mailer.sendPasswordReset({ email: PLUS_EMAIL, name: "Ada Lovelace", resetUrl });
+      await flush();
+    });
+    const logged = lines.join("\n");
+    expect(logged).toContain(`Password reset email failed for ${PLUS_EMAIL}`);
+    expect(logged).toContain("[url]");
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(resetUrl);
+    expect(logged).not.toMatch(/https?:\/\//);
+  });
+
+  it("strips a reset link from a Brevo API failure log", async () => {
+    const token = "brevo-reset-token-must-stay-out";
+    const resetUrl = `http://localhost:3000/reset-password?token=${token}`;
+    const mailer = new InviteMailer(new BrevoEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      FAKE_KEY,
+      async () => new Response(JSON.stringify({ message: `blocked ${resetUrl}` }), { status: 400 }),
+    ), apiConfig({
+      emailTransport: "brevo",
+      brevoApiKey: FAKE_KEY,
+    }));
+    const lines = await captureLogs(async () => {
+      await mailer.sendPasswordReset({ email: PLUS_EMAIL, name: "Ada Lovelace", resetUrl });
+      await flush();
+    });
+    const logged = lines.join("\n");
+    expect(logged).toContain(`Password reset email failed for ${PLUS_EMAIL}`);
+    expect(logged).toContain("[url]");
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(resetUrl);
+    expect(logged).not.toContain(FAKE_KEY);
+    expect(logged).not.toMatch(/https?:\/\//);
+  });
+
   it("returns while the provider send is still pending", async () => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
