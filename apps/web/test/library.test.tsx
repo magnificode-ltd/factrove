@@ -88,6 +88,8 @@ describe("library requests", () => {
     expect(orgHtml).not.toContain("Share with Local Organization");
     expect(mineHtml).not.toContain("list only");
     expect(mineHtml).toContain("Private artifacts are visible only to you.");
+    expect(mineHtml).not.toContain("Have your agent set it up");
+    expect(mineHtml).not.toContain("npm i -g factrove");
     expect(orgHtml).toContain(`${otherId}.html`);
     expect(orgHtml).not.toContain(`${mineId}.html`);
     expect(mineHtml.indexOf(`${mineId}.html`)).toBeLessThan(mineHtml.indexOf(`${sharedId}.html`));
@@ -96,6 +98,13 @@ describe("library requests", () => {
   it("shows an empty organization list for a configured organization", () => {
     const html = renderToStaticMarkup(<LibraryScreen state={{ status: "empty", view: "org", context }} />);
     expect(html).toContain("No organization-shared artifacts for Local Organization.");
+    expect(html).toContain("factrove upload plan.html --access org_shared");
+    expect(html).toContain("Install and configure are in the");
+    expect(html).toContain('href="https://factrove.mintlify.app/cli-reference/overview"');
+    expect(html).not.toContain("steps are on");
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain("npm i -g factrove");
+    expect(html).not.toContain("Have your agent set it up");
     expect(html).not.toContain("<ul");
   });
 
@@ -114,6 +123,16 @@ describe("library requests", () => {
     const mineHtml = renderToStaticMarkup(<LibraryScreen state={mine} />);
     const orgHtml = renderToStaticMarkup(<LibraryScreen state={org} />);
     expect(mineHtml).toContain("No artifacts yet");
+    expect(mineHtml).toContain("Upload your first artifact");
+    expect(mineHtml).toContain("npm i -g factrove");
+    expect(mineHtml).toContain("npx factrove");
+    expect(mineHtml).toContain('href="/account/api-keys"');
+    expect(mineHtml).toContain("factrove upload plan.html");
+    expect(mineHtml).toContain("Have your agent set it up");
+    expect(mineHtml).toContain("https://factrove.mintlify.app/cli-reference/overview");
+    expect(mineHtml).not.toContain("docs.factrove.app");
+    expect(mineHtml).not.toContain("git clone");
+    expect(mineHtml).not.toContain("pnpm factrove");
     expect(mineHtml).toContain("Local User · No organization");
     expect(mineHtml).not.toContain("<ul");
     expect(orgHtml).toContain("has no configured organization");

@@ -367,7 +367,7 @@ With the stack up and the origins left on localhost:
     Plain upload prints only the artifact id. pnpm writes the script line it runs to stderr, so the substitution above is the id.
   </Step>
   <Step title="Library and viewer">
-    Open `http://localhost:3000`, choose **My artifacts**, and use Refresh if the new row is not listed yet. The viewer is `http://localhost:3000/artifacts/{id}`.
+    Open `http://localhost:3000`, choose **My artifacts**, and use Refresh if the new row is not listed yet. The viewer is `http://localhost:3000/artifacts/{id}`. An empty My artifacts page shows `npm i -g factrove`, `factrove configure` with the API origin, and `factrove upload`, plus a prompt for a coding agent. The npm package is not published yet. Use the `pnpm factrove` commands on this page until it is. Plain upload prints the artifact id. Add `--json` and open `viewerUrl` from that line.
   </Step>
   <Step title="Share link">
     ```bash

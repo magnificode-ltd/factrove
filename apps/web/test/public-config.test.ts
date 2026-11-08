@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   browserApiUrl,
+  cliApiOrigin,
   DEFAULT_SOURCE_CODE_URL,
   publicConfigScript,
   readPublicApiOrigin,
@@ -69,6 +70,19 @@ describe("public API origin", () => {
     expect(sourceCodeUrl({ SOURCE_CODE_URL: "https://git.example.com/fork" })).toBe("https://git.example.com/fork");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(sourceCodeUrl({ SOURCE_CODE_URL: "not a url" })).toBe(DEFAULT_SOURCE_CODE_URL);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("uses the browser API origin for the CLI and skips the internal address", () => {
+    expect(cliApiOrigin({ BROWSER_API_URL: "https://api.example.com/", INTERNAL_API_URL: "http://api:3001" })).toBe(
+      "https://api.example.com",
+    );
+    process.env.NEXT_PUBLIC_API_URL = "https://baked.example.com";
+    expect(cliApiOrigin({})).toBe("https://baked.example.com");
+    delete process.env.NEXT_PUBLIC_API_URL;
+    expect(cliApiOrigin({})).toBe("http://localhost:3001");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(cliApiOrigin({ BROWSER_API_URL: "https://api.example.com/library" })).toBe("http://localhost:3001");
     expect(warn).toHaveBeenCalledOnce();
   });
 

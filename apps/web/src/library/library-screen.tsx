@@ -1,13 +1,15 @@
 import type { ContextEnvelope } from "@factrove/contracts";
 import { ArtifactCard } from "@/components/artifact-card";
-import { CliTerminal, uploadCommand } from "@/components/cli-terminal";
+import { CliTerminal } from "@/components/cli-terminal";
 import { AppBar, LibraryTabs, ModeNote } from "@/components/chrome";
-import { CopyButton } from "@/components/copy-button";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { gettingStartedCopy } from "@/library/getting-started";
+import { GettingStarted, OrganizationEmpty } from "@/library/getting-started-card";
 import type { LibraryModel } from "@/library/load-library";
+import { cliApiOrigin } from "@/public-config";
 
 function contextLabel(context: ContextEnvelope): string {
   return `${context.user.name} · ${context.organization?.name ?? "No organization"}`;
@@ -92,23 +94,15 @@ function LibraryBody({ state, now }: { state: LibraryModel; now: number }) {
     );
   }
   if (state.status === "empty") {
-    const message =
-      state.view === "mine"
-        ? "No artifacts yet. Upload an HTML file with the Factrove CLI, then refresh."
-        : `No organization-shared artifacts for ${state.context.organization?.name ?? "this organization"}.`;
+    const copy = gettingStartedCopy({ apiOrigin: cliApiOrigin() });
+    if (state.view === "mine") {
+      return <GettingStarted copy={copy} />;
+    }
     return (
-      <Card role="status" className="mt-10 max-w-xl bg-white">
-        <CardContent className="flex flex-col items-start gap-4">
-          {state.view === "mine" ? <CliTerminal /> : null}
-          <p className="text-lg leading-relaxed">{message}</p>
-          {state.view === "mine" ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <code className="rounded-lg bg-lilac px-3 py-2 font-mono text-sm text-ink">{uploadCommand}</code>
-              <CopyButton label="Copy command" copiedLabel="Copied" message="Command copied" value={uploadCommand} />
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+      <OrganizationEmpty
+        organizationName={state.context.organization?.name ?? "this organization"}
+        copy={copy}
+      />
     );
   }
 
