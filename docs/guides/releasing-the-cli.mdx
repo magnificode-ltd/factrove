@@ -7,7 +7,7 @@ The public npm package is `factrove`. It installs two commands, `factrove` and `
 
 The workspace package stays `@factrove/cli` and private. The repository root is also named `factrove`, and pnpm will not accept a second workspace package with that name. `node scripts/pack-cli.mjs` writes `apps/cli/npm/` with the public manifest, bundles `@factrove/api-client` and `@factrove/contracts` into `dist/cli.js`, and leaves NestJS, `reflect-metadata`, `rxjs`, and `zod` as normal dependencies. That directory is gitignored. `npm publish` runs there, not in `apps/cli`.
 
-Publishing happens only when someone runs the [Publish CLI](https://github.com/magnificode-ltd/factrove/actions/workflows/publish-cli.yml) workflow by hand. The workflow file is `.github/workflows/publish-cli.yml`. It has no `push` or `tag` trigger.
+Publishing happens only when someone runs the [Publish CLI](https://github.com/magnificode-ltd/factrove/actions/workflows/publish-cli.yml) workflow by hand from `main`. The workflow file is `.github/workflows/publish-cli.yml`. It has no `push` or `tag` trigger. A dispatch from any other branch is skipped, so it cannot publish.
 
 ## Add NPM_TOKEN
 
@@ -18,12 +18,12 @@ Create a granular access token on the npm account that owns `factrove` (npm user
 1. Open [npm Access Tokens](https://www.npmjs.com/settings/tommagni/tokens) and generate a **Granular Access Token**.
 2. Name it for GitHub Actions, and set an expiration you will rotate.
 3. Under packages, grant **read and write** only for the `factrove` package. Do not grant access to every package on the account.
-4. Choose the automation option so the token can publish from CI without an interactive 2FA prompt. npm labels this as a granular token for automation.
+4. Tick **Bypass two-factor authentication**. It is off by default. CI cannot publish until that box is ticked. The token is still a granular access token, scoped to read and write on `factrove` only.
 5. In the GitHub repository, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `NPM_TOKEN` and paste the token.
 
 Do not commit the token, and do not put it in the workflow file. The workflow writes it to `~/.npmrc` only for the publish step.
 
-Provenance needs `id-token: write`, which the workflow already sets, and a public GitHub repository. `npm publish` uses `--access public --provenance`. This repository is private, and npm will not sign provenance for a private repository. Make the repository public before the first real publish, or that step fails.
+The publish command is `npm publish --access public`. It does not pass `--provenance`. The publish step sets `NPM_CONFIG_PROVENANCE` to the opposite of `github.event.repository.private`. While this repository is private, that value is false and npm publishes without provenance, which is what npm accepts from a private repository. When the repository is later made public, the same workflow turns provenance on without a workflow edit. `id-token: write` is already set so a public repository can sign it. You do not need to make the repository public before the first publish.
 
 ## Cut a release
 
@@ -39,7 +39,7 @@ Provenance needs `id-token: write`, which the workflow already sets, and a publi
     The job installs dependencies, builds the CLI, runs the CLI tests, writes the publish directory, prints `npm pack --dry-run`, and fails if that version is already on npm. It then installs the tarball into a clean prefix and runs `factrove --help` and `ftrv --help`. It does not publish.
   </Step>
   <Step title="Publish">
-    Run the workflow again with **Dry-run** unchecked. The same checks run, then `npm publish --access public --provenance`. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
+    Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance stays off while the repository is private and turns on automatically once the repository is public. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
   </Step>
 </Steps>
 

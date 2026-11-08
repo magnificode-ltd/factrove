@@ -2,8 +2,10 @@ name: Publish CLI
 
 # Publishes the public npm package `factrove` from a generated manifest.
 # The workspace package stays `@factrove/cli` and private.
-# This workflow runs only when someone dispatches it. It does not run on push or on tags.
+# This workflow runs only when someone dispatches it from main. It does not run on push or on tags.
+# A dispatch from any other branch is skipped, so it cannot publish.
 # dry-run defaults to true, so a dispatch packs and smoke-tests without publishing.
+# Provenance follows repository visibility: NPM_CONFIG_PROVENANCE is false while the repo is private.
 
 on:
   workflow_dispatch:
@@ -28,12 +30,15 @@ concurrency:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main'
     name: Pack and publish factrove
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -115,6 +120,7 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry-run }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: ${{ !github.event.repository.private }}
         run: |
           set -euo pipefail
           if [ "$DRY_RUN" != "false" ]; then
@@ -122,8 +128,8 @@ jobs:
             exit 0
           fi
           if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::error::NPM_TOKEN repository secret is missing. Add a granular npm automation token with read and write access limited to the factrove package."
+            echo "::error::NPM_TOKEN repository secret is missing. Add a granular access token with read and write on the factrove package, and tick Bypass two-factor authentication."
             exit 1
           fi
           printf '%s\n' "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "${HOME}/.npmrc"
-          npm publish --access public --provenance
+          npm publish --access public
