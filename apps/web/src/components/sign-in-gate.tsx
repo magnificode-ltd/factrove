@@ -19,10 +19,7 @@ export function SignInGate({ message, returnTo }: { message: string; returnTo: s
   return (
     <div className="ft-canvas min-h-dvh">
       <div className="ft-hero flex min-h-dvh flex-col">
-        <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <Button asChild variant="outline" className="h-10 bg-white">
-            <a href="/">Back to library</a>
-          </Button>
+        <header className="flex items-center justify-end px-4 py-3 sm:px-6">
           <SourceCodeLink className={sourceLinkClass} />
         </header>
         <main className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8 sm:py-12">
