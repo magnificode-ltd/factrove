@@ -5,6 +5,22 @@ description: Commands, flags, config precedence, and how Factrove differs from a
 
 The commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Run `factrove --help` for the short list, and `factrove <command> --help` for that command's flags. The generated pages reprint those help texts word for word, then list flags the help text omits.
 
+## Install
+
+The published npm package is `factrove`. Node.js must be at least 24.7.0 and below 25.
+
+```bash
+npm install --global factrove
+factrove --help
+ftrv --help
+```
+
+`ftrv` is an alias for `factrove`. npm rejected a separate `ftrv` package, so both names are bins of `factrove`. `npx factrove` runs the same program without a global install.
+
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. A self-hosted API needs `--api-url`, `FACTROVE_API_URL`, or a profile `api_url`. [Release the CLI](/guides/releasing-the-cli) publishes a version. It does not run on push.
+
+From a checkout of this repository, `pnpm factrove` runs the built CLI. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`. `apps/cli/.env` can point that command at `http://localhost:3001`. The published commands do not read that file.
+
 Help text uses synopsis placeholders such as `<artifact-id>`. In a shell, `<` starts a redirection. Executable examples below use quoted variables.
 
 ## Agent workflow
@@ -39,7 +55,7 @@ factrove delete "$artifact_id" --yes
 factrove configure
 ```
 
-From this repository the same commands run as `pnpm factrove`. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`.
+From this repository the same commands run as `pnpm factrove`. After `npm install --global factrove`, drop the `pnpm` prefix, or use `ftrv` in its place. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`.
 
 ## Commands
 
@@ -83,7 +99,7 @@ The API origin is the first value that is set:
 4. `api_url` in the selected profile
 5. `endpoint_url` in that profile, when `api_url` is absent
 6. a URL from the dev env file, only for `pnpm factrove`
-7. `http://localhost:3001`
+7. `https://api.factrove.app`
 
 The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. An explicit `--profile` skips `FACTROVE_API_KEY` and uses that profile's key. The profile name is `--profile`, then `FACTROVE_PROFILE`, then `default`.
 
@@ -91,7 +107,7 @@ The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profi
 
 ## Dev env file
 
-`pnpm factrove` reads `apps/cli/.env`. `node apps/cli/dist/main.js` does not. `FACTROVE_CLI_ENV_FILE` selects a different file, and that name comes from the process environment. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set an API key or `FACTROVE_ENDPOINT_URL`. A URL from the file is used only when the process environment and the selected profile have no URL.
+`pnpm factrove` reads `apps/cli/.env`. `node apps/cli/dist/main.js` and the published `factrove` command do not. `FACTROVE_CLI_ENV_FILE` selects a different file, and that name comes from the process environment. The file may set `FACTROVE_API_URL` and `FACTROVE_PROFILE` when those variables are unset. It does not set an API key or `FACTROVE_ENDPOINT_URL`. A URL from the file is used only when the process environment and the selected profile have no URL. The example sets `FACTROVE_API_URL=http://localhost:3001` so `pnpm factrove` talks to a local API. Without that file, the built-in origin is `https://api.factrove.app`.
 
 ## Differences from aws s3
 

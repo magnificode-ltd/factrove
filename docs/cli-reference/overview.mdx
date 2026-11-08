@@ -3,24 +3,37 @@ title: CLI overview
 description: Install and configure the Factrove CLI, then read the exact help pages generated from the command spec.
 ---
 
-The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. It ships inside this repository, not as a published `bin`. From the repository root, install dependencies and build the CLI plus the workspace packages it imports. The launcher refuses to start until `apps/cli/dist/main.js` exists.
+The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. The published npm package is `factrove`. Node.js must be at least 24.7.0 and below 25.
+
+```bash
+npm install --global factrove
+factrove --help
+ftrv --help
+```
+
+`ftrv` is the same program. `npx factrove` runs it without a global install. With no profile and no API URL, it calls `https://api.factrove.app`. `--api-url`, `FACTROVE_API_URL`, and `factrove configure` override that origin. [Release the CLI](/guides/releasing-the-cli) is the manual publish. It does not run on push.
+
+From a checkout, contributors use `pnpm factrove`. Install dependencies and build the CLI plus the workspace packages it imports. The launcher refuses to start until `apps/cli/dist/main.js` exists:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter @factrove/cli... build
+pnpm factrove --help
 ```
 
-Run it with `pnpm factrove`. That launcher reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The built binary `node apps/cli/dist/main.js` does not read that file. Set `BETTER_AUTH_SECRET` and start the API before configure. See [Quickstart](/quickstart) and [Troubleshooting](/guides/troubleshooting).
+`pnpm factrove` reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The example points that command at `http://localhost:3001`. `node apps/cli/dist/main.js` and the published commands do not read that file. Set `BETTER_AUTH_SECRET` and start the API before configure against a local server. See [Quickstart](/quickstart) and [Troubleshooting](/guides/troubleshooting).
 
 The program help uses the name `factrove`. The pages that follow reprint `factrove --help` and each `factrove <command> --help` text word for word, then list flags that help text omits.
 
 ## Configure once
 
-Create a key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). Then, from the repository root:
+Create a key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). Then:
 
 ```bash
-pnpm factrove configure
+factrove configure --api-url http://localhost:3001
 ```
+
+From the repository root, the same step is `pnpm factrove configure`. `ftrv configure` is the same command as `factrove configure`.
 
 See [configure](/cli-reference/configure). The key is not printed.
 

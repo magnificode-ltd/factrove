@@ -264,7 +264,8 @@ describe("local runtime", () => {
     assert.equal(/^SMTP_PASSWORD=\S/m.test(apiExample), false);
 
     const cliExample = readFileSync(join(repoRoot, "apps/cli/.env.example"), "utf8");
-    assert.match(cliExample, /^# FACTROVE_API_URL=http:\/\/localhost:3001$/m);
+    assert.match(cliExample, /^FACTROVE_API_URL=http:\/\/localhost:3001$/m);
+    assert.match(cliExample, /https:\/\/api\.factrove\.app/);
     assert.match(cliExample, /^# FACTROVE_PROFILE=default$/m);
     assert.equal(/^[^#\n]*FACTROVE_API_KEY=/m.test(cliExample), false);
     assert.equal(cliExample.includes("DATABASE_URL"), false);
@@ -278,7 +279,10 @@ describe("local runtime", () => {
     assert.equal(launcher.includes("FACTROVE_API_URL"), false);
     assert.equal(launcher.includes("loadCliEnv"), false);
     const cliPackage = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
-    assert.deepEqual(cliPackage.files, ["dist", "LICENSE", "NOTICE"]);
+    assert.deepEqual(cliPackage.files, ["dist", "README.md", "LICENSE", "NOTICE"]);
+    assert.equal(cliPackage.private, true);
+    assert.equal(cliPackage.name, "@factrove/cli");
+    assert.deepEqual(cliPackage.engines, { node: ">=24.7.0 <25" });
     const cliMain = readFileSync(join(repoRoot, "apps/cli/src/main.ts"), "utf8");
     assert.equal(cliMain.includes("loadCliEnv"), false);
     const devScript = readFileSync(join(repoRoot, "scripts/dev.mjs"), "utf8");

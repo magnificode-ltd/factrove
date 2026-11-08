@@ -21,6 +21,7 @@ describe("getting started copy", () => {
     const copy = gettingStartedCopy({ apiOrigin: "https://api.example.com" });
     expect(copy.installCommand).toBe("npm i -g factrove");
     expect(copy.npxCommand).toBe("npx factrove");
+    expect(copy.defaultApiUrl).toBe("https://api.factrove.app");
     expect(copy.configureCommand).toBe("factrove configure --api-url https://api.example.com");
     expect(copy.uploadCommand).toBe("factrove upload plan.html");
     expect(copy.orgUploadCommand).toBe("factrove upload plan.html --access org_shared");
@@ -30,6 +31,8 @@ describe("getting started copy", () => {
     expect(copy.agentPrompt).toContain(copy.uploadCommand);
     expect(copy.agentPrompt).toContain(`printf '%s\\n' "$FACTROVE_API_KEY" | ${copy.configureCommand}`);
     expect(copy.agentPrompt).toContain("npx factrove");
+    expect(copy.agentPrompt).toContain("ftrv");
+    expect(copy.agentPrompt).toContain("https://api.factrove.app");
     expect(copy.agentPrompt).toContain("Do not pass the key with --api-key");
     expect(copy.agentPrompt).not.toContain("git clone");
     expect(copy.agentPrompt).not.toContain("pnpm factrove");
@@ -76,6 +79,8 @@ describe("getting started copy", () => {
     expect(html).toContain("Copy npx");
     expect(html).toContain("Copy prompt");
     expect(html).toContain("suggests the value from the environment or the saved profile");
+    expect(html).toContain("https://api.factrove.app");
+    expect(html).toContain("ftrv");
     expect(html).not.toContain("Without it, the CLI uses");
     expect(html).toContain('href="/account/api-keys"');
     expect(html).toContain(`href="${DOCS_BASE_URL}/cli-reference/overview"`);

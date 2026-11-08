@@ -12,7 +12,8 @@ const artifactId = "123e4567-e89b-42d3-a456-426614174000";
 const isolated = { FACTROVE_CONFIG_DIR: "/tmp/factrove-parse-missing-7044" };
 
 describe("CLI argument parsing", () => {
-  it("defaults access to private and the API origin to localhost", () => {
+  it("defaults access to private and the API origin to the hosted Factrove API", () => {
+    expect(DEFAULT_API_URL).toBe("https://api.factrove.app");
     expect(parseCliArgs(["upload", file], isolated)).toEqual({
       kind: "upload",
       path: file,
@@ -136,7 +137,7 @@ describe("CLI argument parsing", () => {
 });
 
 describe("factrove get arguments", () => {
-  it("defaults format to html and the API origin to localhost", () => {
+  it("defaults format to html and the API origin to the hosted Factrove API", () => {
     expect(parseCliArgs(["get", artifactId], isolated)).toEqual({
       kind: "get",
       id: artifactId,
@@ -181,6 +182,24 @@ describe("factrove get arguments", () => {
 });
 
 describe("factrove configure arguments", () => {
+  it("suggests the hosted API when no profile or URL is configured", () => {
+    expect(parseCliArgs(["configure"], isolated)).toMatchObject({
+      kind: "configure",
+      apiUrl: undefined,
+      suggestedApiUrl: "https://api.factrove.app",
+    });
+    expect(parseCliArgs(["configure", "--api-url", "http://127.0.0.1:3001"], isolated)).toMatchObject({
+      apiUrl: "http://127.0.0.1:3001",
+      suggestedApiUrl: "http://127.0.0.1:3001",
+    });
+    expect(upload(["upload", file], { FACTROVE_API_URL: "http://127.0.0.1:3001" }).apiUrl).toBe(
+      "http://127.0.0.1:3001",
+    );
+    expect(upload(["upload", file], { FACTROVE_ENDPOINT_URL: "http://127.0.0.1:3002" }).apiUrl).toBe(
+      "http://127.0.0.1:3002",
+    );
+  });
+
   it("keeps the key flag off the resolved upload command", () => {
     expect(failure(["upload", file, "--api-key", "ftrv_secret"], {}).message).toMatch(/only valid for the configure command/);
     const configured = parseCliArgs(["configure", "--profile", "dev", "--api-key", "ftrv_secret"], isolated);

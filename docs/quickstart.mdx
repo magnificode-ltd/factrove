@@ -1,9 +1,23 @@
 ---
 title: Quickstart
-description: Get the Factrove repository, run it locally, create an API key, and upload an HTML file.
+description: Install the Factrove CLI, or run the repository locally, create an API key, and upload an HTML file.
 ---
 
-Factrove is used from this repository. There is no published CLI package and no `bin` executable. Run every command on this page from the repository root.
+## Install the CLI
+
+The published npm package is `factrove`. It installs `factrove` and `ftrv`. Both run the same program. Node.js must be at least 24.7 and below 25.
+
+```bash
+npm install --global factrove
+factrove --help
+ftrv --help
+```
+
+`npx factrove --help` runs it without a global install.
+
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. `factrove configure`, `--api-url`, `--endpoint-url`, and `FACTROVE_API_URL` override that origin. A self-hosted API needs the override. [Release the CLI](/guides/releasing-the-cli) is how a maintainer publishes a version. Nothing publishes on push.
+
+The rest of this page runs the local repository. From the repository root, contributors use `pnpm factrove` instead of the global install. `pnpm` prints the script line it runs to stderr.
 
 ## Get the source
 
@@ -82,7 +96,7 @@ If a replace returns `500`, GET the artifact before retrying. Prepare the HTML s
 
 ## 4. Open the library
 
-Visit `http://localhost:3000`. Use **My artifacts** or **Organization artifacts**, then Refresh after an upload. An empty **My artifacts** page shows `npm i -g factrove` (or `npx factrove`), `factrove configure --api-url` for this app's API origin, and `factrove upload`, plus a prompt you can paste into a coding agent. The npm package is not published yet, so the commands in this guide still use `pnpm factrove`. The [CLI reference](/cli-reference/overview) lists every command. Organization artifacts stay empty until the account has a membership. Signup and seed do not create one. See [Organization membership](/concepts#organization-membership).
+Visit `http://localhost:3000`. Use **My artifacts** or **Organization artifacts**, then Refresh after an upload. An empty **My artifacts** page shows `npm i -g factrove` (or `npx factrove`), `ftrv` as the same command, `factrove configure --api-url` for this app's API origin, and `factrove upload`, plus a prompt you can paste into a coding agent. The commands in this guide still use `pnpm factrove` because they run from the checkout. The [CLI reference](/cli-reference/overview) lists every command. Organization artifacts stay empty until the account has a membership. Signup and seed do not create one. See [Organization membership](/concepts#organization-membership).
 
 The owner of a private artifact can choose **Share with** the organization name in the viewer. After confirmation, members of that organization can open it. The web app cannot make it private again. The owner can also **Rename** or **Delete** an artifact from the library and the viewer. Delete asks for confirmation, then removes the artifact, its stored HTML, and any public link.
 
@@ -107,4 +121,4 @@ pnpm factrove delete "$artifact_id" --yes
 
 A copyable agent workflow is in [CLI](/guides/cli#agent-workflow). Help text still uses synopsis placeholders such as `<artifact-id>`. Those are not shell syntax. Executable examples on this site use quoted variables.
 
-`pnpm factrove` reads `apps/cli/.env` only for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. `node apps/cli/dist/main.js` does not read that file. The default API origin is `http://localhost:3001`. See [CLI](/guides/cli) for flags and precedence.
+`pnpm factrove` reads `apps/cli/.env` only for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The example sets `FACTROVE_API_URL` to `http://localhost:3001` so that command talks to the local API. `node apps/cli/dist/main.js` and the published `factrove` command do not read that file. Their built-in origin is `https://api.factrove.app`. See [CLI](/guides/cli) for flags and precedence.

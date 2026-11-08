@@ -4,6 +4,7 @@ node_modules/
 .pnpm-store/
 **/node_modules/
 **/dist/
+apps/cli/npm/
 **/.next/
 *.tsbuildinfo
 .env
