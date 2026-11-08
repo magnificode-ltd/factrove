@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import type { AccessType, ContextEnvelope } from "@factrove/contracts";
-import { authPageHref } from "@/auth/return-path";
 import { ArtifactFrame, CONTENT_LOAD_FAILURE } from "@/components/artifact-frame";
 import { ViewerBar } from "@/components/chrome";
 import { ArtifactActions } from "@/components/artifact-actions";
 import { CopyButton } from "@/components/copy-button";
 import { OrgShareControl } from "@/components/org-share-control";
 import { ShareControl } from "@/components/share-control";
-import { Button } from "@/components/ui/button";
+import { SignInGate } from "@/components/sign-in-gate";
 import { accessLabel, artifactLabel, formatBytes, formatRelativeTime, formatUploadedAt, isEmbeddableContentUrl } from "@/format";
 import type { ViewerModel } from "@/viewer/load-artifact";
 
@@ -20,14 +19,15 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
   const [organization, setOrganization] = useState<ContextEnvelope["organization"]>(
     state.status === "ready" ? state.organization ?? null : null
   );
+  if (state.status === "signed-out") {
+    return <SignInGate message={state.message} returnTo={state.returnTo} />;
+  }
   const title =
     state.status === "ready"
       ? artifactLabel({ ...state.artifact, name })
       : state.status === "missing"
         ? "Artifact not found"
-        : state.status === "signed-out"
-          ? "Sign in"
-          : "Artifact unavailable";
+        : "Artifact unavailable";
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <ViewerBar
@@ -150,21 +150,14 @@ function ReadyArtifact({ state }: { state: Extract<ViewerModel, { status: "ready
   return <ArtifactFrame key={artifact.contentUrl} contentUrl={artifact.contentUrl} />;
 }
 
-function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" }> }) {
-  const calm = state.status === "signed-out";
+function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" }> }) {
+  const calm = state.status === "missing";
   return (
     <div className="ft-enter flex h-full items-center px-6 sm:px-10">
       <div className="max-w-xl">
         <p role={calm ? "status" : "alert"} className={calm ? "text-lg" : "text-lg text-destructive"}>
           {state.message}
         </p>
-        {state.status === "signed-out" ? (
-          <p className="mt-5">
-            <Button asChild className="h-11">
-              <a href={authPageHref("login", state.returnTo)}>Sign in</a>
-            </Button>
-          </p>
-        ) : null}
       </div>
     </div>
   );
