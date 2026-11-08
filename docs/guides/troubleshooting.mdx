@@ -6,7 +6,7 @@ description: Ports, secrets, storage, API origins, cookies, profiles, public lin
 These are the failures a local checkout and a self-hosted install hit most often.
 
 <Note>
-The checks below are for a local checkout and a self-hosted install: ports, containers, and server env files. On Factrove Cloud, a CLI `NETWORK_ERROR` means the profile origin or `FACTROVE_API_URL` is something other than `https://api.factrove.app`. Setup for each path is the [self-host quickstart](/self-host/quickstart) and the [Factrove Cloud quickstart](/cloud/quickstart).
+The checks below are for a local checkout and a self-hosted install: ports, containers, and server env files. A `NETWORK_ERROR` means the CLI could not reach the API: check the effective origin (profile, `FACTROVE_API_URL`) and your connection. Setup for each path is the [self-host quickstart](/self-host/quickstart) and the [Factrove Cloud quickstart](/cloud/quickstart).
 </Note>
 
 ## Ports and the container runtime

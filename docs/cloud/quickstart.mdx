@@ -70,7 +70,7 @@ factrove configure --api-url https://api.factrove.app
 
 The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and stores the origin as `api_url`. Later commands on that profile call `https://api.factrove.app`.
 
-With no profile and no API URL, `factrove` and `ftrv` already call `https://api.factrove.app`. Saving it on the profile keeps that origin when a shell variable or another profile would otherwise win. Precedence is in [CLI](/guides/cli).
+With no profile and no API URL, `factrove` and `ftrv` already call `https://api.factrove.app`. Saving it on the profile keeps that origin when no flag or `FACTROVE_API_URL` / `FACTROVE_ENDPOINT_URL` is set. Those environment variables outrank the profile, so unset them (or pass `--api-url https://api.factrove.app`) when you use Factrove Cloud. Precedence is in [CLI](/guides/cli).
 
 On a terminal, `factrove configure` with no `--api-url` prompts `Factrove API URL [https://api.factrove.app]:` when nothing else has set an origin. Press Enter to accept it, or pass `--api-url` as above. A `FACTROVE_API_URL` already set in the environment is the suggestion instead, so pass `--api-url https://api.factrove.app` when you want the hosted API stored.
 
@@ -97,4 +97,4 @@ Replace `./page.html` with a non-empty UTF-8 `.html` or `.htm` file. Plain succe
 
 The library and the viewer are on the hosted web app. Refresh **My artifacts** if the new row is not listed yet.
 
-Command flags are in the [CLI reference](/cli-reference/overview). Share links are in [Sharing links](/guides/sharing-links). A `NETWORK_ERROR` from the CLI means the profile origin or `FACTROVE_API_URL` is not the hosted API. See [Troubleshooting](/guides/troubleshooting).
+Command flags are in the [CLI reference](/cli-reference/overview). Share links are in [Sharing links](/guides/sharing-links). A `NETWORK_ERROR` means the CLI could not reach the API: check the effective origin (profile, `FACTROVE_API_URL`) and your connection. See [Troubleshooting](/guides/troubleshooting).
