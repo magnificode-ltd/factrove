@@ -31,12 +31,14 @@ export function ViewerBar({
   title,
   meta,
   tools,
-  showLibraryLink = true
+  showLibraryLink = true,
+  reserveLibraryLink = false
 }: {
   title: string;
   meta?: ReactNode;
   tools?: ReactNode;
   showLibraryLink?: boolean;
+  reserveLibraryLink?: boolean;
 }) {
   return (
     <header className="z-30 border-b border-border bg-cloud">
@@ -45,6 +47,10 @@ export function ViewerBar({
         {showLibraryLink ? (
           <Button asChild variant="outline" className="h-10">
             <a href="/">Back to library</a>
+          </Button>
+        ) : reserveLibraryLink ? (
+          <Button asChild variant="outline" className="invisible h-10" aria-hidden="true" tabIndex={-1}>
+            <span>Back to library</span>
           </Button>
         ) : null}
         <h1 className="min-w-0 flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
