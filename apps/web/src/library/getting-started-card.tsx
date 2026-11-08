@@ -42,8 +42,9 @@ export function GettingStarted({ copy }: { copy: GettingStartedCopy }) {
                 API keys
               </a>{" "}
               page. The secret is shown once. <Code>factrove configure</Code> prompts for that key, so it stays out
-              of shell history. <Code>--api-url</Code> is this app&apos;s API origin. Without it, the CLI uses{" "}
-              <Code>http://localhost:3001</Code>.
+              of shell history. <Code>--api-url</Code> is this app&apos;s API origin. Without that flag, configure
+              asks for the URL, suggests the value from the environment or the saved profile, and uses{" "}
+              <Code>http://localhost:3001</Code> only when neither is set.
             </p>
             <CommandRow value={copy.configureCommand} label="Copy configure" />
           </li>
@@ -100,15 +101,10 @@ export function OrganizationEmpty({
         <p className="text-lg leading-relaxed">No organization-shared artifacts for {organizationName}.</p>
         <p className="text-base leading-relaxed">
           After the CLI is configured, upload with <Code>--access org_shared</Code>. That needs a current
-          organization membership. Signup does not create one. The install and configure steps are on{" "}
-          <a href="/" className={textLink}>My artifacts</a>.
+          organization membership. Signup does not create one. Install and configure are in the{" "}
+          <a href={copy.docsUrl} className={textLink} target="_blank" rel="noreferrer">CLI reference</a>.
         </p>
         <CommandRow value={copy.orgUploadCommand} label="Copy upload" />
-        <p className="text-base leading-relaxed">
-          <a href={copy.docsUrl} className={textLink} target="_blank" rel="noreferrer">
-            CLI reference
-          </a>
-        </p>
       </CardContent>
     </Card>
   );

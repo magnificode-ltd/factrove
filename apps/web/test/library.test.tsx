@@ -99,6 +99,9 @@ describe("library requests", () => {
     const html = renderToStaticMarkup(<LibraryScreen state={{ status: "empty", view: "org", context }} />);
     expect(html).toContain("No organization-shared artifacts for Local Organization.");
     expect(html).toContain("factrove upload plan.html --access org_shared");
+    expect(html).toContain("Install and configure are in the");
+    expect(html).toContain('href="https://factrove.mintlify.app/cli-reference/overview"');
+    expect(html).not.toContain("steps are on");
     expect(html).toContain('href="/"');
     expect(html).not.toContain("npm i -g factrove");
     expect(html).not.toContain("Have your agent set it up");

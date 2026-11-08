@@ -35,9 +35,31 @@ describe("getting started copy", () => {
     expect(copy.agentPrompt).not.toContain("pnpm factrove");
   });
 
-  it("quotes an API origin that is not a bare shell word", () => {
-    const copy = gettingStartedCopy({ apiOrigin: "http://[::1]:3001" });
-    expect(copy.configureCommand).toBe("factrove configure --api-url 'http://[::1]:3001'");
+  it("quotes an API origin that is not a plain URL", () => {
+    expect(gettingStartedCopy({ apiOrigin: "https://api.example.com" }).configureCommand).toBe(
+      "factrove configure --api-url https://api.example.com",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "http://localhost:3001" }).configureCommand).toBe(
+      "factrove configure --api-url http://localhost:3001",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "http://[::1]:3001" }).configureCommand).toBe(
+      "factrove configure --api-url 'http://[::1]:3001'",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "https://api;true" }).configureCommand).toBe(
+      "factrove configure --api-url 'https://api;true'",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "https://api&true" }).configureCommand).toBe(
+      "factrove configure --api-url 'https://api&true'",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "https://api$true" }).configureCommand).toBe(
+      "factrove configure --api-url 'https://api$true'",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "https://api!true" }).configureCommand).toBe(
+      "factrove configure --api-url 'https://api!true'",
+    );
+    expect(gettingStartedCopy({ apiOrigin: "https://api'host.example" }).configureCommand).toBe(
+      "factrove configure --api-url 'https://api'\\''host.example'",
+    );
   });
 
   it("renders the deployment API origin into the empty library", () => {
@@ -53,6 +75,8 @@ describe("getting started copy", () => {
     expect(html).toContain("Copy upload");
     expect(html).toContain("Copy npx");
     expect(html).toContain("Copy prompt");
+    expect(html).toContain("suggests the value from the environment or the saved profile");
+    expect(html).not.toContain("Without it, the CLI uses");
     expect(html).toContain('href="/account/api-keys"');
     expect(html).toContain(`href="${DOCS_BASE_URL}/cli-reference/overview"`);
   });

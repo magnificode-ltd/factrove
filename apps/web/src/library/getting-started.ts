@@ -34,7 +34,7 @@ export function gettingStartedCopy(input: { apiOrigin: string }): GettingStarted
 }
 
 function shellWord(value: string): string {
-  if (/^[A-Za-z0-9._~:/?#@!$&*+,;=%-]+$/.test(value)) {
+  if (/^[A-Za-z0-9._~:/-]+$/.test(value)) {
     return value;
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
@@ -51,7 +51,7 @@ function agentPrompt(input: { configureCommand: string; uploadCommand: string })
     "",
     "Ask me for an API key. I create it in the Factrove web app at /account/api-keys. The secret is shown once. Do not invent a key. Do not pass the key with --api-key, so it stays out of shell history.",
     "",
-    "The CLI defaults to http://localhost:3001. Save the key for this app's API origin with factrove configure:",
+    "Without --api-url, factrove configure asks for the URL. It suggests the value from the environment or the saved profile, and uses http://localhost:3001 only when neither is set. Save the key for this app's API origin with:",
     input.configureCommand,
     "On a terminal, the command prompts for the key. When stdin is not a terminal, pipe the key on the first line and keep --api-url:",
     `printf '%s\\n' "$FACTROVE_API_KEY" | ${input.configureCommand}`,
