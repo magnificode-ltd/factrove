@@ -51,20 +51,42 @@ export function createEmailSender(config: ApiConfig, deps: EmailSenderDeps = {})
 
 export class LogEmailSender implements EmailSender {
   constructor(
-    private readonly from: Pick<ApiConfig, "emailFromAddress" | "emailFromName">,
+    private readonly from: Pick<ApiConfig, "emailFromAddress" | "emailFromName" | "emailLogFullLinks">,
     private readonly log: (message: string) => void,
   ) {}
 
   send(message: OutboundEmail): Promise<void> {
+    const text = this.from.emailLogFullLinks ? message.text : redactLoggedEmailText(message.text);
     this.log([
       `EMAIL_TRANSPORT is log. ${emailPurpose(message)} was not sent.`,
       `From: ${this.from.emailFromName} <${this.from.emailFromAddress}>`,
       `To: ${message.to}`,
       `Subject: ${message.subject}`,
-      message.text,
+      text,
     ].join("\n"));
     return Promise.resolve();
   }
+}
+
+// The log transport is the default, including in production. Query strings on
+// links can be reset tokens, so they are replaced unless a dev-only flag is set.
+export function redactLoggedEmailText(text: string): string {
+  return text.replace(/\bhttps?:\/\/[^\s<>"']+/gi, (raw) => {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      const query = raw.indexOf("?");
+      return query === -1 ? raw : `${raw.slice(0, query)}?[redacted]`;
+    }
+    if (url.search.length === 0 && url.hash.length === 0) {
+      return raw;
+    }
+    url.search = "";
+    url.hash = "";
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return `${url.origin}${path}?[redacted]`;
+  });
 }
 
 export { redactSecrets };

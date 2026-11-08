@@ -126,7 +126,8 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
-| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it |
+| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it. Link queries are redacted |
+| `EMAIL_LOG_LINKS` | no | `redacted` (default) or `full`. `full` keeps the query and is refused when `NODE_ENV` is `production` |
 | `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
 | `EMAIL_LOGO_URL` | no | Absolute http(s) logo for auth email. Empty uses the text wordmark |
@@ -601,7 +602,7 @@ A 200 response creates the account. The saved body is `/tmp/factrove-signup.json
 
 - `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message. `messageId` is omitted when the provider id contains a secret or is not a normal id.
 - `Auth email shutdown left N send(s) unfinished:` means the process stopped before queued invite or password-reset sends finished. The account still exists.
-- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected for an invite. A password reset uses the same shape with `Password reset email was not sent.` The following lines are From, To, Subject, and the text.
+- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected for an invite. A password reset uses the same shape with `Password reset email was not sent.` The following lines are From, To, Subject, and the text. A link query, including a reset token, is replaced with `?[redacted]`. `EMAIL_LOG_LINKS=full` keeps the query, and only when `NODE_ENV` is not `production`. In production that value stops the process.
 - `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
@@ -614,7 +615,7 @@ Forgot password is `/forgot-password`. The sign-in page links to it. The form al
 
 A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...`, not the API origin. The token expires in one hour and works once. `/reset-password` asks for a new password of 8 to 128 characters and rejects a password on the common-password list. An expired or used link shows that state and offers another request. No new environment variable is required. Reset mail uses the same `EMAIL_TRANSPORT`, from address, from name, and logo as the invite.
 
-Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`.
+Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` The logged link keeps the path and replaces the query with `?[redacted]`, so the token is not in the log. `EMAIL_LOG_LINKS=full` logs the query only when `NODE_ENV` is not `production`. When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`. A successful reset signs out every existing session for that account.
 
 The wording lives in `apps/api/src/mail/password-reset-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API.
 

@@ -81,6 +81,8 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
       minPasswordLength: AUTH_PASSWORD_MIN_LENGTH,
       maxPasswordLength: AUTH_PASSWORD_MAX_LENGTH,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_EXPIRES_IN_SECONDS,
+      // A reset link must not leave an older browser signed in.
+      revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, token }) => {
         const resetUrl = passwordResetUrl(input.webOrigin, token);
         const email = user.email.trim();
