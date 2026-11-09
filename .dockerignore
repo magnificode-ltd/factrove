@@ -28,3 +28,5 @@ test-results
 **/*.tsbuildinfo
 agent-transcripts
 .cursor
+# Cloud-only tree. Self-host images are built from this context and must not contain it.
+ee

@@ -1,0 +1,7 @@
+{
+  "name": "@factrove/ee-api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Factrove Cloud API code. Not part of the pnpm workspace. No license is set."
+}
