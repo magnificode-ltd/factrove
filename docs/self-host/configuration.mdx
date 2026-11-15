@@ -1,0 +1,93 @@
+---
+title: Configuration
+description: Env files and public origins for a Factrove server you run.
+keywords:
+  - configuration
+  - environment
+  - public base url
+  - self-host
+---
+
+These are the env files and origins for a Factrove server you run. The CLI's built-in API origin, `https://api.factrove.app`, is the Factrove Cloud API. Save your server's origin with `factrove configure --api-url`. The [quickstart](/self-host/quickstart) uses the localhost values below. Cloud setup is the [Factrove Cloud quickstart](/cloud/quickstart).
+
+The published `factrove` and `ftrv` commands do not read the server's env file. `pnpm factrove` in a checkout reads `apps/cli/.env`, and the example sets `FACTROVE_API_URL` to `http://localhost:3001`.
+
+## Which file
+
+| How you start the server | File the process reads |
+| --- | --- |
+| Docker Compose stack (`docker-compose.yml`) | `.env.docker`, and only when you pass `--env-file .env.docker` |
+| Node processes from a checkout | `apps/api/.env` |
+
+Copy the matching example, then replace the placeholders:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+```bash
+cp apps/api/.env.example apps/api/.env
+```
+
+`.env.docker` is gitignored. `DATABASE_URL`, `S3_ENDPOINT`, and `INTERNAL_API_URL` are set in `docker-compose.yml`, so a line with one of those names in `.env.docker` does not change the container. On the from-source process, `apps/api/.env` is where `DATABASE_URL` is set.
+
+Every variable, the storage choices, and invite email are in [Deploy the server](/self-host/deploy#configure) and [Run from source](/self-host/deploy#run-from-source).
+
+## Localhost origins
+
+The Compose defaults that match the published ports:
+
+```text
+WEB_ORIGIN=http://localhost:3000
+PUBLIC_BASE_URL=http://localhost:3000
+API_PUBLIC_ORIGIN=http://localhost:3001
+BROWSER_API_URL=http://localhost:3001
+```
+
+`WEB_ORIGIN` is the browser origin of the web app. `PUBLIC_BASE_URL` is the origin of viewer URLs and public share links. `API_PUBLIC_ORIGIN` and `BROWSER_API_URL` are the origin the browser uses for the API. Point the CLI at that API origin.
+
+On the Compose stack, `PUBLIC_BASE_URL` defaults to `http://localhost:3000` when the variable is empty. It does not follow `WEB_ORIGIN`. With `WEB_ORIGIN` on another port and `PUBLIC_BASE_URL` empty, viewer and share links still use port 3000. Set `PUBLIC_BASE_URL` whenever the web origin is not `http://localhost:3000`.
+
+On the from-source process, an empty `PUBLIC_BASE_URL` uses `WEB_ORIGIN`. That fallback is the API process with the variable left out of `apps/api/.env`. The Compose file substitutes `http://localhost:3000` before the process starts, so the fallback does not run there.
+
+`localhost` and `127.0.0.1` are different hosts. A cookie domain cannot cover either. Keep `WEB_ORIGIN` and `PUBLIC_BASE_URL` on the same host when either one is localhost or an IP address.
+
+If you change `WEB_PORT` or `API_PORT`, set `WEB_ORIGIN`, `PUBLIC_BASE_URL`, `API_PUBLIC_ORIGIN`, and `BROWSER_API_URL` to those host ports.
+
+## HTTPS origins
+
+Terminate TLS at a reverse proxy and set the public origins to the URLs you serve. The host ports stay on loopback. These hostnames are placeholders:
+
+```text
+WEB_ORIGIN=https://library.example.com
+PUBLIC_BASE_URL=https://library.example.com
+API_PUBLIC_ORIGIN=https://api.example.com
+BROWSER_API_URL=https://api.example.com
+AUTH_COOKIE_DOMAIN=example.com
+```
+
+Use the narrowest parent that still covers the web app, the API, and `PUBLIC_BASE_URL` as `AUTH_COOKIE_DOMAIN`. The proxy, `TRUSTED_PROXIES`, and the cookie name are in [HTTPS and a reverse proxy](/self-host/deploy#https-and-a-reverse-proxy).
+
+The CLI profile then uses the public API origin:
+
+```bash
+factrove configure --api-url https://api.example.com
+```
+
+Replace `https://api.example.com` with the origin you set as `API_PUBLIC_ORIGIN`.
+
+## Secrets required by Compose
+
+Compose will not start until these are set. Generate each with `openssl rand -hex 32`. The output is 64 hex characters. Use it as-is.
+
+| Variable | Constraint |
+| --- | --- |
+| `POSTGRES_PASSWORD` | Inserted into `DATABASE_URL` without encoding. `@`, `:`, `/`, and `#` break that URL. The hex output avoids them |
+| `BETTER_AUTH_SECRET` | At least 32 characters. Signs session cookies |
+| `GARAGE_RPC_SECRET` | 64 hex characters, when you use the bundled Garage. The example placeholder is not a valid secret |
+| `S3_ACCESS_KEY_ID` | Garage access key id you choose. Passed to the API as `AWS_ACCESS_KEY_ID` |
+| `S3_SECRET_ACCESS_KEY` | Garage secret key. Passed to the API as `AWS_SECRET_ACCESS_KEY`. This pair is not an AWS key |
+
+`SHARE_TOKEN_KEY` is optional. When it is empty, share tokens are derived from `BETTER_AUTH_SECRET`. Rotating either input makes existing public links return 404.
+
+`EMAIL_TRANSPORT` defaults to `log`, which writes the invite to the API log. `smtp` and `brevo` are in [Invite email](/self-host/deploy#invite-email).

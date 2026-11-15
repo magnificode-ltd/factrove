@@ -6,12 +6,18 @@ description: Install and configure the Factrove CLI, then read the exact help pa
 The CLI is a standalone NestJS process that calls the HTTP API. It has no listener of its own. The published npm package is `factrove`. Node.js must be at least 24.7.0 and below 25.
 
 ```bash
-npm install --global factrove
+npm i -g factrove
 factrove --help
 ftrv --help
 ```
 
-`ftrv` is the same program. `npx factrove` runs it without a global install. With no profile and no API URL, it calls `https://api.factrove.app`. `--api-url`, `FACTROVE_API_URL`, and `factrove configure` override that origin. [Release the CLI](/guides/releasing-the-cli) is the manual publish. It does not run on push.
+`ftrv` is a bin alias of the `factrove` package. `npx factrove` runs that package without a global install. The name you pass to `npx` is `factrove`.
+
+<Info>
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is [Factrove Cloud](/cloud/quickstart). A server you run needs `--api-url`, `FACTROVE_API_URL`, or `factrove configure` pointed at your API origin. [Self-host](/self-host/quickstart) saves that profile. Commands and flags are the same on both. The API origin is what changes.
+</Info>
+
+[Release the CLI](/guides/releasing-the-cli) is the manual publish. It does not run on push.
 
 From a checkout, contributors use `pnpm factrove`. Install dependencies and build the CLI plus the workspace packages it imports. The launcher refuses to start until `apps/cli/dist/main.js` exists:
 
@@ -21,7 +27,7 @@ pnpm --filter @factrove/cli... build
 pnpm factrove --help
 ```
 
-`pnpm factrove` reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The example points that command at `http://localhost:3001`. `node apps/cli/dist/main.js` and the published commands do not read that file. Set `BETTER_AUTH_SECRET` and start the API before configure against a local server. See [Quickstart](/quickstart) and [Troubleshooting](/guides/troubleshooting).
+`pnpm factrove` reads `apps/cli/.env` for unset `FACTROVE_API_URL` and `FACTROVE_PROFILE`. The example points that command at `http://localhost:3001`. `node apps/cli/dist/main.js` and the published commands do not read that file. Set `BETTER_AUTH_SECRET` and start the API before configure against a server you run. See the [self-host quickstart](/self-host/quickstart) and [Troubleshooting](/guides/troubleshooting).
 
 The program help uses the name `factrove`. The pages that follow reprint `factrove --help` and each `factrove <command> --help` text word for word, then list flags that help text omits.
 
@@ -29,11 +35,20 @@ The program help uses the name `factrove`. The pages that follow reprint `factro
 
 Create a key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). Then:
 
-```bash
-factrove configure --api-url http://localhost:3001
-```
+<Tabs>
+  <Tab title="Factrove Cloud">
+    ```bash
+    factrove configure --api-url https://api.factrove.app
+    ```
+  </Tab>
+  <Tab title="Self-host">
+    ```bash
+    factrove configure --api-url http://localhost:3001
+    ```
+  </Tab>
+</Tabs>
 
-From the repository root, the same step is `pnpm factrove configure`. `ftrv configure` is the same command as `factrove configure`.
+Each command stores that origin on the selected profile. Running both against the `default` profile keeps only the origin from the command you ran last. Pass the origin of the server you run when it is not localhost. From the repository root, the same step is `pnpm factrove configure`. `ftrv configure` is the same command as `factrove configure` after `npm i -g factrove`.
 
 See [configure](/cli-reference/configure). The key is not printed.
 

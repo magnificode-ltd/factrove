@@ -10,14 +10,18 @@ The commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `conf
 The published npm package is `factrove`. Node.js must be at least 24.7.0 and below 25.
 
 ```bash
-npm install --global factrove
+npm i -g factrove
 factrove --help
 ftrv --help
 ```
 
-`ftrv` is an alias for `factrove`. npm rejected a separate `ftrv` package, so both names are bins of `factrove`. `npx factrove` runs the same program without a global install.
+`ftrv` is a bin alias of the `factrove` package. Both names run the same program. `npx factrove` runs that package without a global install. The name you pass to `npx` is `factrove`.
 
-With no profile and no API URL, the CLI calls `https://api.factrove.app`. A self-hosted API needs `--api-url`, `FACTROVE_API_URL`, or a profile `api_url`. [Release the CLI](/guides/releasing-the-cli) publishes a version. It does not run on push.
+<Info>
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is [Factrove Cloud](/cloud/quickstart). A server you run needs `--api-url`, `FACTROVE_API_URL`, or a profile `api_url` set to your API origin. [Self-host](/self-host/quickstart) saves that profile. Use a different `--profile` name for each origin. Configuring one profile again replaces its API URL.
+</Info>
+
+[Release the CLI](/guides/releasing-the-cli) publishes a version. It does not run on push.
 
 From a checkout of this repository, `pnpm factrove` runs the built CLI. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`. `apps/cli/.env` can point that command at `http://localhost:3001`. The published commands do not read that file.
 
@@ -55,7 +59,7 @@ factrove delete "$artifact_id" --yes
 factrove configure
 ```
 
-From this repository the same commands run as `pnpm factrove`. After `npm install --global factrove`, drop the `pnpm` prefix, or use `ftrv` in its place. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`.
+From this repository the same commands run as `pnpm factrove`. After `npm i -g factrove`, drop the `pnpm` prefix, or use `ftrv` in its place. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`.
 
 ## Commands
 
