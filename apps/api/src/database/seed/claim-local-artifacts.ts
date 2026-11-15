@@ -52,6 +52,16 @@ export async function claimLocalArtifacts(prisma: PrismaClient, email: string): 
       );
     }
 
+    const memberships = await tx.member.findMany({
+      where: { userId: user.id },
+      select: { organizationId: true },
+      take: 2,
+    });
+    const organizationId = memberships.length === 1 ? memberships[0]?.organizationId : undefined;
+    if (!organizationId) {
+      throw new ClaimLocalArtifactsError("That account must belong to exactly one organization.");
+    }
+
     const pending = await tx.artifact.count({
       where: { creatorUserId: localUserFixture.id },
     });
@@ -62,16 +72,6 @@ export async function claimLocalArtifacts(prisma: PrismaClient, email: string): 
         artifactsClaimed: 0,
         membershipsAdded: 0,
       };
-    }
-
-    const memberships = await tx.member.findMany({
-      where: { userId: user.id },
-      select: { organizationId: true },
-      take: 2,
-    });
-    const organizationId = memberships.length === 1 ? memberships[0]?.organizationId : undefined;
-    if (!organizationId) {
-      throw new ClaimLocalArtifactsError("That account must belong to exactly one organization.");
     }
 
     const updated = await tx.artifact.updateMany({

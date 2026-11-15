@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Prisma, PrismaClient } from "@prisma/client";
+import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backfillOrganizationDisplayName } from "../src/auth/organization-backfill-name.js";
 import { organizationSlugCandidates } from "../src/auth/organization-slug.js";
@@ -45,7 +46,19 @@ describe("organization backfill", () => {
   });
 
   it("uses the same slug and display-name rules as create-first-organization", async () => {
-    const names = ["Ada Lab", "Local", "!!!", "Árvíz", "b".repeat(47), "c".repeat(48), "Tom's organization"];
+    const names = [
+      "Ada Lab",
+      "Local",
+      "!!!",
+      "Árvíz",
+      "b".repeat(47),
+      "c".repeat(48),
+      "Tom's organization",
+      "1️⃣UP",
+      "1️⃣UP's organization",
+      "A\u0301 Lab",
+      "é",
+    ];
     for (const name of names) {
       const expected = organizationSlugCandidates(name, () => "abc123");
       const actual = await slugCandidates(prisma, name, ["abc123"]);
@@ -178,7 +191,100 @@ describe("organization backfill", () => {
     expect(again.artifactsClaimed).toBe(0);
     expect(again.membershipsAdded).toBe(0);
   });
+
+  it("rejects a claim with the wrong number of organizations when nothing is left to claim", async () => {
+    await prisma.artifact.updateMany({
+      where: { creatorUserId: localUserFixture.id },
+      data: { creatorUserId: "user-tom-a" },
+    });
+    expect(await prisma.artifact.count({ where: { creatorUserId: localUserFixture.id } })).toBe(0);
+
+    await insertUser(prisma, { id: "user-zero", name: "Zero", email: "zero@example.com" });
+    await insertAccount(prisma, { id: "account-zero", userId: "user-zero" });
+    await expect(claimLocalArtifacts(prisma, "zero@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+
+    await insertUser(prisma, { id: "user-several", name: "Several", email: "several@example.com" });
+    await insertAccount(prisma, { id: "account-several", userId: "user-several" });
+    await insertOrganization(prisma, { id: "several-a", name: "Several A", slug: "several-a" });
+    await insertOrganization(prisma, { id: "several-b", name: "Several B", slug: "several-b" });
+    await insertMember(prisma, { id: "several-member-a", organizationId: "several-a", userId: "user-several" });
+    await insertMember(prisma, { id: "several-member-b", organizationId: "several-b", userId: "user-several" });
+    await expect(claimLocalArtifacts(prisma, "several@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+
+    const quiet = await claimLocalArtifacts(prisma, "tom.a@example.com");
+    expect(quiet.artifactsClaimed).toBe(0);
+    expect(quiet.membershipsAdded).toBe(0);
+  });
+
+  it("does not add a second membership when organization creation commits first", async () => {
+    const userId = "user-race";
+    await insertUser(prisma, { id: userId, name: "Race", email: "race@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const holder = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await holder.connect();
+    await migrator.connect();
+    let migratorOpen = false;
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`SELECT id FROM "user" WHERE id = $1 FOR UPDATE`, [userId]);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForBackfillLock(prisma);
+      await holder.query(
+        `INSERT INTO organization (id, name, slug, "createdAt") VALUES ('race-org', 'Race Lab', 'race-lab', CURRENT_TIMESTAMP)`,
+      );
+      await holder.query(
+        `INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('race-member', 'race-org', $1, 'owner', CURRENT_TIMESTAMP)`,
+        [userId],
+      );
+      await holder.query("COMMIT");
+      await backfill;
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await holder.end();
+      await migrator.end();
+    }
+
+    const memberships = await prisma.member.findMany({
+      where: { userId },
+      select: { organizationId: true },
+    });
+    expect(memberships).toEqual([{ organizationId: "race-org" }]);
+  });
 });
+
+async function waitForBackfillLock(prisma: PrismaClient): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 8_000) {
+    const rows = await prisma.$queryRaw<Array<{ waiting: number }>>`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS waiter
+      WHERE waiter.pid <> pg_backend_pid()
+        AND waiter.state = 'active'
+        AND waiter.wait_event_type = 'Lock'
+        AND waiter.query ILIKE '%factrove_backfill_organizations%'
+    `;
+    if (Number(rows[0]?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("backfill did not wait on the user lock");
+}
 
 async function slugCandidates(prisma: PrismaClient, name: string, suffixes: string[]): Promise<string[]> {
   const rows = await prisma.$queryRaw<Array<{ slugs: string[] | string }>>`
