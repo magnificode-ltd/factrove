@@ -285,7 +285,10 @@ export class ArtifactsRepository {
     }
 
     const rows = await this.prisma.artifact.findMany({
-      where: { creatorUserId: input.userId },
+      where: {
+        creatorUserId: input.userId,
+        ...(input.mineOrganizationId ? { organizationId: input.mineOrganizationId } : {}),
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     return rows.map(toArtifactRecord);
@@ -333,6 +336,9 @@ async function shareWithOrganizationInTransaction(
   if (!locked || locked.creatorUserId !== input.creatorUserId) {
     return { outcome: "not-found" };
   }
+  if (input.apiKeyOrganizationId !== null && locked.organizationId !== input.apiKeyOrganizationId) {
+    return { outcome: "not-found" };
+  }
   if (locked.accessType === "org_shared") {
     return { outcome: "already", record: toArtifactRecord(locked) };
   }
@@ -367,9 +373,9 @@ async function shareWithOrganizationInTransaction(
 // Same rule as ActorService, evaluated in the UPDATE so the check and the write
 // cannot drift. A session must still be present and unexpired. Its current
 // organization is the active membership, or the only membership when that id
-// is missing or stale. An API key has no session. The confirmed id has to be
-// the key's organization, and the creator has to still be a member of it.
-// Plain EXISTS does not lock those rows.
+// is missing or stale. An API key has no session. The confirmed id and the
+// artifact's current organization both have to be the key's organization, and
+// the creator has to still be a member of it. Plain EXISTS does not lock those rows.
 function shareAuthorizationSql(input: {
   organizationId: string;
   sessionId: string | null;
@@ -390,6 +396,7 @@ function shareAuthorizationSql(input: {
   if (input.apiKeyOrganizationId !== null) {
     return Prisma.sql`
       ${input.organizationId} = ${input.apiKeyOrganizationId}
+      AND artifact.organization_id = ${input.apiKeyOrganizationId}
       AND EXISTS (
         SELECT 1
         FROM "member"
@@ -442,6 +449,9 @@ async function classifyShareRefusal(
 ): Promise<ShareWithOrganizationOutcome> {
   const row = await tx.artifact.findUnique({ where: { id: input.id } });
   if (!row || row.creatorUserId !== input.creatorUserId) {
+    return { outcome: "not-found" };
+  }
+  if (input.apiKeyOrganizationId && row.organizationId !== input.apiKeyOrganizationId) {
     return { outcome: "not-found" };
   }
   if (row.accessType === "org_shared") {

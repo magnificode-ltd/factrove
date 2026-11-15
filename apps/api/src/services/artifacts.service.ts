@@ -27,7 +27,7 @@ import {
 import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
-import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
+import { ActorService, type Actor, type ActorWithOrganization, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
@@ -165,7 +165,7 @@ export class ArtifactsService {
   async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
     const actor = await this.actors.requireCurrentOrganization(request);
     const record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     const confirmed = readShareWithOrganizationBody(readBody());
@@ -218,7 +218,7 @@ export class ArtifactsService {
   async deleteArtifact(request: HeaderSource, id: string): Promise<void> {
     const actor = await this.actors.requireCurrentOrganization(request);
     let record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     for (let attempt = 0; attempt < DELETE_REPLACE_ATTEMPTS; attempt += 1) {
@@ -239,7 +239,7 @@ export class ArtifactsService {
         return;
       }
       const current = await this.artifacts.findById(record.id);
-      if (!current || current.creatorUserId !== actor.user.id) {
+      if (!current || !this.ownsInKeyOrganization(actor, current)) {
         return;
       }
       record = current;
@@ -257,6 +257,7 @@ export class ArtifactsService {
       view,
       userId: actor.user.id,
       organizationId: actor.organization.id,
+      mineOrganizationId: actor.via === "api-key" ? actor.organization.id : undefined,
     });
     return records.map((record) => this.toDto(record, false));
   }
@@ -549,10 +550,19 @@ export class ArtifactsService {
   private async requireOwner(request: HeaderSource, id: string): Promise<ArtifactRecord> {
     const actor = await this.actors.requireCurrentOrganization(request);
     const record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     return record;
+  }
+
+  // A session may use an artifact the person created in any of their organizations.
+  // An API key may use one only when that artifact already belongs to the key's organization.
+  private ownsInKeyOrganization(actor: ActorWithOrganization, record: ArtifactRecord): boolean {
+    if (actor.user.id !== record.creatorUserId) {
+      return false;
+    }
+    return actor.via !== "api-key" || record.organizationId === actor.organization.id;
   }
 
   private chargePublicView(clientIp: string | null, kind: "view" | "content"): void {
@@ -635,6 +645,9 @@ export class ArtifactsService {
   }
 
   private async canRead(actor: Actor, record: ArtifactRecord): Promise<boolean> {
+    if (actor.via === "api-key" && record.organizationId !== actor.organization?.id) {
+      return false;
+    }
     if (actor.user.id === record.creatorUserId) {
       return true;
     }

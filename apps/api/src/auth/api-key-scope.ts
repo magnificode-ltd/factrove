@@ -33,6 +33,9 @@ export async function scopeOrganizationApiKeyRequest(
   if (action === "delete" || action === "get" || action === "update") {
     await rejectKeyOutsideOrganization(ctx, input.prisma, input.organizationId, action);
   }
+  if (action === "update") {
+    return { body: immutableApiKeyMetadata(ctx.body) };
+  }
   return undefined;
 }
 
@@ -57,6 +60,18 @@ function scopedListQuery(query: unknown, organizationId: string): JsonRecord {
   const next = isRecord(query) ? query : {};
   next.organizationId = organizationId;
   return next;
+}
+
+// Metadata is written only at create. An update cannot replace createdByUserId
+// or any other metadata. The same body object is returned so a later merge
+// cannot copy the client value back in.
+function immutableApiKeyMetadata(body: unknown): unknown {
+  if (!isRecord(body)) {
+    return body;
+  }
+  delete body.metadata;
+  delete body.userId;
+  return body;
 }
 
 async function rejectKeyOutsideOrganization(

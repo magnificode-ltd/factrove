@@ -42,4 +42,7 @@ export type ListArtifactsInput = {
   view: ArtifactView;
   userId: string;
   organizationId: string | null;
+  // Set for an API key. view=mine then includes only that organization.
+  // A session leaves this unset and still lists the creator's artifacts in every organization.
+  mineOrganizationId?: string;
 };

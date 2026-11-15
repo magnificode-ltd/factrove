@@ -403,6 +403,147 @@ describe("organization-owned API keys", () => {
     const revokedUpload = await uploadHtml(baseUrl, replacementBody.key, "<p>no</p>");
     expect(revokedUpload.status).toBe(401);
   });
+
+  it("ignores an update that tries to change createdByUserId", async () => {
+    const owner = await signUp(baseUrl, {
+      email: "owner-meta@example.com",
+      password: "owner-meta-password",
+      name: "Owner Meta",
+    });
+    const org = await createFirstOrganization(baseUrl, owner.cookie, "Meta Lab");
+    const ownerKey = await createKey(baseUrl, owner.cookie, "owner");
+    const uploaded = await uploadHtml(baseUrl, ownerKey.key, "<p>owner-private</p>");
+    expect(uploaded.status).toBe(201);
+    const artifactId = ((await uploaded.json()) as { artifact: { id: string } }).artifact.id;
+
+    const member = await signUp(baseUrl, {
+      email: "member-meta@example.com",
+      password: "member-meta-password",
+      name: "Member Meta",
+    });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: org.id,
+        userId: member.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    await prisma.session.updateMany({
+      where: { userId: member.userId },
+      data: { activeOrganizationId: org.id },
+    });
+    const memberKey = await createKey(baseUrl, member.cookie, "member");
+    expect(readCreatedBy((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toBe(member.userId);
+
+    const forged = await updateKey(baseUrl, member.cookie, {
+      keyId: memberKey.id,
+      metadata: { createdByUserId: owner.userId },
+    });
+    expect(forged.status).not.toBe(200);
+    expect(readCreatedBy((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toBe(member.userId);
+
+    const renamed = await updateKey(baseUrl, member.cookie, {
+      keyId: memberKey.id,
+      name: "renamed",
+      metadata: { createdByUserId: owner.userId, note: "no" },
+    });
+    expect(renamed.status).toBe(200);
+    const stored = await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } });
+    expect(stored.name).toBe("renamed");
+    expect(readCreatedBy(stored.metadata)).toBe(member.userId);
+
+    const context = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${memberKey.key}` },
+    });
+    expect(context.status).toBe(200);
+    expect(await context.json()).toMatchObject({
+      user: { id: member.userId, name: "Member Meta" },
+      organization: { id: org.id },
+    });
+    const hidden = await fetch(`${baseUrl}/api/v1/artifacts/${artifactId}`, {
+      headers: { authorization: `Bearer ${memberKey.key}` },
+    });
+    expect(hidden.status).toBe(404);
+  });
+
+  it("keeps a key inside its own organization when the creator also belongs to another", async () => {
+    const user = await signUp(baseUrl, {
+      email: "two-orgs@example.com",
+      password: "two-orgs-password",
+      name: "Two Orgs",
+    });
+    const orgA = await createFirstOrganization(baseUrl, user.cookie, "Org A");
+    const keyA = await createKey(baseUrl, user.cookie, "org-a");
+    const orgB = "same-creator-org-b";
+    await prisma.organization.create({
+      data: { id: orgB, name: "Org B", slug: "same-creator-org-b", createdAt: new Date() },
+    });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: orgB,
+        userId: user.userId,
+        role: "owner",
+        createdAt: new Date(),
+      },
+    });
+    await prisma.session.updateMany({
+      where: { userId: user.userId },
+      data: { activeOrganizationId: orgB },
+    });
+    const keyB = await createKey(baseUrl, user.cookie, "org-b");
+    expect((await prisma.apikey.findUniqueOrThrow({ where: { id: keyB.id } })).referenceId).toBe(orgB);
+
+    const uploaded = await uploadHtml(baseUrl, keyB.key, "<p>org-b</p>");
+    expect(uploaded.status).toBe(201);
+    const artifact = ((await uploaded.json()) as { artifact: { id: string; name: string | null; organizationId: string } }).artifact;
+    expect(artifact.organizationId).toBe(orgB);
+    const keyAHeaders = { authorization: `Bearer ${keyA.key}` };
+
+    const detail = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, { headers: keyAHeaders });
+    const content = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/content`, { headers: keyAHeaders });
+    const mine = await fetch(`${baseUrl}/api/v1/artifacts?view=mine`, { headers: keyAHeaders });
+    const rename = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/name`, {
+      method: "PATCH",
+      headers: { ...keyAHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Stolen" }),
+    });
+    const replaced = await putHtml(baseUrl, keyA.key, artifact.id, "<p>stolen</p>");
+    const shared = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
+      method: "POST",
+      headers: keyAHeaders,
+    });
+    const rehome = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "PATCH",
+      headers: { ...keyAHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ accessType: "org_shared", organizationId: orgA.id }),
+    });
+    const removed = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      method: "DELETE",
+      headers: keyAHeaders,
+    });
+
+    for (const response of [detail, content, rename, replaced, shared, rehome, removed]) {
+      expect(response.status).toBe(404);
+    }
+    expect(JSON.stringify(await mine.json())).not.toContain(artifact.id);
+    const row = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    expect(row.organizationId).toBe(orgB);
+    expect(row.name).toBe(artifact.name);
+    expect(row.accessType).toBe("private");
+    expect(row.shareTokenHash).toBeNull();
+
+    const visible = await fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { authorization: `Bearer ${keyB.key}` },
+    });
+    expect(visible.status).toBe(200);
+    const listed = await fetch(`${baseUrl}/api/v1/artifacts?view=mine`, {
+      headers: { authorization: `Bearer ${keyB.key}` },
+    });
+    expect(JSON.stringify(await listed.json())).toContain(artifact.id);
+  });
 });
 
 async function runMigration(): Promise<void> {
@@ -483,11 +624,51 @@ async function deleteKey(baseUrl: string, cookie: string, keyId: string): Promis
   });
 }
 
+async function createKey(baseUrl: string, cookie: string, name: string): Promise<{ id: string; key: string }> {
+  const response = await fetch(`${baseUrl}/api/auth/api-key/create`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: "http://localhost:3000",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  expect(response.status).toBe(200);
+  const body = await response.json() as { id?: string; key?: string };
+  if (!body.id || !body.key) {
+    throw new Error("api key create did not return a key");
+  }
+  return { id: body.id, key: body.key };
+}
+
+async function updateKey(baseUrl: string, cookie: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}/api/auth/api-key/update`, {
+    method: "POST",
+    headers: {
+      cookie,
+      origin: "http://localhost:3000",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 async function uploadHtml(baseUrl: string, apiKey: string, html: string): Promise<Response> {
   const form = new FormData();
   form.append("file", new Blob([new TextEncoder().encode(html)]), "keyed.html");
   return fetch(`${baseUrl}/api/v1/artifacts`, {
     method: "POST",
+    headers: { authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+}
+
+async function putHtml(baseUrl: string, apiKey: string, id: string, html: string): Promise<Response> {
+  const form = new FormData();
+  form.append("file", new Blob([new TextEncoder().encode(html)]), "keyed.html");
+  return fetch(`${baseUrl}/api/v1/artifacts/${id}/content`, {
+    method: "PUT",
     headers: { authorization: `Bearer ${apiKey}` },
     body: form,
   });

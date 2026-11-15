@@ -2628,7 +2628,10 @@ describe("HTTP API", () => {
 
     await prisma.artifact.update({ where: { id: artifact.id }, data: { organizationId: otherOrgId } });
     const parked = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
-    const stay = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    const hiddenFromKey = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: owner.apiKey });
+    expect(hiddenFromKey.status).toBe(404);
+    const sessionShare = { cookie: owner.cookie, headers: { origin: "http://localhost:3000" } };
+    const stay = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, sessionShare);
     expect(stay.status).toBe(200);
     const stayed = artifactEnvelopeSchema.parse(await stay.json());
     expect(stayed.artifact.accessType).toBe("org_shared");
@@ -2641,7 +2644,7 @@ describe("HTTP API", () => {
       baseUrl,
       artifact.id,
       { accessType: "org_shared", organizationId: otherOrgId },
-      { apiKey: owner.apiKey },
+      sessionShare,
     );
     expect(confirmStored.status).toBe(200);
     expect(artifactEnvelopeSchema.parse(await confirmStored.json()).artifact.organizationId).toBe(otherOrgId);
@@ -2649,7 +2652,7 @@ describe("HTTP API", () => {
       baseUrl,
       artifact.id,
       { accessType: "org_shared", organizationId: "org-share-neither" },
-      { apiKey: owner.apiKey },
+      sessionShare,
     );
     expect(confirmNeither.status).toBe(200);
     expect(artifactEnvelopeSchema.parse(await confirmNeither.json()).artifact.organizationId).toBe(otherOrgId);
