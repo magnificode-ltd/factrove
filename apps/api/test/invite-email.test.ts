@@ -22,8 +22,8 @@ import { INVITE_QUEUE_LIMIT, InviteMailer } from "../src/mail/invite-mailer.js";
 import { SmtpEmailSender, type SmtpMail, type SmtpTransportOptions } from "../src/mail/smtp-email-sender.js";
 import {
   API_CONFIG,
-  DEFAULT_EMAIL_FROM_ADDRESS,
   DEFAULT_EMAIL_FROM_NAME,
+  LOG_EMAIL_FROM_ADDRESS,
   readApiConfig,
   type ApiConfig,
 } from "../src/services/api-config.js";
@@ -45,8 +45,9 @@ describe("email configuration", () => {
       SMTP_PASSWORD,
     }));
     expect(config.emailTransport).toBe("log");
-    expect(config.emailFromAddress).toBe(DEFAULT_EMAIL_FROM_ADDRESS);
-    expect(config.emailFromAddress).toBe("support@factrove.app");
+    expect(config.emailFromAddress).toBe(LOG_EMAIL_FROM_ADDRESS);
+    expect(config.emailFromAddress).toBe("no-reply@localhost");
+    expect(readApiConfig(authEnv({ EMAIL_FROM_ADDRESS: "   " })).emailFromAddress).toBe("no-reply@localhost");
     expect(config.emailFromName).toBe(DEFAULT_EMAIL_FROM_NAME);
     expect(config.emailFromName).toBe("Factrove");
     expect(config.emailLogoUrl).toBeNull();
@@ -73,6 +74,7 @@ describe("email configuration", () => {
     const config = readApiConfig(authEnv({
       EMAIL_TRANSPORT: "brevo",
       BREVO_API_KEY: `  ${FAKE_KEY}  `,
+      EMAIL_FROM_ADDRESS: "library@example.com",
       SMTP_PASSWORD,
     }));
     expect(config.emailTransport).toBe("brevo");
@@ -175,6 +177,7 @@ describe("email configuration", () => {
       SMTP_HOST: " mail.example.com ",
       SMTP_PORT: "587",
       SMTP_SECURE: "FALSE",
+      EMAIL_FROM_ADDRESS: "library@example.com",
       BREVO_API_KEY: FAKE_KEY,
     }));
     expect(open.emailTransport).toBe("smtp");
@@ -196,6 +199,7 @@ describe("email configuration", () => {
       SMTP_SECURE: "True",
       SMTP_USER: "  login  ",
       SMTP_PASSWORD: `  ${SMTP_PASSWORD}  `,
+      EMAIL_FROM_ADDRESS: "library@example.com",
     }));
     expect(authed.smtp).toEqual({
       host: "smtp-relay.brevo.com",
@@ -211,6 +215,7 @@ describe("email configuration", () => {
       SMTP_PORT: "587",
       SMTP_SECURE: "false",
       SMTP_REQUIRE_TLS: "false",
+      EMAIL_FROM_ADDRESS: "library@example.com",
     })).smtp?.requireTls).toBe(false);
     expect(() => readApiConfig(authEnv({
       EMAIL_TRANSPORT: "smtp",
@@ -218,18 +223,49 @@ describe("email configuration", () => {
       SMTP_PORT: "587",
       SMTP_SECURE: "false",
       SMTP_REQUIRE_TLS: "yes",
+      EMAIL_FROM_ADDRESS: "library@example.com",
     }))).toThrow("SMTP_REQUIRE_TLS must be true or false.");
+  });
+
+  it("requires a from address for smtp and brevo", () => {
+    const smtp = {
+      EMAIL_TRANSPORT: "smtp",
+      SMTP_HOST: "mail.example.com",
+      SMTP_PORT: "587",
+      SMTP_SECURE: "false",
+    };
+    expect(() => readApiConfig(authEnv(smtp))).toThrow(
+      "Set EMAIL_FROM_ADDRESS when EMAIL_TRANSPORT is smtp.",
+    );
+    expect(() => readApiConfig(authEnv({ ...smtp, EMAIL_FROM_ADDRESS: "   " }))).toThrow(
+      "Set EMAIL_FROM_ADDRESS when EMAIL_TRANSPORT is smtp.",
+    );
+    expect(() => readApiConfig(authEnv({
+      EMAIL_TRANSPORT: "brevo",
+      BREVO_API_KEY: FAKE_KEY,
+    }))).toThrow("Set EMAIL_FROM_ADDRESS when EMAIL_TRANSPORT is brevo.");
+    expect(() => readApiConfig(authEnv({
+      EMAIL_TRANSPORT: "brevo",
+      BREVO_API_KEY: FAKE_KEY,
+      EMAIL_FROM_ADDRESS: "   ",
+    }))).toThrow("Set EMAIL_FROM_ADDRESS when EMAIL_TRANSPORT is brevo.");
+    expect(readApiConfig(authEnv({
+      ...smtp,
+      EMAIL_FROM_ADDRESS: " library@example.com ",
+    })).emailFromAddress).toBe("library@example.com");
   });
 });
 
 describe("invite email", () => {
   const signInUrl = "http://localhost:3000/login";
+  const siteUrl = "https://library.example.com";
 
   it("keeps a plus-address in the text and the HTML", () => {
     const message = buildInviteEmail({
       recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada Lovelace " },
       signInUrl,
       supportEmail: "support@factrove.app",
+      siteUrl,
     });
     expect(message).toMatchObject({
       to: PLUS_EMAIL,
@@ -242,7 +278,8 @@ describe("invite email", () => {
     expect(message.text).toContain("Sign in to Factrove:");
     expect(message.text).toContain(signInUrl);
     expect(message.text).toContain("Contact support@factrove.app if you need help.");
-    expect(message.text).toContain("Factrove: https://factrove.app");
+    expect(message.text).toContain(`Factrove: ${siteUrl}`);
+    expect(message.text).not.toContain("https://factrove.app");
     expect(message.text).not.toContain("invited");
     expect(message.text).not.toContain("?");
     expect(message.html).toContain(PLUS_EMAIL);
@@ -264,9 +301,9 @@ describe("invite email", () => {
     expect(dark).toContain(".link { color: #858bee !important;");
     expect(message.html).toContain(`<a class="link" href="${signInUrl}"`);
     expect(message.html).toContain('class="link" href="mailto:support@factrove.app"');
-    expect(message.html).toContain('class="link" href="https://factrove.app"');
+    expect(message.html).toContain(`class="link" href="${siteUrl}" style="color:#5e64d6; word-break:break-word; overflow-wrap:anywhere;">Factrove</a>`);
     expect(message.html).toContain("mailto:support@factrove.app");
-    expect(message.html).toContain('href="https://factrove.app"');
+    expect(message.html).not.toContain("https://factrove.app");
     expect(message.html).not.toContain("<img");
     expect(message.html).not.toContain("<script>");
     expect(message.html).not.toContain("?");
@@ -278,6 +315,7 @@ describe("invite email", () => {
       recipient: { email: PLUS_EMAIL, name: "Ada <script>" },
       signInUrl,
       supportEmail: "support+help@factrove.app",
+      siteUrl,
       logoUrl: "https://cdn.example.com/logo.png",
     });
     expect(message.html).toContain("Hi Ada &lt;script&gt;,");
@@ -297,6 +335,7 @@ describe("invite email", () => {
       recipient: { email: PLUS_EMAIL, name: "  " },
       signInUrl,
       supportEmail: "support@factrove.app",
+      siteUrl,
     });
     expect(message.text).toContain(`Hi,\nYour Factrove account for ${PLUS_EMAIL} is ready.`);
     expect(message.text).not.toContain("Hi ,");
@@ -602,6 +641,8 @@ describe("invite mailer", () => {
       subject: INVITE_EMAIL_SUBJECT,
     })]);
     expect(sent[0]?.text).toContain("http://localhost:3000/login");
+    expect(sent[0]?.text).toContain("Factrove: http://localhost:3000");
+    expect(sent[0]?.html).toContain('href="http://localhost:3000" style="color:#5e64d6; word-break:break-word; overflow-wrap:anywhere;">Factrove</a>');
     expect(sent[0]?.text).not.toContain("?");
     expect(lines).toEqual([]);
   });
@@ -633,6 +674,54 @@ describe("invite mailer", () => {
     expect(lines.join("\n")).not.toContain(FAKE_KEY);
     expect(lines.join("\n")).not.toContain(SMTP_PASSWORD);
     expect(lines.join("\n")).not.toContain("smtp-user-not-real");
+  });
+
+  it("strips a reset link from an SMTP failure log", async () => {
+    const token = "smtp-reset-token-must-stay-out";
+    const resetUrl = `http://localhost:3000/reset-password?token=${token}`;
+    const mailer = new InviteMailer(new SmtpEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      { host: "mail.example.com", port: 587, secure: false, requireTls: true, user: null, password: null },
+      () => ({
+        async sendMail(mail) {
+          throw new Error(`550 rejected ${mail.text}`);
+        },
+      }),
+    ), apiConfig({}));
+    const lines = await captureLogs(async () => {
+      await mailer.sendPasswordReset({ email: PLUS_EMAIL, name: "Ada Lovelace", resetUrl });
+      await flush();
+    });
+    const logged = lines.join("\n");
+    expect(logged).toContain(`Password reset email failed for ${PLUS_EMAIL}`);
+    expect(logged).toContain("[url]");
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(resetUrl);
+    expect(logged).not.toMatch(/https?:\/\//);
+  });
+
+  it("strips a reset link from a Brevo API failure log", async () => {
+    const token = "brevo-reset-token-must-stay-out";
+    const resetUrl = `http://localhost:3000/reset-password?token=${token}`;
+    const mailer = new InviteMailer(new BrevoEmailSender(
+      { emailFromAddress: "support@factrove.app", emailFromName: "Factrove" },
+      FAKE_KEY,
+      async () => new Response(JSON.stringify({ message: `blocked ${resetUrl}` }), { status: 400 }),
+    ), apiConfig({
+      emailTransport: "brevo",
+      brevoApiKey: FAKE_KEY,
+    }));
+    const lines = await captureLogs(async () => {
+      await mailer.sendPasswordReset({ email: PLUS_EMAIL, name: "Ada Lovelace", resetUrl });
+      await flush();
+    });
+    const logged = lines.join("\n");
+    expect(logged).toContain(`Password reset email failed for ${PLUS_EMAIL}`);
+    expect(logged).toContain("[url]");
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(resetUrl);
+    expect(logged).not.toContain(FAKE_KEY);
+    expect(logged).not.toMatch(/https?:\/\//);
   });
 
   it("returns while the provider send is still pending", async () => {
@@ -883,7 +972,7 @@ describe("invite mailer", () => {
       await mailer.sendInvite({ email: "other+factrove@mail.grokbot.com", name: "Ada Lovelace" });
       const lines = await captureLogs(() => mailer.onApplicationShutdown());
       expect(lines).toEqual([
-        `Invite email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
+        `Auth email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
       ]);
     } finally {
       release();
@@ -941,7 +1030,7 @@ describe("invite mailer", () => {
     try {
       await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
       const lines = await captureLogs(() => moduleRef.close());
-      expect(lines.join("\n")).toContain(`Invite email shutdown left 1 send(s) unfinished: ${PLUS_EMAIL}.`);
+      expect(lines.join("\n")).toContain(`Auth email shutdown left 1 send(s) unfinished: ${PLUS_EMAIL}.`);
     } finally {
       release();
     }
@@ -1001,9 +1090,12 @@ describe("sign-up invite", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: async (account) => {
         invited.push(account);
       },
+      sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
     const created = await auth.handler(signUpRequest("Magnificode+Factrove@Mail.Grokbot.com"));
     expect(created.status).toBe(200);
@@ -1032,7 +1124,10 @@ describe("sign-up invite", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: () => gate,
+      sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
     const created = await Promise.race([
       auth.handler(signUpRequest("pending+factrove@mail.grokbot.com")),
@@ -1106,6 +1201,7 @@ function sampleEmail(): OutboundEmail {
     recipient: { email: PLUS_EMAIL, name: "Invite Check" },
     signInUrl: "http://localhost:3000/login",
     supportEmail: "support@factrove.app",
+    siteUrl: "http://localhost:3000",
   });
 }
 
@@ -1128,6 +1224,7 @@ function apiConfig(overrides: Partial<ApiConfig>): ApiConfig {
     emailFromAddress: "support@factrove.app",
     emailFromName: "Factrove",
     emailLogoUrl: null,
+    emailLogFullLinks: false,
     brevoApiKey: null,
     smtp: null,
     ...overrides,

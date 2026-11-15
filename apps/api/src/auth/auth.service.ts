@@ -23,7 +23,13 @@ export class AuthService implements OnModuleInit {
       // Sign-in is trusted on the owner app, the public base URL, and the API origin.
       trustedOrigins: [...new Set([...browserOrigins(this.config.webOrigin, this.config.publicBaseUrl), this.config.apiPublicOrigin])],
       cookieDomain: this.config.authCookieDomain,
-      onUserCreated: (account) => this.invites.sendInvite(account),
+      webOrigin: this.config.webOrigin,
+      // The signup message is the verification email, which also welcomes the
+      // person. Sending the invite as well would deliver two emails at once.
+      // People who already have an account are not emailed from here.
+      onUserCreated: async () => {},
+      sendPasswordResetEmail: (message) => this.invites.sendPasswordReset(message),
+      sendVerificationEmail: (message) => this.invites.sendVerification(message),
     });
   }
 

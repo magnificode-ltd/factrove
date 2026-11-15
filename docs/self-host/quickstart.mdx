@@ -80,7 +80,7 @@ A ready API returns `{"status":"ok"}`. `compose.yaml` is a different file. `dock
 
 The Compose stack does not seed a user. Open `http://localhost:3000/signup` and create an account with a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in.
 
-Creating the account sends one invite email. With `EMAIL_TRANSPORT` unset or `log`, the API writes that message to its log and does not send it. [Invite email](/self-host/deploy#invite-email) is how to switch on SMTP or Brevo.
+Creating the account sends one verification email, which also welcomes the person. Sign-in is not blocked. Forgot password is at `/forgot-password` and uses that same mail setup. With `EMAIL_TRANSPORT` unset or `log`, the API writes that message to its log and does not send it. [Invite email](/self-host/deploy#invite-email) is how to switch on SMTP or Brevo.
 
 Create a key at `http://localhost:3000/account/api-keys`. The secret is shown once. The CLI does not create accounts or keys. A copyable session request, for an API you run, is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
 

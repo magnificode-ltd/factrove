@@ -1,6 +1,6 @@
 import { Logger } from "@nestjs/common";
 import type { ApiConfig } from "../services/api-config.js";
-import type { EmailSender, OutboundEmail } from "./email-sender.js";
+import { emailPurpose, type EmailSender, type OutboundEmail } from "./email-sender.js";
 import { redactSecrets, safeMessageId } from "./redact-secret.js";
 
 export const BREVO_TRANSACTIONAL_EMAIL_URL = "https://api.brevo.com/v3/smtp/email";
@@ -19,7 +19,7 @@ export class BrevoEmailSender implements EmailSender {
 
   async send(message: OutboundEmail): Promise<void> {
     // The transactional key cannot call GET /v3/account. This sender only posts
-    // the invite. Startup does not contact Brevo.
+    // the message. Startup does not contact Brevo.
     let response: Response;
     try {
       response = await this.fetchImpl(BREVO_TRANSACTIONAL_EMAIL_URL, {
@@ -44,15 +44,16 @@ export class BrevoEmailSender implements EmailSender {
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "request failed";
-      throw new Error(`Brevo invite email request failed. ${redactSecrets(detail, [this.apiKey])}`);
+      const purpose = emailPurpose(message).toLowerCase();
+      throw new Error(`Brevo ${purpose} request failed. ${redactSecrets(detail, [this.apiKey])}`);
     }
     if (!response.ok) {
       const detail = await brevoErrorDetail(response, this.apiKey);
-      throw new Error(`Brevo rejected the invite email with status ${response.status}.${detail}`);
+      throw new Error(`Brevo rejected the ${emailPurpose(message).toLowerCase()} with status ${response.status}.${detail}`);
     }
     const messageId = safeMessageId(await readMessageId(response) ?? "", [this.apiKey]);
     const suffix = messageId === null ? "" : ` messageId=${messageId}`;
-    this.log(`Invite email sent to ${message.to}${suffix}`);
+    this.log(`${emailPurpose(message)} sent to ${message.to}${suffix}`);
   }
 }
 
