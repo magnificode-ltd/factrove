@@ -25,7 +25,7 @@ describe("verification email", () => {
     const message = buildVerificationEmail({
       recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada <script> " },
       verifyUrl: verifyUrl ?? "",
-      supportEmail: "support@factrove.app",
+      supportEmail: "library@example.com",
       siteUrl: WEB_ORIGIN,
     });
     expect(message.subject).toBe(VERIFICATION_EMAIL_SUBJECT);
@@ -48,7 +48,7 @@ describe("verification email", () => {
     const token = "header.payload.sig";
     const lines: string[] = [];
     await new LogEmailSender({
-      emailFromAddress: "support@factrove.app",
+      emailFromAddress: "library@example.com",
       emailFromName: "Factrove",
       emailLogFullLinks: false,
     }, (line) => lines.push(line)).send(message);

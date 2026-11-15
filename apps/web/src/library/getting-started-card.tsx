@@ -43,9 +43,7 @@ export function GettingStarted({ copy }: { copy: GettingStartedCopy }) {
                 API keys
               </a>{" "}
               page. The secret is shown once. <Code>factrove configure</Code> prompts for that key, so it stays out
-              of shell history. <Code>--api-url</Code> is this app&apos;s API origin. Without that flag, configure
-              asks for the URL, suggests the value from the environment or the saved profile, and uses{" "}
-              <Code>{copy.defaultApiUrl}</Code> only when neither is set.
+              of shell history. <Code>--api-url</Code> is this app&apos;s API origin.
             </p>
             <CommandRow value={copy.configureCommand} label="Copy configure" />
           </li>

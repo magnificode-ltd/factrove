@@ -34,7 +34,7 @@ describe("password reset email", () => {
     const message = buildPasswordResetEmail({
       recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada <script> " },
       resetUrl: resetUrl ?? "",
-      supportEmail: "support@factrove.app",
+      supportEmail: "library@example.com",
       siteUrl: WEB_ORIGIN,
     });
     expect(message.to).toBe(PLUS_EMAIL);
@@ -53,7 +53,7 @@ describe("password reset email", () => {
     expect(message.html).toContain("#858bee");
     expect(message.html).toContain("#5e64d6");
     expect(message.html).toContain("prefers-color-scheme: dark");
-    expect(message.html).toContain('class="link" href="mailto:support@factrove.app"');
+    expect(message.html).toContain('class="link" href="mailto:library@example.com"');
     expect(message.html).toContain(`href="${WEB_ORIGIN}" style="color:#5e64d6; word-break:break-word; overflow-wrap:anywhere;">Factrove</a>`);
     expect(message.text).toContain(`Factrove: ${WEB_ORIGIN}`);
     expect(message.html).not.toContain("https://factrove.app");
@@ -69,12 +69,12 @@ describe("password reset email", () => {
     const message = buildPasswordResetEmail({
       recipient: { email: PLUS_EMAIL, name: "Ada Lovelace" },
       resetUrl,
-      supportEmail: "support@factrove.app",
+      supportEmail: "library@example.com",
       siteUrl: WEB_ORIGIN,
     });
     const redacted: string[] = [];
     await new LogEmailSender({
-      emailFromAddress: "support@factrove.app",
+      emailFromAddress: "library@example.com",
       emailFromName: "Factrove",
       emailLogFullLinks: false,
     }, (line) => redacted.push(line)).send(message);
@@ -87,7 +87,7 @@ describe("password reset email", () => {
 
     const revealed: string[] = [];
     await new LogEmailSender({
-      emailFromAddress: "support@factrove.app",
+      emailFromAddress: "library@example.com",
       emailFromName: "Factrove",
       emailLogFullLinks: true,
     }, (line) => revealed.push(line)).send(message);
