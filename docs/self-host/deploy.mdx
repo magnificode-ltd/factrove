@@ -340,7 +340,7 @@ npm i -g factrove
 factrove configure --api-url http://localhost:3001
 ```
 
-`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, which is Factrove Cloud, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, which is Factrove Cloud, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up and name the organization. The key belongs to that organization. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session). The migration that moves keys onto the organization deletes every existing key. After `pnpm db:migrate`, create a new one.
 
 From a checkout, the same command is `pnpm factrove`. Node.js 24.16.0 and pnpm 11.25.0 match the pins in this repository.
 

@@ -1,5 +1,7 @@
 import { APIError } from "better-auth/api";
 import { organization } from "better-auth/plugins";
+import { createAccessControl } from "better-auth/plugins/access";
+import { defaultStatements } from "better-auth/plugins/organization/access";
 
 export const ORGANIZATION_ACTION_UNAVAILABLE = "This organization action is not available.";
 
@@ -28,13 +30,50 @@ function closedOrganizationAction(): never {
 /**
  * Organization routes are mounted. The actions this project does not ship are
  * rejected here. Signup still creates no membership. The first organization is
- * a later endpoint, because the plugin create route takes a client slug.
+ * POST /api/v1/onboarding/organization, because the plugin create route takes a client slug.
  */
+// Same statements as Better Auth's default owner, admin, and member roles.
+// apiKey is added for every role: any member of the active organization can
+// create, list, and delete that organization's keys.
+const apiKeyActions = ["create", "read", "update", "delete"] as const;
+const organizationAccess = createAccessControl({
+  ...defaultStatements,
+  apiKey: apiKeyActions,
+});
+const organizationRoles = {
+  owner: organizationAccess.newRole({
+    organization: ["update", "delete"],
+    member: ["create", "update", "delete"],
+    invitation: ["create", "cancel"],
+    team: ["create", "update", "delete"],
+    ac: ["create", "read", "update", "delete"],
+    apiKey: apiKeyActions,
+  }),
+  admin: organizationAccess.newRole({
+    organization: ["update"],
+    member: ["create", "update", "delete"],
+    invitation: ["create", "cancel"],
+    team: ["create", "update", "delete"],
+    ac: ["create", "read", "update", "delete"],
+    apiKey: apiKeyActions,
+  }),
+  member: organizationAccess.newRole({
+    organization: [],
+    member: [],
+    invitation: [],
+    team: [],
+    ac: ["read"],
+    apiKey: apiKeyActions,
+  }),
+};
+
 export function factroveOrganization() {
   return organization({
     allowUserToCreateOrganization: false,
     creatorRole: "owner",
     disableOrganizationDeletion: true,
+    ac: organizationAccess,
+    roles: organizationRoles,
     organizationHooks: {
       beforeCreateOrganization: async () => {
         closedOrganizationAction();

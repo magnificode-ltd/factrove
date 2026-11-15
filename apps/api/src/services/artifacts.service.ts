@@ -178,6 +178,7 @@ export class ArtifactsService {
       creatorUserId: actor.user.id,
       organizationId: confirmed.organizationId,
       sessionId: actor.sessionId,
+      apiKeyOrganizationId: actor.via === "api-key" ? actor.organization.id : null,
     });
     if (outcome.outcome === "not-found") {
       throw artifactNotFound();

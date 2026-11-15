@@ -1566,21 +1566,14 @@ describe("HTTP API", () => {
       email: "rename-member@example.invalid",
       name: "Member",
       keyName: "rename-member",
+      organizationId: localOrganizationFixture.id,
     });
-    await addMembership(prisma, member.userId, localOrganizationFixture.id);
     const admin = await createUserWithApiKey(prisma, {
       email: "rename-admin@example.invalid",
       name: "Admin",
       keyName: "rename-admin",
-    });
-    await prisma.member.create({
-      data: {
-        id: randomUUID(),
-        organizationId: localOrganizationFixture.id,
-        userId: admin.userId,
-        role: "admin",
-        createdAt: new Date(),
-      },
+      organizationId: localOrganizationFixture.id,
+      role: "admin",
     });
     const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${shared.id}`, {
       headers: { authorization: `Bearer ${member.apiKey}` },
@@ -2460,8 +2453,8 @@ describe("HTTP API", () => {
       email: "org-share-reader@example.invalid",
       name: "Reader",
       keyName: "org-share-reader",
+      organizationId: localOrganizationFixture.id,
     });
-    await addMembership(prisma, reader.userId, localOrganizationFixture.id);
     const missingId = "00000000-0000-4000-8000-000000000077";
     const missing = await patchAccess(baseUrl, missingId, { accessType: "org_shared" }, { apiKey: owner.apiKey });
     const strangerDenied = await patchAccess(baseUrl, artifact.id, { accessType: "org_shared" }, { apiKey: stranger.apiKey });
@@ -2673,11 +2666,12 @@ describe("HTTP API", () => {
     }
   });
 
-  it("rejects sharing when the caller has no organization", async () => {
+  it("rejects an API key whose creating user is not a member of the key organization", async () => {
     const solo = await createUserWithApiKey(prisma, {
       email: "no-org-share@example.invalid",
       name: "Solo",
       keyName: "solo",
+      member: false,
     });
     const rejected = await patchAccess(
       baseUrl,
@@ -2685,10 +2679,10 @@ describe("HTTP API", () => {
       { accessType: "org_shared", organizationId: localOrganizationFixture.id },
       { apiKey: solo.apiKey },
     );
-    expect(rejected.status).toBe(403);
+    expect(rejected.status).toBe(401);
     expect(await errorOf(rejected)).toEqual({
-      code: "ORGANIZATION_SETUP_REQUIRED",
-      message: "Create an organization to continue.",
+      code: "UNAUTHENTICATED",
+      message: "Sign in to continue.",
     });
     expect(await prisma.artifact.count()).toBe(0);
   });
@@ -2811,7 +2805,6 @@ describe("HTTP API", () => {
       ],
     });
     try {
-      await prisma.member.deleteMany({ where: { userId: owner.userId } });
       await addMembership(prisma, owner.userId, orgA);
       await addMembership(prisma, owner.userId, orgB);
       const sessions = await prisma.session.updateMany({
@@ -2827,10 +2820,10 @@ describe("HTTP API", () => {
       const keyed = await globalThis.fetch(`${baseUrl}/api/v1/context`, {
         headers: { authorization: `Bearer ${owner.apiKey}` },
       });
-      expect(keyed.status).toBe(409);
-      expect(await errorOf(keyed)).toEqual({
-        code: "ORGANIZATION_SELECTION_REQUIRED",
-        message: "Choose an organization to continue.",
+      expect(keyed.status).toBe(200);
+      expect(contextEnvelopeSchema.parse(await keyed.json())).toEqual({
+        user: { id: owner.userId, name: "Owner" },
+        organization: { id: localOrganizationFixture.id, name: localOrganizationFixture.name },
       });
 
       const artifact = await uploadWithCookie(baseUrl, "active-org.html", new TextEncoder().encode("<p>active</p>"), owner.cookie);
@@ -2881,8 +2874,8 @@ describe("HTTP API", () => {
       email: "org-share-envelope-reader@example.invalid",
       name: "Envelope Reader",
       keyName: "envelope-reader",
+      organizationId: localOrganizationFixture.id,
     });
-    await addMembership(prisma, reader.userId, localOrganizationFixture.id);
     const readable = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
       headers: { authorization: `Bearer ${reader.apiKey}` },
     });
