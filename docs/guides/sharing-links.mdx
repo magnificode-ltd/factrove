@@ -3,11 +3,15 @@ title: Sharing links
 description: Create public artifact links, optionally protect them with a password, and understand unlock, lockout, and Retry-After.
 ---
 
-Artifacts use private or organization-shared access. The owner of a private artifact can share it with the current organization from the viewer. That switch does not create, change, or remove a public link. The owner can separately enable a public link, optionally protected by a password. Organization members can read an `org_shared` artifact without that link. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail. There is no assumption that a particular domain is hosted for you.
+Artifacts use private or organization-shared access. The owner of a private artifact can share it with the current organization from the viewer. That switch does not create, change, or remove a public link. The owner can separately enable a public link, optionally protected by a password. Organization members can read an `org_shared` artifact without that link. A share URL is the public base origin plus `/share/{id}/{token}`. Anyone with that URL can ask the API for the public detail.
+
+<Info>
+On a server you run, that origin is `PUBLIC_BASE_URL`. A from-source process uses `WEB_ORIGIN` when `PUBLIC_BASE_URL` is unset. On Factrove Cloud, the hosted service sets the origin. This repository does not record that hosted web origin, so the examples below use localhost and a placeholder self-hosted origin. The share command is the same on both. See [Self-host](/self-host/quickstart) and [Factrove Cloud](/cloud/quickstart).
+</Info>
 
 ## Create and revoke a link
 
-In the library or viewer, use Share. From the CLI:
+In the library or viewer, use Share. Examples below use `pnpm factrove` from a checkout. After `npm i -g factrove`, run `factrove` or `ftrv` with the same flags. From the CLI:
 
 ```bash
 pnpm factrove share "$artifact_id"

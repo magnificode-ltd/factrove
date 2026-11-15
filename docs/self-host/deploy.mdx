@@ -1,5 +1,6 @@
 ---
-title: Self-hosting
+title: Deploy the server
+sidebarTitle: Deploy
 description: Run Factrove with Docker Compose, or from source, including storage, HTTPS, the CLI, upgrades, and backups.
 keywords:
   - self-hosting
@@ -11,11 +12,13 @@ keywords:
   - ghcr
 ---
 
+Use this page to deploy a Factrove server you run. The short path is the [self-host quickstart](/self-host/quickstart). Origins and env files are in [Configuration](/self-host/configuration). Factrove Cloud setup is the [Factrove Cloud quickstart](/cloud/quickstart).
+
 Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/arm64` images for the API and the web app. See [Published images](#published-images).
 
 Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
 
-`compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](/quickstart) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
+`compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](#run-from-source) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
 
 ## Prerequisites
 
@@ -328,14 +331,14 @@ Point both services at the external URL. Encode reserved characters in the passw
 
 ## Point the CLI at this install
 
-Install the published CLI and point it at this API. Node.js must be at least 24.7.0 and below 25. The package name is `factrove`. `ftrv` is the same command.
+Install the published CLI and point it at this API. Node.js must be at least 24.7.0 and below 25. The package name is `factrove`. `ftrv` is a bin alias of that package. The [quickstart](/self-host/quickstart) is the same step. This section also includes the checkout command.
 
 ```bash
-npm install --global factrove
+npm i -g factrove
 factrove configure --api-url http://localhost:3001
 ```
 
-`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, which is Factrove Cloud, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
 
 From a checkout, the same command is `pnpm factrove`. Node.js 24.16.0 and pnpm 11.25.0 match the pins in this repository.
 
@@ -616,6 +619,6 @@ Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#
 
 `pnpm infra:down` stops the dev PostgreSQL and Garage from `compose.yaml` and keeps their volumes. `pnpm infra:reset` deletes those dev volumes after you confirm. Neither command touches project `factrove-selfhost`.
 
-CLI credentials in `~/.factrove` stay until you delete those files. There is no artifact-delete command. A private artifact can be shared with the current organization from the web app, or with `PATCH /api/v1/artifacts/{id}` and `{ "accessType": "org_shared", "organizationId": "<current organization id>" }`. The CLI does not change access on an existing artifact. See [Current limits](/concepts#current-limits).
+CLI credentials in `~/.factrove` stay until you delete those files. `factrove delete` removes an artifact, its stored HTML, and any public link. A private artifact can be shared with the current organization from the web app, or with `PATCH /api/v1/artifacts/{id}` and `{ "accessType": "org_shared", "organizationId": "<current organization id>" }`. The CLI does not change access on an existing artifact. See [Current limits](/concepts#current-limits).
 
 Failures during startup are collected in [Troubleshooting](/guides/troubleshooting).

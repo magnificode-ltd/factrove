@@ -1,0 +1,128 @@
+---
+title: Self-host quickstart
+sidebarTitle: Quickstart
+description: Install the Factrove CLI, start a server you run, create the first user and an API key, and save a CLI profile for that API.
+keywords:
+  - self-host
+  - quickstart
+  - docker compose
+  - api key
+---
+
+This page runs Factrove on a machine you control. The published CLI talks to your API. [Factrove Cloud](/cloud/quickstart) is the hosted service and does not use these steps.
+
+You need Docker Engine with Compose v2, and Node.js at least 24.7 and below 25 for the CLI. You do not need Node on the host to build the Compose images. The API image already pins Node.js 24.16.0.
+
+## Install the CLI
+
+The published npm package is `factrove`.
+
+<Tabs>
+  <Tab title="npm">
+    ```bash
+    npm i -g factrove
+    factrove --help
+    ftrv --help
+    ```
+  </Tab>
+  <Tab title="npx">
+    ```bash
+    npx factrove --help
+    ```
+  </Tab>
+</Tabs>
+
+A global install puts `factrove` and `ftrv` on your PATH. They run the same program. `ftrv` is a bin alias inside the `factrove` package. `npx factrove` runs that package without a global install. The name you pass to `npx` is `factrove`.
+
+With no profile and no API URL, the CLI calls `https://api.factrove.app`, which is Factrove Cloud. The steps below save your server's API origin so later commands do not use that default.
+
+## Start the server
+
+Clone the repository and start the Compose stack. That stack is PostgreSQL, Garage, a one-shot migration, the API, and the web app. [Deploy the server](/self-host/deploy) is the full install, including published images, HTTPS, external storage, upgrades, and backups. [Configuration](/self-host/configuration) lists the env files and origins.
+
+```bash
+git clone https://github.com/magnificode-ltd/factrove.git
+cd factrove
+cp .env.docker.example .env.docker
+```
+
+Replace every placeholder in `.env.docker` before the first start. Generate a secret with `openssl rand -hex 32` and use a fresh value for each of these:
+
+- `POSTGRES_PASSWORD`
+- `BETTER_AUTH_SECRET` (at least 32 characters)
+- `GARAGE_RPC_SECRET` (64 hex characters)
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+
+The example text for `GARAGE_RPC_SECRET` is not a valid Garage secret. Compose will not start while any of those five are unset. Pass `--env-file .env.docker` or Compose will not read that file.
+
+Leave the origins on the localhost defaults for this quickstart:
+
+```text
+WEB_ORIGIN=http://localhost:3000
+PUBLIC_BASE_URL=http://localhost:3000
+API_PUBLIC_ORIGIN=http://localhost:3001
+BROWSER_API_URL=http://localhost:3001
+```
+
+On this stack an empty `PUBLIC_BASE_URL` becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN`. If you change the public origin, set `PUBLIC_BASE_URL` to that same origin. [Configuration](/self-host/configuration) covers that case and HTTPS.
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml up --build -d
+curl -fsS http://127.0.0.1:3001/api/v1/health
+```
+
+A ready API returns `{"status":"ok"}`. `compose.yaml` is a different file. `docker compose up` without `-f docker-compose.yml` starts PostgreSQL and Garage for a checkout and leaves the API and the web app on the host. The self-host stack is the command above.
+
+`pnpm dev` from a checkout is the other way to run the apps. It is documented in [Run from source](/self-host/deploy#run-from-source).
+
+## Create the first user and an API key
+
+The Compose stack does not seed a user. Open `http://localhost:3000/signup` and create an account with a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in.
+
+Creating the account sends one invite email. With `EMAIL_TRANSPORT` unset or `log`, the API writes that message to its log and does not send it. [Invite email](/self-host/deploy#invite-email) is how to switch on SMTP or Brevo.
+
+Create a key at `http://localhost:3000/account/api-keys`. The secret is shown once. The CLI does not create accounts or keys. A copyable session request, for an API you run, is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+
+## Point a CLI profile at this server
+
+Save the key and this API origin on a profile. `--api-key` prompts when you omit it, so the key stays out of shell history.
+
+```bash
+factrove configure --api-url http://localhost:3001
+```
+
+`npx factrove configure --api-url http://localhost:3001` is the same step without a global install. After `npm i -g factrove`, `ftrv configure --api-url http://localhost:3001` is the same command.
+
+`factrove configure` writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600. It stores the origin as `api_url` and does not print the key. Later commands on that profile use `http://localhost:3001`. If the API is on another origin, pass that origin instead. It should match `API_PUBLIC_ORIGIN`.
+
+<Info>
+The built-in origin is `https://api.factrove.app`. That is Factrove Cloud. This server needs `--api-url` or a saved profile URL. If you also use Factrove Cloud, give this profile its own name so the two origins stay apart.
+</Info>
+
+Use a named profile when you keep a Factrove Cloud profile as well:
+
+```bash
+factrove configure --profile self-host --api-url http://localhost:3001
+factrove --profile self-host upload ./fixtures/hello.html
+```
+
+From a checkout of this repository, `pnpm factrove` runs the built CLI. `apps/cli/.env` can set `FACTROVE_API_URL` for that command only. The published `factrove` and `ftrv` commands do not read that file. [Deploy the server](/self-host/deploy#point-the-cli-at-this-install) includes the checkout command.
+
+## Upload a file
+
+From the repository root, after configure:
+
+```bash
+factrove upload ./fixtures/hello.html
+```
+
+Plain success prints only the artifact id. Open it at:
+
+```text
+http://localhost:3000/artifacts/{id}
+```
+
+`--json` prints one line that includes `viewerUrl`. The library is `http://localhost:3000`. Use **My artifacts**, then Refresh if the new row is not listed yet.
+
+Commands, flags, and precedence are in [CLI](/guides/cli). Ports, secrets, and a wrong API origin are in [Troubleshooting](/guides/troubleshooting).

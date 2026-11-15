@@ -1,25 +1,54 @@
 ---
 title: Introduction
-description: Factrove is a self-hostable library for HTML artifacts, with a web app, HTTP API, and CLI.
+description: Factrove is a library for HTML artifacts. Self-host the server, or use Factrove Cloud, then use the same CLI and API.
+keywords:
+  - factrove
+  - self-host
+  - factrove cloud
 ---
 
-Factrove keeps HTML artifacts in one place you run yourself. People and agents upload files, the web app lists them, and a viewer opens the stored HTML.
+Factrove stores HTML artifacts. People and agents upload files, the web app lists them, and a viewer opens the stored HTML. You can run that server yourself, or use Factrove Cloud, the hosted service. The web app, the HTTP API, and the CLI are the same product on both. The setup steps differ.
 
-This site documents the code in this repository. It does not describe a hosted product, a price, or a launch date. The software is licensed under the GNU Affero General Public License v3.0 or later.
+The software is licensed under the GNU Affero General Public License v3.0 or later.
+
+## Choose a setup
+
+<Columns cols={2}>
+  <Card title="Self-host" icon="server" href="/self-host/quickstart">
+    Run the API, the web app, PostgreSQL, and object storage. You choose the origins, the secrets, and when to upgrade.
+  </Card>
+  <Card title="Factrove Cloud" icon="cloud" href="/cloud/quickstart">
+    Sign up on the hosted service, create an API key, and point the CLI at the hosted API.
+  </Card>
+</Columns>
+
+Self-host when you want the data on infrastructure you operate, or when you are changing this repository. The [self-host quickstart](/self-host/quickstart) installs the CLI, starts the server, creates the first user and an API key, and saves a CLI profile for your API origin.
+
+Factrove Cloud when you want an account on the hosted service and do not want to run the server. The [Factrove Cloud quickstart](/cloud/quickstart) signs you up, creates an API key, installs the same CLI, and saves a profile for the hosted API.
+
+Use a separate CLI profile for each. One `factrove configure` writes one profile, and a later configure of that same profile replaces its API origin.
 
 ## What you get
 
 - A **web app** for sign-in, the library, and the viewer
 - An **HTTP API** for artifacts, public shares, and API keys
-- A **CLI** that uploads files, prints content, and manages share links. The published package is `factrove` (`npm i -g factrove`). `ftrv` runs the same program. A checkout of this repository uses `pnpm factrove`.
+- A **CLI** that uploads files, prints content, and manages share links
 
-The API owns PostgreSQL metadata and object storage. The web app and CLI only know HTTP origins.
+The published npm package is `factrove`.
 
-## Links use a base URL you set
+```bash
+npm i -g factrove
+```
 
-Viewer and share URLs are a configured origin plus the artifact path. The API reads `PUBLIC_BASE_URL` (and falls back to `WEB_ORIGIN` when that is unset). Setting the variable does not start a server or publish the app.
+`npx factrove` runs it without a global install. A global install also puts `ftrv` on your PATH. `ftrv` is a bin alias of the `factrove` package, and it runs the same program. The package name you install, and the name you pass to `npx`, is `factrove`.
 
-Local:
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is Factrove Cloud. A server you run needs its own API origin on the profile. [Release the CLI](/guides/releasing-the-cli) is how a maintainer publishes a version. Nothing publishes on push.
+
+## Links use a base URL
+
+Viewer and share URLs are a configured origin plus the artifact path. On a server you run, the API reads `PUBLIC_BASE_URL`, and a from-source process falls back to `WEB_ORIGIN` when that is unset. Setting the variable does not start a server. On Factrove Cloud, the hosted service sets that origin. This repository does not record the hosted web origin.
+
+A server on your machine:
 
 ```text
 http://localhost:3000/artifacts/{id}
@@ -35,9 +64,7 @@ https://library.example.com/share/{id}/{token}
 
 ## Where to go next
 
-- [Quickstart](/quickstart) gets the source and runs the local loop
+- [Self-host quickstart](/self-host/quickstart)
+- [Factrove Cloud quickstart](/cloud/quickstart)
 - [Concepts](/concepts) explains artifacts, HTML delivery, access, and shares
-- [Self-hosting](/guides/self-hosting) runs the Docker Compose stack, or the same apps from source
-- [CLI](/guides/cli) covers commands, flags, and config precedence
-- [Sharing links](/guides/sharing-links) covers public URLs and optional passwords
-- [Troubleshooting](/guides/troubleshooting) covers ports, origins, cookies, and links
+- [CLI reference](/cli-reference/overview) and [API reference](/api-reference/overview) apply to both setups

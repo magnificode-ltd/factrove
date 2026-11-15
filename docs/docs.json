@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "name": "Factrove",
   "theme": "mint",
-  "description": "Guides and references for Factrove, a self-hostable library for HTML artifacts.",
+  "description": "Guides and references for Factrove. Self-host the server, or use Factrove Cloud.",
   "seo": {
     "metatags": {
       "canonical": "https://factrove.mintlify.app"
@@ -16,29 +16,49 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Get started",
+        "tab": "Overview",
+        "icon": "book-open",
         "groups": [
           {
-            "group": "Get started",
+            "group": "Start",
             "pages": [
               "introduction",
-              "quickstart",
               "concepts"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/cli",
+              "guides/sharing-links",
+              "guides/troubleshooting",
+              "guides/releasing-the-cli"
             ]
           }
         ]
       },
       {
-        "tab": "Guides",
+        "tab": "Self-host",
+        "icon": "server",
         "groups": [
           {
-            "group": "Guides",
+            "group": "Self-host",
             "pages": [
-              "guides/self-hosting",
-              "guides/cli",
-              "guides/releasing-the-cli",
-              "guides/sharing-links",
-              "guides/troubleshooting"
+              "self-host/quickstart",
+              "self-host/deploy",
+              "self-host/configuration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Factrove Cloud",
+        "icon": "cloud",
+        "groups": [
+          {
+            "group": "Factrove Cloud",
+            "pages": [
+              "cloud/quickstart"
             ]
           }
         ]
@@ -76,6 +96,18 @@
       }
     ]
   },
+  "redirects": [
+    {
+      "source": "/quickstart",
+      "destination": "/self-host/quickstart",
+      "permanent": true
+    },
+    {
+      "source": "/guides/self-hosting",
+      "destination": "/self-host/deploy",
+      "permanent": true
+    }
+  ],
   "api": {
     "openapi": "api-reference/openapi.json",
     "examples": {
@@ -83,6 +115,6 @@
     }
   },
   "markdown": {
-    "instructions": "Describe what the running code does. Do not invent hosted pricing, launch dates, or security guarantees. Share and viewer links are a configured base URL plus an artifact path. Show localhost and a placeholder origin such as https://library.example.com."
+    "instructions": "Describe what the running code does. Self-host and Factrove Cloud are different setups. Do not invent hosted pricing, launch dates, or a hosted web origin. The CLI default API origin is https://api.factrove.app. Share and viewer links are a configured base URL plus an artifact path. For a server the reader runs, show localhost and a placeholder origin such as https://library.example.com."
   }
 }
