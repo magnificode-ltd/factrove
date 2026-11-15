@@ -257,7 +257,8 @@ describe("local runtime", () => {
     assert.match(apiExample, /^AWS_SECRET_ACCESS_KEY=factrove-local-secret$/m);
     assert.match(apiExample, /Plain http:\/\/ is accepted only for localhost, 127\.0\.0\.1, and ::1/);
     assert.match(apiExample, /^EMAIL_TRANSPORT=log$/m);
-    assert.match(apiExample, /^EMAIL_FROM_ADDRESS=support@factrove\.app$/m);
+    assert.equal(/^EMAIL_FROM_ADDRESS=\S/m.test(apiExample), false);
+    assert.match(apiExample, /^# EMAIL_FROM_ADDRESS=library@example\.com$/m);
     assert.match(apiExample, /^EMAIL_FROM_NAME=Factrove$/m);
     assert.equal(apiExample.includes("BREVO_SENDER_"), false);
     assert.equal(/^BREVO_API_KEY=\S/m.test(apiExample), false);
