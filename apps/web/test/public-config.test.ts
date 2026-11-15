@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { docsUrl } from "../src/docs";
 import {
   browserApiUrl,
   cliApiOrigin,
@@ -83,6 +84,8 @@ describe("public API origin", () => {
     expect(readDocsBaseUrl("javascript:alert(1)")).toBeUndefined();
     expect(readDocsBaseUrl("")).toBeUndefined();
     expect(readDocsBaseUrl("   ")).toBeUndefined();
+    expect(readDocsBaseUrl("https://docs.example.com/?lang=en")).toBeUndefined();
+    expect(readDocsBaseUrl("https://docs.example.com/#guide")).toBeUndefined();
     expect(docsBaseUrl({})).toBe(DEFAULT_DOCS_BASE_URL);
     expect(docsBaseUrl({ DOCS_BASE_URL: "" })).toBe(DEFAULT_DOCS_BASE_URL);
     expect(docsBaseUrl({ DOCS_BASE_URL: "   " })).toBe(DEFAULT_DOCS_BASE_URL);
@@ -91,7 +94,15 @@ describe("public API origin", () => {
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(docsBaseUrl({ DOCS_BASE_URL: "not a url" })).toBe(DEFAULT_DOCS_BASE_URL);
-    expect(warn).toHaveBeenCalledOnce();
+    expect(docsBaseUrl({ DOCS_BASE_URL: "https://docs.example.com/?lang=en" })).toBe(DEFAULT_DOCS_BASE_URL);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "https://docs.example.com/factrove#guide" })).toBe(DEFAULT_DOCS_BASE_URL);
+    process.env.DOCS_BASE_URL = "https://docs.example.com/?lang=en";
+    expect(docsUrl("/cli-reference/overview")).toBe(`${DEFAULT_DOCS_BASE_URL}/cli-reference/overview`);
+    expect(docsUrl("/cli-reference/overview")).not.toContain("?lang=en/");
+    process.env.DOCS_BASE_URL = "https://docs.example.com/#guide";
+    expect(docsUrl("/cli-reference/overview")).toBe(`${DEFAULT_DOCS_BASE_URL}/cli-reference/overview`);
+    expect(docsUrl("/cli-reference/overview")).not.toContain("#guide/");
+    expect(warn).toHaveBeenCalledTimes(7);
   });
 
   it("uses the browser API origin for the CLI and skips the internal address", () => {

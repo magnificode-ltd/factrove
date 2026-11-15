@@ -71,17 +71,23 @@ export function readDocsBaseUrl(value: string | undefined): string | undefined {
   if (!href) {
     return undefined;
   }
+  const url = new URL(href);
+  // A query or hash would swallow the path docsUrl appends.
+  if (url.search !== "" || url.hash !== "") {
+    return undefined;
+  }
   return href.replace(/\/+$/, "");
 }
 
 // Base URL for docs links such as the CLI reference. Read when a page renders
 // so an install can set DOCS_BASE_URL without rebuilding the web app.
-// Unset or empty keeps the public docs site. A trailing slash is dropped.
+// Unset, empty, or a URL with a query or hash keeps the public docs site.
+// A trailing slash is dropped.
 export function docsBaseUrl(env?: RuntimeEnv): string {
   const source = runtimeEnv(env);
   const override = readDocsBaseUrl(source.DOCS_BASE_URL);
   if (source.DOCS_BASE_URL?.trim() && !override) {
-    console.warn("DOCS_BASE_URL must be an absolute http(s) URL without a username or password.");
+    console.warn("DOCS_BASE_URL must be an absolute http(s) URL without a username, password, query, or hash.");
   }
   return override ?? DEFAULT_DOCS_BASE_URL;
 }
