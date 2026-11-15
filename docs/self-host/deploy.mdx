@@ -124,6 +124,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `PUBLIC_BASE_URL` | set it whenever the web origin is not `http://localhost:3000` | Origin for viewer URLs and public share links. An empty value becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN` |
 | `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
 | `SOURCE_CODE_URL` | no | Source code link in the web app. Default `https://github.com/magnificode-ltd/factrove`. Read when a page is rendered |
+| `DOCS_BASE_URL` | no | Docs links in the web app, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. Read when a page is rendered |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
@@ -131,7 +132,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
 | `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it. Link queries are redacted |
 | `EMAIL_LOG_LINKS` | no | `redacted` (default) or `full`. `full` keeps the query and is refused when `NODE_ENV` is `production` |
-| `EMAIL_FROM_ADDRESS` | when transport is `smtp` or `brevo` | From address and the support contact in the footer. Unset with `log` uses `no-reply@localhost`. Factrove Cloud sets `support@factrove.app` |
+| `EMAIL_FROM_ADDRESS` | when transport is `smtp` or `brevo` | From address and the support contact in the footer. Unset with `log` uses `no-reply@localhost`. A sample address is `library@example.com` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
 | `EMAIL_LOGO_URL` | no | Absolute http(s) logo for auth email. Empty uses the text wordmark |
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
@@ -473,6 +474,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `NEXT_PUBLIC_API_URL` | Origin baked into the web client at `pnpm build`. Default `http://localhost:3001` |
 | `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
 | `SOURCE_CODE_URL` | Optional URL for the Source code link. Default `https://github.com/magnificode-ltd/factrove`. The web process reads it when rendering a page |
+| `DOCS_BASE_URL` | Optional base URL for docs links. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. The web process reads it when rendering a page |
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
@@ -488,7 +490,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 
 `BASE_URL` is read by `pnpm db:seed` and by auth schema generation. The API process uses `API_PUBLIC_ORIGIN` instead.
 
-`pnpm dev` does not copy `BROWSER_API_URL`, `INTERNAL_API_URL`, or `SOURCE_CODE_URL` out of `apps/api/.env`. For a production web process, export them in the environment. Set `NEXT_PUBLIC_API_URL` before the build when you are not using `BROWSER_API_URL`. `SOURCE_CODE_URL` is read when a page renders, including under `next start`.
+`pnpm dev` does not copy `BROWSER_API_URL`, `INTERNAL_API_URL`, `SOURCE_CODE_URL`, or `DOCS_BASE_URL` out of `apps/api/.env`. For a production web process, export them in the environment. Set `NEXT_PUBLIC_API_URL` before the build when you are not using `BROWSER_API_URL`. `SOURCE_CODE_URL` and `DOCS_BASE_URL` are read when a page renders, including under `next start`.
 
 <Warning>
 `pnpm build` and `next build` fix `NEXT_PUBLIC_API_URL` into the client bundle. `next start` cannot change that baked origin. `BROWSER_API_URL` on the web process replaces it for pages rendered after you set the variable.
@@ -513,7 +515,7 @@ Creating an account sends one email to that address. It welcomes the person and 
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
-`EMAIL_FROM_NAME` defaults to `Factrove`. `EMAIL_FROM_ADDRESS` is required when `EMAIL_TRANSPORT` is `smtp` or `brevo`. Leave it unset with `log`. The log then uses `no-reply@localhost`, which is only written to the API log. `docker-compose.yml` passes an empty address when the variable is unset, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`. Factrove Cloud sets the from address to `support@factrove.app`.
+`EMAIL_FROM_NAME` defaults to `Factrove`. `EMAIL_FROM_ADDRESS` is required when `EMAIL_TRANSPORT` is `smtp` or `brevo`. Leave it unset with `log`. The log then uses `no-reply@localhost`, which is only written to the API log. `docker-compose.yml` passes an empty address when the variable is unset, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`. The samples below use `library@example.com` as the from address.
 
 The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready and asks them to confirm it. A "Confirm email" button links to `WEB_ORIGIN/verify-email?token=...`. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `WEB_ORIGIN`. The link text is Factrove. The plain-text part ends with `Factrove:` followed by that same origin. The HTML and the plain-text part carry the same words. The template does not add a query parameter of its own.
 
