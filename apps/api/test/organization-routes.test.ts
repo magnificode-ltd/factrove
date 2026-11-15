@@ -39,7 +39,10 @@ describe("closed organization routes", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: async () => {},
+      sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
 
     const created = await auth.handler(signUpRequest("org-lock@example.invalid"));
@@ -101,7 +104,10 @@ describe("closed organization routes", () => {
       secret: TEST_AUTH_SECRET,
       trustedOrigins: ["http://localhost:3000"],
       cookieDomain: null,
+      webOrigin: "http://localhost:3000",
       onUserCreated: async () => {},
+      sendPasswordResetEmail: async () => {},
+      sendVerificationEmail: async () => {},
     });
     const created = await auth.handler(signUpRequest("org-active@example.invalid"));
     expect(created.status).toBe(200);

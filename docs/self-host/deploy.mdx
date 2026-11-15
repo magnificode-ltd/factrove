@@ -1,5 +1,6 @@
 ---
-title: Self-hosting
+title: Deploy the server
+sidebarTitle: Deploy
 description: Run Factrove with Docker Compose, or from source, including storage, HTTPS, the CLI, upgrades, and backups.
 keywords:
   - self-hosting
@@ -11,11 +12,13 @@ keywords:
   - ghcr
 ---
 
+Use this page to deploy a Factrove server you run. The short path is the [self-host quickstart](/self-host/quickstart). Origins and env files are in [Configuration](/self-host/configuration). Factrove Cloud setup is the [Factrove Cloud quickstart](/cloud/quickstart).
+
 Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/arm64` images for the API and the web app. See [Published images](#published-images).
 
 Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
 
-`compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](/quickstart) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
+`compose.yaml` is a different file. It starts PostgreSQL and Garage for [`pnpm dev`](#run-from-source) and leaves the API and the web app on the host. `docker compose up` without `-f docker-compose.yml` selects that file.
 
 ## Prerequisites
 
@@ -126,10 +129,11 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
-| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes the invite to the API log and does not send it |
-| `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
+| `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it. Link queries are redacted |
+| `EMAIL_LOG_LINKS` | no | `redacted` (default) or `full`. `full` keeps the query and is refused when `NODE_ENV` is `production` |
+| `EMAIL_FROM_ADDRESS` | when transport is `smtp` or `brevo` | From address and the support contact in the footer. Unset with `log` uses `no-reply@localhost`. Factrove Cloud sets `support@factrove.app` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
-| `EMAIL_LOGO_URL` | no | Absolute http(s) logo for the invite. Empty uses the text wordmark |
+| `EMAIL_LOGO_URL` | no | Absolute http(s) logo for auth email. Empty uses the text wordmark |
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
 | `SMTP_PORT` | when transport is `smtp` | Port from 1 to 65535. `587` is the usual STARTTLS port |
 | `SMTP_SECURE` | when transport is `smtp` | `true` for implicit TLS, usually port 465. `false` for STARTTLS, usually port 587 |
@@ -328,14 +332,14 @@ Point both services at the external URL. Encode reserved characters in the passw
 
 ## Point the CLI at this install
 
-Install the published CLI and point it at this API. Node.js must be at least 24.7.0 and below 25. The package name is `factrove`. `ftrv` is the same command.
+Install the published CLI and point it at this API. Node.js must be at least 24.7.0 and below 25. The package name is `factrove`. `ftrv` is a bin alias of that package. The [quickstart](/self-host/quickstart) is the same step. This section also includes the checkout command.
 
 ```bash
-npm install --global factrove
+npm i -g factrove
 factrove configure --api-url http://localhost:3001
 ```
 
-`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
+`npx factrove configure --api-url http://localhost:3001` skips the global install. The built-in origin is `https://api.factrove.app`, which is Factrove Cloud, so this install needs `--api-url` or a saved profile URL. `--endpoint-url` is the same option. `--api-key` prompts when you omit it, so the key stays out of shell history. Create the key in the web app at `/account/api-keys` after you sign up. The secret is shown once. The same session call is in [API overview](/api-reference/overview#create-an-api-key-from-a-session).
 
 From a checkout, the same command is `pnpm factrove`. Node.js 24.16.0 and pnpm 11.25.0 match the pins in this repository.
 
@@ -472,7 +476,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Invite email. Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up invite and the password reset). Unset transport is `log`. `EMAIL_FROM_ADDRESS` is required for `smtp` and `brevo`. Unset with `log` uses `no-reply@localhost`. The from name defaults to `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages, including the footer |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user, password, and `SMTP_REQUIRE_TLS`. User and password are both set or both empty. Unset `SMTP_REQUIRE_TLS` requires STARTTLS when `SMTP_SECURE` is `false` |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
@@ -505,19 +509,19 @@ pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 
 ### Invite email
 
-Creating an account sends one invite email to that address. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts. There is no organization-member invite route.
+Creating an account sends one email to that address. It welcomes the person and asks them to confirm the address. Sign-in is not blocked. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts, and API keys are unchanged. People who already have an account are not emailed. There is no organization-member invite route.
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
-`EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
+`EMAIL_FROM_NAME` defaults to `Factrove`. `EMAIL_FROM_ADDRESS` is required when `EMAIL_TRANSPORT` is `smtp` or `brevo`. Leave it unset with `log`. The log then uses `no-reply@localhost`, which is only written to the API log. `docker-compose.yml` passes an empty address when the variable is unset, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`. Factrove Cloud sets the from address to `support@factrove.app`.
 
-The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready. A "Sign in to Factrove" button links to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
+The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready and asks them to confirm it. A "Confirm email" button links to `WEB_ORIGIN/verify-email?token=...`. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `WEB_ORIGIN`. The link text is Factrove. The plain-text part ends with `Factrove:` followed by that same origin. The HTML and the plain-text part carry the same words. The template does not add a query parameter of its own.
 
-Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
+Set `WEB_ORIGIN` to the public URL of the web app before you send mail. Confirmation links and password-reset links start with that origin. The default `http://localhost:3000` only works for a browser on the same machine.
 
-Sign-up does not wait for the provider. The API sends at most four invites at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Invite email skipped for <address>. The send queue is full.` and that invite is not sent. On shutdown the API waits up to 10 seconds for queued and in-flight invites, then logs `Invite email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
+Sign-up does not wait for the provider. The API sends at most four auth emails at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Verification email skipped for <address>. The send queue is full.` and that message is not sent. A password reset past the limit logs `Password reset email skipped for <address>. The send queue is full.` On shutdown the API waits up to 10 seconds for queued and in-flight auth email, then logs `Auth email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
 
-The HTML and plain-text layout live in `apps/api/src/mail/invite-email-template.ts`. Edit that file, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
+The signup wording lives in `apps/api/src/mail/verification-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
 
 This install needs Node.js 24 (`>=24.7.0 <25`; 24.16.0 is pinned). A ready API answers `GET /api/v1/health`.
 
@@ -529,7 +533,6 @@ Log, which is also the default when `EMAIL_TRANSPORT` is unset:
 
 ```bash
 EMAIL_TRANSPORT=log
-EMAIL_FROM_ADDRESS=support@factrove.app
 EMAIL_FROM_NAME=Factrove
 ```
 
@@ -537,7 +540,7 @@ Any SMTP server. Leave `SMTP_USER` and `SMTP_PASSWORD` empty together when that 
 
 ```bash
 EMAIL_TRANSPORT=smtp
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 SMTP_HOST=mail.example.com
 SMTP_PORT=587
@@ -550,7 +553,7 @@ Brevo's SMTP relay. The login and the SMTP key come from the Brevo SMTP settings
 
 ```bash
 EMAIL_TRANSPORT=smtp
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
@@ -563,7 +566,7 @@ Brevo's HTTP API:
 
 ```bash
 EMAIL_TRANSPORT=brevo
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 BREVO_API_KEY=replace-with-a-transactional-key
 ```
@@ -599,14 +602,32 @@ send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
 
 A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
 
-- `Invite email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the message. `messageId` is omitted when the provider id contains a secret or is not a normal id.
-- `Invite email shutdown left N send(s) unfinished:` means the process stopped before those sends finished. The account still exists.
-- `EMAIL_TRANSPORT is log. Invite email was not sent.` means the log transport is selected. The following lines are From, To, Subject, and the text.
-- `Invite email failed for <address>.` means the send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
+- `Verification email sent to <address> messageId=<id>` means the SMTP server or the Brevo HTTP API accepted the signup message. `messageId` is omitted when the provider id contains a secret or is not a normal id. A password reset uses `Password reset email sent to <address>`.
+- `Auth email shutdown left N send(s) unfinished:` means the process stopped before queued verification or password-reset sends finished. The account still exists.
+- `EMAIL_TRANSPORT is log. Verification email was not sent.` means the log transport is selected for signup. A password reset uses `Password reset email was not sent.` The following lines are From, To, Subject, and the text. A link query, including a reset or verification token, is replaced with `?[redacted]`. `EMAIL_LOG_LINKS=full` keeps the query, and only when `NODE_ENV` is not `production`. In production that value stops the process.
+- `Verification email failed for <address>.` means the signup send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
 A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
 
 The signup form at `http://localhost:3000/signup` sends the same request. `pnpm dev` starts the web app and the API together. Use the curl above when you only need the API.
+
+### Password reset
+
+Forgot password is `/forgot-password`. The sign-in page links to it. The form always shows the same confirmation, so the page does not say whether that address has an account. `POST /api/auth/request-password-reset` does the same: a missing address and a known address both return 200 with the same JSON.
+
+A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...`, not the API origin. The token expires in one hour and works once. `/reset-password` asks for a new password of 8 to 128 characters and rejects a password on the common-password list. An expired or used link shows that state and offers another request. No new environment variable is required. Reset mail uses the same `EMAIL_TRANSPORT`, from address, from name, and logo as the invite. The footer link and the plain-text site line are `WEB_ORIGIN`. The link text is Factrove.
+
+Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` The logged link keeps the path and replaces the query with `?[redacted]`, so the token is not in the log. `EMAIL_LOG_LINKS=full` logs the query only when `NODE_ENV` is not `production`. When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`. A successful reset signs out every existing session for that account.
+
+The wording lives in `apps/api/src/mail/password-reset-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API.
+
+### Email verification
+
+Signup sends the verification email described above instead of a separate welcome. One message avoids two emails at once. The body still says the account is ready. The link is `WEB_ORIGIN/verify-email?token=...` and expires in one hour. Opening it can sign the visitor in. `/verify-email` shows a confirmed state or an expired state. The log transport replaces that query with `?[redacted]` unless `EMAIL_LOG_LINKS=full` and `NODE_ENV` is not `production`.
+
+`requireEmailVerification` stays false and `autoSignIn` stays true. A new account can sign in, use the library, and call the API with a key before the address is confirmed. The CLI is unchanged. Signing in does not send another email. Accounts that already exist are not emailed and are not forced through verification.
+
+A signed-in person whose address is not confirmed sees a small notice, "Verify your email." They can dismiss it for that browser session or choose Resend. Resend calls `POST /api/auth/send-verification-email`, which Better Auth limits to 3 requests per 60 seconds per client address. The same `EMAIL_TRANSPORT`, from address, from name, and logo are used. The footer link and the plain-text site line are `WEB_ORIGIN`. The link text is Factrove. No new variable is required.
 
 Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#point-the-cli-at-this-install). Health, library, and share checks are the same, against the host ports.
 
@@ -616,6 +637,6 @@ Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#
 
 `pnpm infra:down` stops the dev PostgreSQL and Garage from `compose.yaml` and keeps their volumes. `pnpm infra:reset` deletes those dev volumes after you confirm. Neither command touches project `factrove-selfhost`.
 
-CLI credentials in `~/.factrove` stay until you delete those files. There is no artifact-delete command. A private artifact can be shared with the current organization from the web app, or with `PATCH /api/v1/artifacts/{id}` and `{ "accessType": "org_shared", "organizationId": "<current organization id>" }`. The CLI does not change access on an existing artifact. See [Current limits](/concepts#current-limits).
+CLI credentials in `~/.factrove` stay until you delete those files. `factrove delete` removes an artifact, its stored HTML, and any public link. A private artifact can be shared with the current organization from the web app, or with `PATCH /api/v1/artifacts/{id}` and `{ "accessType": "org_shared", "organizationId": "<current organization id>" }`. The CLI does not change access on an existing artifact. See [Current limits](/concepts#current-limits).
 
 Failures during startup are collected in [Troubleshooting](/guides/troubleshooting).

@@ -59,9 +59,12 @@ describe("invite failure process", () => {
         secret: TEST_AUTH_SECRET,
         trustedOrigins: ["http://localhost:3000"],
         cookieDomain: null,
+        webOrigin: "http://localhost:3000",
         onUserCreated: async () => {
           throw new Error("hook exploded");
         },
+        sendPasswordResetEmail: async () => {},
+        sendVerificationEmail: async () => {},
       });
       const response = await auth.handler(new Request("http://localhost:3001/api/auth/sign-up/email", {
         method: "POST",
@@ -105,6 +108,7 @@ function workerConfig(): ApiConfig {
     emailFromAddress: "support@factrove.app",
     emailFromName: "Factrove",
     emailLogoUrl: null,
+    emailLogFullLinks: false,
     brevoApiKey: null,
     smtp: null,
   };

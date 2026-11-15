@@ -70,6 +70,7 @@ const config: ApiConfig = {
   emailFromAddress: "support@factrove.app",
   emailFromName: "Factrove",
   emailLogoUrl: null,
+  emailLogFullLinks: false,
   brevoApiKey: null,
   smtp: null,
 };
@@ -248,7 +249,7 @@ describe("API configuration", () => {
     expect(defaults.trustedProxies).toEqual([]);
     expect(defaults.shareTokenKey).toBeNull();
     expect(defaults.emailTransport).toBe("log");
-    expect(defaults.emailFromAddress).toBe("support@factrove.app");
+    expect(defaults.emailFromAddress).toBe("no-reply@localhost");
     expect(defaults.emailFromName).toBe("Factrove");
     expect(defaults.emailLogoUrl).toBeNull();
     expect(defaults.brevoApiKey).toBeNull();

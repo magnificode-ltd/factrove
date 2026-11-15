@@ -12,6 +12,7 @@ export function buildInviteEmail(input: {
   recipient: InviteRecipient;
   signInUrl: string;
   supportEmail: string;
+  siteUrl: string;
   logoUrl?: string | null;
 }): OutboundEmail {
   const email = input.recipient.email.trim();
@@ -20,6 +21,7 @@ export function buildInviteEmail(input: {
     recipientName: input.recipient.name,
     signInUrl: input.signInUrl,
     supportEmail: input.supportEmail,
+    siteUrl: input.siteUrl,
     logoUrl: input.logoUrl ?? null,
   });
   return {

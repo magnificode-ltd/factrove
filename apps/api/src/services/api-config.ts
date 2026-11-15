@@ -21,6 +21,9 @@ export type ApiConfig = {
   emailFromName: string;
   // Absolute http(s) logo for the invite. Null uses the text wordmark.
   emailLogoUrl: string | null;
+  // True only outside production, and only when EMAIL_LOG_LINKS=full.
+  // The log transport otherwise redacts query strings, including reset tokens.
+  emailLogFullLinks: boolean;
   // Set only when emailTransport is brevo. Other transports leave this null.
   brevoApiKey: string | null;
   // Set only when emailTransport is smtp. Other transports leave this null.
@@ -39,7 +42,9 @@ export type SmtpConfig = {
   password: string | null;
 };
 
-export const DEFAULT_EMAIL_FROM_ADDRESS = "support@factrove.app";
+// Used only when EMAIL_TRANSPORT is log and EMAIL_FROM_ADDRESS is unset.
+// smtp and brevo require EMAIL_FROM_ADDRESS. The log value is never delivered.
+export const LOG_EMAIL_FROM_ADDRESS = "no-reply@localhost";
 export const DEFAULT_EMAIL_FROM_NAME = "Factrove";
 export const EMAIL_TRANSPORTS = ["log", "smtp", "brevo"] as const;
 
@@ -113,39 +118,58 @@ function readOrigin(value: string | undefined, fallback: string, name: string): 
   return url.origin;
 }
 
-function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTransport" | "emailFromAddress" | "emailFromName" | "emailLogoUrl" | "brevoApiKey" | "smtp"> {
+function readEmailConfig(env: NodeJS.ProcessEnv): Pick<ApiConfig, "emailTransport" | "emailFromAddress" | "emailFromName" | "emailLogoUrl" | "emailLogFullLinks" | "brevoApiKey" | "smtp"> {
   const emailTransport = readEmailTransport(env.EMAIL_TRANSPORT);
-  const emailFromAddress = readEmailFromAddress(env.EMAIL_FROM_ADDRESS);
   const emailFromName = readEmailFromName(env.EMAIL_FROM_NAME);
   const emailLogoUrl = readEmailLogoUrl(env.EMAIL_LOGO_URL);
+  const emailLogFullLinks = readEmailLogFullLinks(env);
   if (emailTransport === "brevo") {
+    const brevoApiKey = readRequiredBrevoApiKey(env.BREVO_API_KEY);
     return {
       emailTransport,
-      emailFromAddress,
+      emailFromAddress: readEmailFromAddress(env.EMAIL_FROM_ADDRESS, emailTransport),
       emailFromName,
       emailLogoUrl,
-      brevoApiKey: readRequiredBrevoApiKey(env.BREVO_API_KEY),
+      emailLogFullLinks,
+      brevoApiKey,
       smtp: null,
     };
   }
   if (emailTransport === "smtp") {
+    const smtp = readSmtpConfig(env);
     return {
       emailTransport,
-      emailFromAddress,
+      emailFromAddress: readEmailFromAddress(env.EMAIL_FROM_ADDRESS, emailTransport),
       emailFromName,
       emailLogoUrl,
+      emailLogFullLinks,
       brevoApiKey: null,
-      smtp: readSmtpConfig(env),
+      smtp,
     };
   }
   return {
     emailTransport,
-    emailFromAddress,
+    emailFromAddress: readEmailFromAddress(env.EMAIL_FROM_ADDRESS, "log"),
     emailFromName,
     emailLogoUrl,
+    emailLogFullLinks,
     brevoApiKey: null,
     smtp: null,
   };
+}
+
+function readEmailLogFullLinks(env: NodeJS.ProcessEnv): boolean {
+  const raw = (env.EMAIL_LOG_LINKS ?? "").trim().toLowerCase();
+  if (raw.length === 0 || raw === "redacted") {
+    return false;
+  }
+  if (raw !== "full") {
+    throw new Error("EMAIL_LOG_LINKS must be redacted or full.");
+  }
+  if ((env.NODE_ENV ?? "").trim() === "production") {
+    throw new Error("EMAIL_LOG_LINKS=full is only allowed when NODE_ENV is not production.");
+  }
+  return true;
 }
 
 function readEmailLogoUrl(value: string | undefined): string | null {
@@ -179,10 +203,13 @@ function readEmailTransport(value: string | undefined): EmailTransport {
   throw new Error("EMAIL_TRANSPORT must be log, smtp, or brevo.");
 }
 
-function readEmailFromAddress(value: string | undefined): string {
+function readEmailFromAddress(value: string | undefined, transport: EmailTransport): string {
   const email = value?.trim() ?? "";
   if (email.length === 0) {
-    return DEFAULT_EMAIL_FROM_ADDRESS;
+    if (transport === "log") {
+      return LOG_EMAIL_FROM_ADDRESS;
+    }
+    throw new Error(`Set EMAIL_FROM_ADDRESS when EMAIL_TRANSPORT is ${transport}.`);
   }
   if (!isEmailAddress(email)) {
     throw new Error("EMAIL_FROM_ADDRESS must be an email address.");
