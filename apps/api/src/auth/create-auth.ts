@@ -116,7 +116,7 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        rejectClosedOrganizationAction(ctx.path, ctx.body);
+        rejectClosedOrganizationAction(ctx.path);
         if (!ctx.path?.includes("/api-key")) {
           return;
         }

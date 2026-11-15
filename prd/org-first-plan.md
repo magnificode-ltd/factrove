@@ -102,12 +102,13 @@ Closed for the whole project, not only the first pull request:
 - invite, accept, reject, cancel
 - remove member, update role, leave
 - delete (`disableOrganizationDeletion: true` as well)
-- `set-active` when `organizationId` or `organizationSlug` is null
+- `POST /organization/set-active`, for every body. A membership id, a slug, an omitted id, and a non-member id are all rejected before the plugin runs, so the stored active organization does not change.
+- `GET /organization/get-organization` and `GET /organization/get-full-organization`. A non-member id or slug on those reads clears the active organization inside the plugin, including from a cross-site navigation, because GET is not covered by the origin check.
 - any update that changes `slug`, `logo`, or `metadata`
 
 `allowUserToCreateOrganization` is false, so a signed-in user cannot create a second organization through the plugin. Do not set `organizationLimit: 1`. A later invite must be able to add a membership without a schema change.
 
-`check-slug`, list, and the other read routes may stay mounted. The UI does not call `check-slug`.
+`check-slug` and list stay mounted. The UI does not call `check-slug`.
 
 Rename of the display name is a later pull request. Until that lands, `beforeUpdateOrganization` rejects every update, including a name change.
 
@@ -119,7 +120,7 @@ Rename of the display name is a later pull request. Until that lands, `beforeUpd
 
 On session create, when the user has exactly one membership, set the column to it. The backfill migration does the same for sessions that already exist.
 
-The client cannot send the field. `set-active` to an organization the user belongs to stays available for a later switcher and for the 409 case. There is no switcher in this work. `set-active` null stays rejected.
+The client cannot send the field. `set-active` is rejected for every body and does not change the stored session. There is no switcher in this work. Several memberships and no valid active id stay a 409 from the guard. That response is not cleared by calling `set-active`.
 
 ## 6. API keys
 
@@ -145,7 +146,7 @@ Billing later is an owner action. When it is built, treat the role as owner if t
 | Second organization | No |
 | Invites | No |
 | Members page | No |
-| Organization switcher | No. `set-active` to a real membership stays for the 409 case |
+| Organization switcher | No. `set-active` is rejected and does not change the session |
 | Rename display name | Yes, owner only, in its own pull request |
 | Change slug, logo, metadata | No |
 | Delete organization | No. Artifacts reference the organization with `ON DELETE RESTRICT` |
@@ -188,7 +189,9 @@ New error codes in `@factrove/contracts` when the guard lands:
 First pull request (this one):
 
 - Signup without an organization name still returns a session and no membership.
-- Create, update, delete, invite, accept, reject, cancel, remove member, role change, leave, and `set-active` null return 403 with `This organization action is not available.`
+- Create, update, delete, invite, accept, reject, cancel, remove member, role change, leave, and every `set-active` body return 403 with `This organization action is not available.`
+- Against a session whose active organization is already set, `set-active` with an organization id, a slug, an omitted body, and a non-member id returns 403 and leaves that stored id unchanged.
+- `GET /organization/get-organization` and `GET /organization/get-full-organization`, including `?organizationSlug=outsider`, return 403 and leave the stored active id unchanged.
 - `check-slug` is not that 403. Listing organizations after a rejected create still returns an empty list.
 
 Create-organization pull request:
@@ -202,7 +205,7 @@ Guard pull request:
 
 - Zero memberships: list, get, upload, replace, rename, delete, share, context, and API-key create return `403 ORGANIZATION_SETUP_REQUIRED`.
 - Health, a public share, `get-session`, and sign-out still succeed.
-- Two memberships and a null active id return 409 on a product route. `set-active` to one of those ids, then the product route succeeds.
+- Two memberships and a null active id return 409 on a product route. That pull request does not call `set-active`.
 
 Backfill pull request:
 

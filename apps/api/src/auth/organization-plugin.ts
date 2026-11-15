@@ -14,6 +14,9 @@ const CLOSED_ORGANIZATION_SUFFIXES = [
   "/organization/remove-member",
   "/organization/update-member-role",
   "/organization/leave",
+  "/organization/set-active",
+  "/organization/get-full-organization",
+  "/organization/get-organization",
 ] as const;
 
 function closedOrganizationAction(): never {
@@ -64,27 +67,18 @@ export function factroveOrganization() {
   });
 }
 
-export function rejectClosedOrganizationAction(path: string | undefined, body: unknown): void {
+export function rejectClosedOrganizationAction(path: string | undefined): void {
   const normalized = normalizeAuthPath(path);
   if (!normalized) {
     return;
   }
-  if (CLOSED_ORGANIZATION_SUFFIXES.some((suffix) => normalized === suffix || normalized.endsWith(suffix))) {
+  if (CLOSED_ORGANIZATION_SUFFIXES.some((suffix) => matchesClosedPath(normalized, suffix))) {
     closedOrganizationAction();
-  }
-  if (normalized === "/organization/set-active" || normalized.endsWith("/organization/set-active")) {
-    if (clearsActiveOrganization(body)) {
-      closedOrganizationAction();
-    }
   }
 }
 
-function clearsActiveOrganization(body: unknown): boolean {
-  if (typeof body !== "object" || body === null) {
-    return false;
-  }
-  const record = body as { organizationId?: unknown; organizationSlug?: unknown };
-  return record.organizationId === null || record.organizationSlug === null;
+function matchesClosedPath(path: string, suffix: string): boolean {
+  return path === suffix || path.endsWith(suffix);
 }
 
 function normalizeAuthPath(path: string | undefined): string | null {

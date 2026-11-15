@@ -81,7 +81,7 @@ A private artifact can still record an organization. That does not put it in the
 
 ## Organization membership
 
-User and Organization come from Better Auth. Runtime sign-in is email and password. The organization plugin's HTTP routes are mounted. Creating or deleting an organization, inviting or removing members, changing roles, leaving, renaming, and clearing the active organization are rejected. Membership is read from the `member` table.
+User and Organization come from Better Auth. Runtime sign-in is email and password. The organization plugin's HTTP routes are mounted. Creating or deleting an organization, inviting or removing members, changing roles, leaving, renaming, and switching or clearing the active organization are rejected. Reading another organization through the organization routes is rejected too. Membership is read from the `member` table.
 
 Signup creates a user and no membership. `pnpm db:seed` upserts the fixture user `local-user` and the organization `local-org` and does not insert a member row. `local-user` has no password. `pnpm db:claim-local-artifacts` adds memberships only for organizations already referenced by artifacts it reassigns from `local-user`.
 
@@ -94,7 +94,7 @@ values ('member-example', 'local-org', '<user-id>', 'member', now());
 
 Look up `<user-id>` with `select id from "user" where email = 'you@example.com'`. The organization id must already exist. `local-org` is the seeded organization.
 
-The current organization is the session's active organization when the user is a member of it. Otherwise it is the user's only membership. With more than one membership and no active organization, it is null. The organization plugin stores `activeOrganizationId` on the session with `input: false`, so a stored value is returned with the session and callers cannot set it on sign-in. Clearing that id through the organization routes is rejected. An id is ignored unless that user has a membership for it. An API key has no active organization, so it uses the sole-membership rule. `factrove upload --access org_shared` needs that current organization. The example fails with `400 ORGANIZATION_REQUIRED` until the membership exists.
+The current organization is the session's active organization when the user is a member of it. Otherwise it is the user's only membership. With more than one membership and no active organization, it is null. The organization plugin stores `activeOrganizationId` on the session with `input: false`, so a stored value is returned with the session and callers cannot set it on sign-in. Switching or clearing that id through the organization routes is rejected, and those requests do not change the stored session. An id is ignored unless that user has a membership for it. An API key has no active organization, so it uses the sole-membership rule. `factrove upload --access org_shared` needs that current organization. The example fails with `400 ORGANIZATION_REQUIRED` until the membership exists.
 
 ## Identity
 

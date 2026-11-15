@@ -10,22 +10,16 @@ import { TEST_AUTH_SECRET } from "./auth-session.js";
 
 describe("closed organization routes", () => {
   it("rejects management writes and clearing the active organization", () => {
-    expect(() => rejectClosedOrganizationAction("/organization/create", { name: "Ada", slug: "ada" })).toThrow(
+    expect(() => rejectClosedOrganizationAction("/organization/create")).toThrow(ORGANIZATION_ACTION_UNAVAILABLE);
+    expect(() => rejectClosedOrganizationAction("organization/update-member-role")).toThrow(ORGANIZATION_ACTION_UNAVAILABLE);
+    expect(() => rejectClosedOrganizationAction("/organization/set-active")).toThrow(ORGANIZATION_ACTION_UNAVAILABLE);
+    expect(() => rejectClosedOrganizationAction("/organization/get-organization?organizationSlug=outsider")).toThrow(
       ORGANIZATION_ACTION_UNAVAILABLE,
     );
-    expect(() => rejectClosedOrganizationAction("organization/update-member-role", { role: "admin" })).toThrow(
-      ORGANIZATION_ACTION_UNAVAILABLE,
-    );
-    expect(() => rejectClosedOrganizationAction("/organization/set-active", { organizationId: null })).toThrow(
-      ORGANIZATION_ACTION_UNAVAILABLE,
-    );
-    expect(() => rejectClosedOrganizationAction("/organization/set-active", { organizationSlug: null })).toThrow(
-      ORGANIZATION_ACTION_UNAVAILABLE,
-    );
-    expect(() => rejectClosedOrganizationAction("/organization/check-slug", { slug: "ada" })).not.toThrow();
-    expect(() => rejectClosedOrganizationAction("/organization/list", undefined)).not.toThrow();
-    expect(() => rejectClosedOrganizationAction("/organization/set-active", { organizationId: "org-1" })).not.toThrow();
-    expect(() => rejectClosedOrganizationAction("/sign-up/email", { name: "Ada", email: "a@example.com", password: "password-1" })).not.toThrow();
+    expect(() => rejectClosedOrganizationAction("/organization/get-full-organization")).toThrow(ORGANIZATION_ACTION_UNAVAILABLE);
+    expect(() => rejectClosedOrganizationAction("/organization/check-slug")).not.toThrow();
+    expect(() => rejectClosedOrganizationAction("/organization/list")).not.toThrow();
+    expect(() => rejectClosedOrganizationAction("/sign-up/email")).not.toThrow();
   });
 
   it("signs up without an organization and rejects the mounted management routes", async () => {
@@ -71,6 +65,8 @@ describe("closed organization routes", () => {
       { path: "/organization/leave", body: { organizationId: "org-1" } },
       { path: "/organization/set-active", body: { organizationId: null } },
       { path: "/organization/set-active", body: { organizationSlug: null } },
+      { path: "/organization/set-active", body: { organizationId: "org-1" } },
+      { path: "/organization/set-active", body: {} },
     ];
     for (const route of closed) {
       const response = await auth.handler(jsonRequest(route.path, cookie, route.body));
@@ -86,7 +82,83 @@ describe("closed organization routes", () => {
     }));
     expect(await stillEmpty.json()).toEqual([]);
   });
+
+  it("leaves the stored active organization unchanged when set-active and organization reads are rejected", async () => {
+    const db: Record<string, Array<Record<string, unknown>>> = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      apikey: [],
+      organization: [],
+      member: [],
+      invitation: [],
+    };
+    const auth = createAuth({
+      prisma: {} as PrismaClient,
+      database: memoryAdapter(db),
+      baseURL: "http://localhost:3001",
+      secret: TEST_AUTH_SECRET,
+      trustedOrigins: ["http://localhost:3000"],
+      cookieDomain: null,
+      onUserCreated: async () => {},
+    });
+    const created = await auth.handler(signUpRequest("org-active@example.invalid"));
+    expect(created.status).toBe(200);
+    const cookie = cookieHeader(created);
+    const session = db.session[0];
+    expect(session?.userId).toEqual(expect.any(String));
+    const userId = session?.userId;
+    const now = new Date();
+    db.organization.push(
+      { id: "home-org", name: "Home", slug: "home", createdAt: now },
+      { id: "other-org", name: "Other", slug: "other", createdAt: now },
+      { id: "outsider-org", name: "Outsider", slug: "outsider", createdAt: now },
+    );
+    db.member.push(
+      { id: "member-home", organizationId: "home-org", userId, role: "owner", createdAt: now },
+      { id: "member-other", organizationId: "other-org", userId, role: "member", createdAt: now },
+    );
+    session.activeOrganizationId = "home-org";
+
+    const posts: unknown[] = [
+      { organizationId: "other-org" },
+      { organizationSlug: "other" },
+      {},
+      { organizationId: "outsider-org" },
+      { organizationSlug: "outsider" },
+    ];
+    for (const body of posts) {
+      const response = await auth.handler(jsonRequest("/organization/set-active", cookie, body));
+      const text = await response.text();
+      expect(response.status, text).toBe(403);
+      expect(text).toContain(ORGANIZATION_ACTION_UNAVAILABLE);
+      expect(storedActiveOrganizationId(db, userId)).toBe("home-org");
+    }
+
+    const reads = [
+      "/organization/get-organization?organizationId=outsider-org",
+      "/organization/get-organization?organizationSlug=outsider",
+      "/organization/get-full-organization?organizationId=outsider-org",
+      "/organization/get-full-organization?organizationSlug=outsider",
+      "/organization/get-organization",
+      "/organization/get-full-organization",
+    ];
+    for (const path of reads) {
+      const response = await auth.handler(new Request(`http://localhost:3001/api/auth${path}`, {
+        headers: { cookie },
+      }));
+      const text = await response.text();
+      expect(response.status, `${path} ${text}`).toBe(403);
+      expect(text).toContain(ORGANIZATION_ACTION_UNAVAILABLE);
+      expect(storedActiveOrganizationId(db, userId)).toBe("home-org");
+    }
+  });
 });
+
+function storedActiveOrganizationId(db: Record<string, Array<Record<string, unknown>>>, userId: unknown): unknown {
+  return db.session.find((row) => row.userId === userId)?.activeOrganizationId;
+}
 
 function signUpRequest(email: string): Request {
   return jsonRequest("/sign-up/email", undefined, {
