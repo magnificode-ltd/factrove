@@ -169,8 +169,14 @@ describe("create the first organization", () => {
       const spoofed = await postOrganizationFrom(port, "127.0.0.1");
       expect(spoofed).toBe(429);
 
+      const absoluteForm = await postOrganizationAbsolute(port, "127.0.0.1");
+      expect(absoluteForm).toBe(429);
+
       const secondPeer = await postOrganizationFrom(port, "127.0.0.2");
       expect(secondPeer).toBe(401);
+
+      const absoluteOtherPeer = await postOrganizationAbsolute(port, "127.0.0.2");
+      expect(absoluteOtherPeer).toBe(401);
     } finally {
       await limited.close();
     }
@@ -193,6 +199,34 @@ function postOrganizationFrom(port: number, localAddress: string): Promise<numbe
           "content-length": Buffer.byteLength(body),
           "x-forwarded-for": "203.0.113.9",
           [CLIENT_IP_HEADER]: "198.51.100.9",
+        },
+      },
+      (response) => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode ?? 0));
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+function postOrganizationAbsolute(port: number, localAddress: string): Promise<number> {
+  const body = JSON.stringify({ name: "Nope" });
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        localAddress,
+        method: "POST",
+        path: `http://127.0.0.1:${port}/api/v1/onboarding/organization`,
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:3000",
+          "content-length": Buffer.byteLength(body),
+          "x-forwarded-for": "203.0.113.9",
+          [CLIENT_IP_HEADER]: "198.51.100.50",
         },
       },
       (response) => {
