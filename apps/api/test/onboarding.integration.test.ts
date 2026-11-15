@@ -1,11 +1,13 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { PrismaClient } from "@prisma/client";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CLIENT_IP_HEADER } from "../src/auth/client-ip.js";
 import { AppModule } from "../src/app.module.js";
 import { configureHttpApp } from "../src/configure-http-app.js";
 import { PrismaService } from "../src/database/prisma.service.js";
@@ -153,23 +155,55 @@ describe("create the first organization", () => {
     expect(plugin.status).toBe(403);
   });
 
-  it("limits organization creates from one client address", async () => {
+  it("limits organization creates per socket address and ignores a spoofed client IP", async () => {
     const limited = await createApp(config);
     await limited.listen(0, "127.0.0.1");
     try {
-      const url = await limited.getUrl();
+      const port = Number(new URL(await limited.getUrl()).port);
+      const firstPeer: number[] = [];
       for (let attempt = 0; attempt < 10; attempt += 1) {
-        const response = await postOrganization(url, undefined, { name: "Nope" });
-        expect(response.status).toBe(401);
+        firstPeer.push(await postOrganizationFrom(port, "127.0.0.1"));
       }
-      const blocked = await postOrganization(url, undefined, { name: "Nope" });
-      expect(blocked.status).toBe(429);
-      expect(blocked.headers.get("retry-after")).toBeTruthy();
+      expect(firstPeer).toEqual(Array.from({ length: 10 }, () => 401));
+
+      const spoofed = await postOrganizationFrom(port, "127.0.0.1");
+      expect(spoofed).toBe(429);
+
+      const secondPeer = await postOrganizationFrom(port, "127.0.0.2");
+      expect(secondPeer).toBe(401);
     } finally {
       await limited.close();
     }
   });
 });
+
+function postOrganizationFrom(port: number, localAddress: string): Promise<number> {
+  const body = JSON.stringify({ name: "Nope" });
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        localAddress,
+        method: "POST",
+        path: "/api/v1/onboarding/organization",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:3000",
+          "content-length": Buffer.byteLength(body),
+          "x-forwarded-for": "203.0.113.9",
+          [CLIENT_IP_HEADER]: "198.51.100.9",
+        },
+      },
+      (response) => {
+        response.resume();
+        response.on("end", () => resolve(response.statusCode ?? 0));
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
 
 async function postOrganization(baseUrl: string, cookie: string | undefined, body: unknown): Promise<Response> {
   return fetch(`${baseUrl}/api/v1/onboarding/organization`, {

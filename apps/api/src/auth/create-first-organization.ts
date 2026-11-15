@@ -66,6 +66,7 @@ export class CreateFirstOrganizationService {
   }
 
   private limit(request: HeaderSource, now: number): void {
+    // configureHttpApp assigns this header from the socket and drops a caller-supplied value.
     const key = readAssignedClientIp(request.headers) ?? "unknown";
     const recent = (this.attempts.get(key) ?? []).filter((at) => now - at < WINDOW_MS);
     if (recent.length >= MAX_ATTEMPTS) {

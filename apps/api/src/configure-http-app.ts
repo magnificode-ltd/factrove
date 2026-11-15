@@ -57,6 +57,14 @@ export function configureHttpApp(app: INestApplication): void {
     assignClientIpForPublicPath(request, config.trustedProxies);
     next();
   });
+  // Organization creation is rate limited by this header. Strip a caller-supplied
+  // value and set it from the socket, the same way /api/auth does.
+  app.use((request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    if (isOnboardingPath(requestPath(request))) {
+      assignClientIp(request, config.trustedProxies);
+    }
+    next();
+  });
   app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
     void toNodeHandler(auth.handler())(request, response);
   });
@@ -94,6 +102,11 @@ function applyCors(request: IncomingMessage, response: ServerResponse, origins: 
   response.statusCode = 204;
   response.end();
   return true;
+}
+
+function isOnboardingPath(path: string): boolean {
+  const normalized = path.split("?")[0]?.toLowerCase() ?? "";
+  return normalized === "/api/v1/onboarding" || normalized.startsWith("/api/v1/onboarding/");
 }
 
 function allowedMethods(publicApi: boolean, path: string): string {
