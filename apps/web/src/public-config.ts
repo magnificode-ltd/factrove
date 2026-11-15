@@ -67,13 +67,17 @@ export function sourceCodeUrl(env?: RuntimeEnv): string {
 }
 
 export function readDocsBaseUrl(value: string | undefined): string | undefined {
-  const href = readSourceCodeUrl(value);
-  if (!href) {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
     return undefined;
   }
-  const url = new URL(href);
-  // A query or hash would swallow the path docsUrl appends.
-  if (url.search !== "" || url.hash !== "") {
+  // URL.search and URL.hash are empty for a bare trailing "?" or "#", and
+  // docsUrl would then append its path after that marker.
+  if (raw.includes("?") || raw.includes("#")) {
+    return undefined;
+  }
+  const href = readSourceCodeUrl(raw);
+  if (!href) {
     return undefined;
   }
   return href.replace(/\/+$/, "");

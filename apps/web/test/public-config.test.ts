@@ -86,6 +86,8 @@ describe("public API origin", () => {
     expect(readDocsBaseUrl("   ")).toBeUndefined();
     expect(readDocsBaseUrl("https://docs.example.com/?lang=en")).toBeUndefined();
     expect(readDocsBaseUrl("https://docs.example.com/#guide")).toBeUndefined();
+    expect(readDocsBaseUrl("https://docs.example.com/?")).toBeUndefined();
+    expect(readDocsBaseUrl("https://docs.example.com/#")).toBeUndefined();
     expect(docsBaseUrl({})).toBe(DEFAULT_DOCS_BASE_URL);
     expect(docsBaseUrl({ DOCS_BASE_URL: "" })).toBe(DEFAULT_DOCS_BASE_URL);
     expect(docsBaseUrl({ DOCS_BASE_URL: "   " })).toBe(DEFAULT_DOCS_BASE_URL);
@@ -102,7 +104,17 @@ describe("public API origin", () => {
     process.env.DOCS_BASE_URL = "https://docs.example.com/#guide";
     expect(docsUrl("/cli-reference/overview")).toBe(`${DEFAULT_DOCS_BASE_URL}/cli-reference/overview`);
     expect(docsUrl("/cli-reference/overview")).not.toContain("#guide/");
-    expect(warn).toHaveBeenCalledTimes(7);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "https://docs.example.com/?" })).toBe(DEFAULT_DOCS_BASE_URL);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "https://docs.example.com/#" })).toBe(DEFAULT_DOCS_BASE_URL);
+    process.env.DOCS_BASE_URL = "https://docs.example.com/?";
+    const bareQuery = docsUrl("/cli-reference/overview");
+    expect(bareQuery).toBe(`${DEFAULT_DOCS_BASE_URL}/cli-reference/overview`);
+    expect(bareQuery).not.toContain("?/");
+    process.env.DOCS_BASE_URL = "https://docs.example.com/#";
+    const bareHash = docsUrl("/cli-reference/overview");
+    expect(bareHash).toBe(`${DEFAULT_DOCS_BASE_URL}/cli-reference/overview`);
+    expect(bareHash).not.toContain("#/");
+    expect(warn).toHaveBeenCalledTimes(11);
   });
 
   it("uses the browser API origin for the CLI and skips the internal address", () => {
