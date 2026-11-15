@@ -2,12 +2,17 @@ name: Publish images
 
 # Publishes the existing Dockerfile targets to GHCR.
 # factrove-api is target api. factrove-web is target web.
-# The job runs on ubuntu-24.04-arm, so linux/arm64 is a native build.
+# Each image is built natively: linux/amd64 on ubuntu-24.04 and linux/arm64
+# on ubuntu-24.04-arm. There is no QEMU.
+# A build pushes that architecture by digest and does not apply tags.
+# A merge job per image creates the multi-arch manifest and applies tags.
 # Pull requests are built without a push by docker-images.yml.
 # This workflow does not run for pull requests, including forks.
 # Each image is tagged with the bare commit SHA (long and short), sha-<long>,
 # sha-<short>, and latest on the default branch. Bare SHA tags stay so an
-# existing reference keeps resolving. factrove-cloud accepts sha- tags.
+# existing reference keeps resolving. Images are tagged sha-<commit>.
+# Cache scopes are per image and architecture. The web build still reads the
+# API cache for the same architecture.
 
 on:
   push:
@@ -17,7 +22,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-ghcr-${{ github.repository }}
@@ -26,12 +30,36 @@ concurrency:
 env:
   API_IMAGE: ghcr.io/magnificode-ltd/factrove-api
   WEB_IMAGE: ghcr.io/magnificode-ltd/factrove-web
+  IMAGE_FLAVOR: |
+    latest=false
+  IMAGE_TAGS: |
+    type=sha,format=long,prefix=
+    type=sha,format=short,prefix=
+    type=sha,format=long,prefix=sha-
+    type=sha,format=short,prefix=sha-
+    type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+  IMAGE_LABELS: |
+    org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+    org.opencontainers.image.revision=${{ github.sha }}
+    org.opencontainers.image.licenses=AGPL-3.0-or-later
 
 jobs:
-  publish:
-    name: Publish linux/arm64
-    runs-on: ubuntu-24.04-arm
+  build-api:
+    name: Build API (linux/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      actions: write
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,81 +75,424 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: API image metadata
-        id: meta-api
+        id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.API_IMAGE }}
-          flavor: |
-            latest=false
-          tags: |
-            type=sha,format=long,prefix=
-            type=sha,format=short,prefix=
-            type=sha,format=long,prefix=sha-
-            type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          flavor: ${{ env.IMAGE_FLAVOR }}
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: ${{ env.IMAGE_LABELS }}
 
-      - name: Build and push the API image
-        id: build-api
+      - name: Build and push the API image by digest
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: api
-          platforms: linux/arm64
-          push: true
+          platforms: linux/${{ matrix.arch }}
+          push: false
           provenance: false
           sbom: false
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha,scope=factrove-api
-          cache-to: type=gha,scope=factrove-api,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.API_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=factrove-api-${{ matrix.arch }}
+          cache-to: type=gha,scope=factrove-api-${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          : "${DIGEST:?}"
+          : "${RUNNER_TEMP:?}"
+          case "${DIGEST}" in
+            sha256:*) ;;
+            *)
+              printf 'build did not return a sha256 digest\n' >&2
+              exit 1
+              ;;
+          esac
+          hex="${DIGEST#sha256:}"
+          case "${hex}" in
+            *[!a-f0-9]*)
+              printf 'build digest is not hex\n' >&2
+              exit 1
+              ;;
+          esac
+          if [ "${#hex}" -ne 64 ]; then
+            printf 'build digest is not 64 hex characters\n' >&2
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${hex}"
+          printf '%s\n' "${DIGEST}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-api-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-web:
+    name: Build web (linux/${{ matrix.arch }})
+    needs: build-api
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      actions: write
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Web image metadata
-        id: meta-web
+        id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.WEB_IMAGE }}
-          flavor: |
-            latest=false
-          tags: |
-            type=sha,format=long,prefix=
-            type=sha,format=short,prefix=
-            type=sha,format=long,prefix=sha-
-            type=sha,format=short,prefix=sha-
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          flavor: ${{ env.IMAGE_FLAVOR }}
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: ${{ env.IMAGE_LABELS }}
 
-      - name: Build and push the web image
-        id: build-web
+      - name: Build and push the web image by digest
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: web
-          platforms: linux/arm64
-          push: true
+          platforms: linux/${{ matrix.arch }}
+          push: false
           provenance: false
           sbom: false
-          tags: ${{ steps.meta-web.outputs.tags }}
-          labels: ${{ steps.meta-web.outputs.labels }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.WEB_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
-            type=gha,scope=factrove-web
-            type=gha,scope=factrove-api
-          cache-to: type=gha,scope=factrove-web,mode=max
+            type=gha,scope=factrove-web-${{ matrix.arch }}
+            type=gha,scope=factrove-api-${{ matrix.arch }}
+          cache-to: type=gha,scope=factrove-web-${{ matrix.arch }},mode=max
 
-      - name: Record published digests
-        run: |
-          printf 'API %s\n' "$API_DIGEST"
-          printf 'API tags:\n%s\n' "$API_TAGS"
-          printf 'Web %s\n' "$WEB_DIGEST"
-          printf 'Web tags:\n%s\n' "$WEB_TAGS"
+      - name: Export digest
         env:
-          API_DIGEST: ${{ steps.build-api.outputs.digest }}
-          WEB_DIGEST: ${{ steps.build-web.outputs.digest }}
-          API_TAGS: ${{ steps.meta-api.outputs.tags }}
-          WEB_TAGS: ${{ steps.meta-web.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          : "${DIGEST:?}"
+          : "${RUNNER_TEMP:?}"
+          case "${DIGEST}" in
+            sha256:*) ;;
+            *)
+              printf 'build did not return a sha256 digest\n' >&2
+              exit 1
+              ;;
+          esac
+          hex="${DIGEST#sha256:}"
+          case "${hex}" in
+            *[!a-f0-9]*)
+              printf 'build digest is not hex\n' >&2
+              exit 1
+              ;;
+          esac
+          if [ "${#hex}" -ne 64 ]; then
+            printf 'build digest is not 64 hex characters\n' >&2
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${hex}"
+          printf '%s\n' "${DIGEST}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-web-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-api:
+    name: Publish API manifest
+    needs: build-api
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      packages: write
+    steps:
+      - name: Download API digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-api-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: API image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.API_IMAGE }}
+          flavor: ${{ env.IMAGE_FLAVOR }}
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: ${{ env.IMAGE_LABELS }}
+
+      - name: Create and push the API manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.API_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          : "${IMAGE:?}"
+          : "${TAGS:?}"
+          shopt -s nullglob
+          hexes=()
+          for path in *; do
+            if [ ! -f "${path}" ]; then
+              printf 'unexpected digest path: %s\n' "${path}" >&2
+              exit 1
+            fi
+            case "${path}" in
+              *[!a-f0-9]*)
+                printf 'unexpected digest file: %s\n' "${path}" >&2
+                exit 1
+                ;;
+            esac
+            if [ "${#path}" -ne 64 ]; then
+              printf 'unexpected digest file: %s\n' "${path}" >&2
+              exit 1
+            fi
+            hexes+=("${path}")
+          done
+          if [ "${#hexes[@]}" -ne 2 ]; then
+            printf 'expected 2 architecture digests, found %s\n' "${#hexes[@]}" >&2
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag || [ -n "${tag}" ]; do
+            if [ -z "${tag}" ]; then
+              continue
+            fi
+            case "${tag}" in
+              "${IMAGE}:"*) ;;
+              *)
+                printf 'refusing tag outside %s: %s\n' "${IMAGE}" "${tag}" >&2
+                exit 1
+                ;;
+            esac
+            args+=(-t "${tag}")
+          done <<< "${TAGS}"
+          if [ "${#args[@]}" -eq 0 ]; then
+            printf 'metadata action returned no tags\n' >&2
+            exit 1
+          fi
+          sources=()
+          for hex in "${hexes[@]}"; do
+            sources+=("${IMAGE}@sha256:${hex}")
+          done
+          printf 'tags:\n%s\n' "${TAGS}"
+          printf 'sources:\n'
+          printf '  %s\n' "${sources[@]}"
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+
+      - name: Inspect the API image
+        env:
+          IMAGE: ${{ env.API_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          : "${IMAGE:?}"
+          : "${TAGS:?}"
+          : "${GITHUB_SHA:?}"
+          ref="${IMAGE}:sha-${GITHUB_SHA}"
+          found=0
+          while IFS= read -r tag || [ -n "${tag}" ]; do
+            if [ -z "${tag}" ]; then
+              continue
+            fi
+            if [ "${tag}" = "${ref}" ]; then
+              found=1
+            fi
+            docker buildx imagetools inspect "${tag}"
+          done <<< "${TAGS}"
+          if [ "${found}" -ne 1 ]; then
+            printf 'missing tag %s\n' "${ref}" >&2
+            exit 1
+          fi
+          raw="$(docker buildx imagetools inspect --raw "${ref}")"
+          if ! printf '%s\n' "${raw}" | jq -e '
+            [
+              .manifests[]
+              | {os: .platform.os, architecture: .platform.architecture}
+            ]
+            | sort_by(.architecture) == [
+                {architecture: "amd64", os: "linux"},
+                {architecture: "arm64", os: "linux"}
+              ]
+          ' >/dev/null; then
+            printf 'expected linux/amd64 and linux/arm64 in %s\n' "${ref}" >&2
+            printf '%s\n' "${raw}" | jq -c '[.manifests[]?.platform]' >&2 || true
+            exit 1
+          fi
+
+  merge-web:
+    name: Publish web manifest
+    needs: build-web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      packages: write
+    steps:
+      - name: Download web digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-web-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Web image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.WEB_IMAGE }}
+          flavor: ${{ env.IMAGE_FLAVOR }}
+          tags: ${{ env.IMAGE_TAGS }}
+          labels: ${{ env.IMAGE_LABELS }}
+
+      - name: Create and push the web manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.WEB_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          : "${IMAGE:?}"
+          : "${TAGS:?}"
+          shopt -s nullglob
+          hexes=()
+          for path in *; do
+            if [ ! -f "${path}" ]; then
+              printf 'unexpected digest path: %s\n' "${path}" >&2
+              exit 1
+            fi
+            case "${path}" in
+              *[!a-f0-9]*)
+                printf 'unexpected digest file: %s\n' "${path}" >&2
+                exit 1
+                ;;
+            esac
+            if [ "${#path}" -ne 64 ]; then
+              printf 'unexpected digest file: %s\n' "${path}" >&2
+              exit 1
+            fi
+            hexes+=("${path}")
+          done
+          if [ "${#hexes[@]}" -ne 2 ]; then
+            printf 'expected 2 architecture digests, found %s\n' "${#hexes[@]}" >&2
+            exit 1
+          fi
+          args=()
+          while IFS= read -r tag || [ -n "${tag}" ]; do
+            if [ -z "${tag}" ]; then
+              continue
+            fi
+            case "${tag}" in
+              "${IMAGE}:"*) ;;
+              *)
+                printf 'refusing tag outside %s: %s\n' "${IMAGE}" "${tag}" >&2
+                exit 1
+                ;;
+            esac
+            args+=(-t "${tag}")
+          done <<< "${TAGS}"
+          if [ "${#args[@]}" -eq 0 ]; then
+            printf 'metadata action returned no tags\n' >&2
+            exit 1
+          fi
+          sources=()
+          for hex in "${hexes[@]}"; do
+            sources+=("${IMAGE}@sha256:${hex}")
+          done
+          printf 'tags:\n%s\n' "${TAGS}"
+          printf 'sources:\n'
+          printf '  %s\n' "${sources[@]}"
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+
+      - name: Inspect the web image
+        env:
+          IMAGE: ${{ env.WEB_IMAGE }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          : "${IMAGE:?}"
+          : "${TAGS:?}"
+          : "${GITHUB_SHA:?}"
+          ref="${IMAGE}:sha-${GITHUB_SHA}"
+          found=0
+          while IFS= read -r tag || [ -n "${tag}" ]; do
+            if [ -z "${tag}" ]; then
+              continue
+            fi
+            if [ "${tag}" = "${ref}" ]; then
+              found=1
+            fi
+            docker buildx imagetools inspect "${tag}"
+          done <<< "${TAGS}"
+          if [ "${found}" -ne 1 ]; then
+            printf 'missing tag %s\n' "${ref}" >&2
+            exit 1
+          fi
+          raw="$(docker buildx imagetools inspect --raw "${ref}")"
+          if ! printf '%s\n' "${raw}" | jq -e '
+            [
+              .manifests[]
+              | {os: .platform.os, architecture: .platform.architecture}
+            ]
+            | sort_by(.architecture) == [
+                {architecture: "amd64", os: "linux"},
+                {architecture: "arm64", os: "linux"}
+              ]
+          ' >/dev/null; then
+            printf 'expected linux/amd64 and linux/arm64 in %s\n' "${ref}" >&2
+            printf '%s\n' "${raw}" | jq -c '[.manifests[]?.platform]' >&2 || true
+            exit 1
+          fi
