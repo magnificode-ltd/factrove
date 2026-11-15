@@ -11,12 +11,14 @@ export function buildVerificationEmail(input: {
   recipient: { email: string; name: string };
   verifyUrl: string;
   supportEmail: string;
+  siteUrl: string;
   logoUrl?: string | null;
 }): OutboundEmail {
   const email = input.recipient.email.trim();
   const name = oneLine(input.recipient.name);
   const verifyUrl = input.verifyUrl.trim();
   const supportEmail = input.supportEmail.trim();
+  const siteUrl = input.siteUrl.trim();
   const logoUrl = input.logoUrl?.trim() ?? "";
   const greeting = name.length > 0 ? `Hi ${name},` : "Hi,";
   const ready = `Your Factrove account for ${email} is ready.`;
@@ -33,7 +35,7 @@ export function buildVerificationEmail(input: {
     "",
     REASON,
     `Contact ${supportEmail} if you need help.`,
-    "Factrove: https://factrove.app",
+    `Factrove: ${siteUrl}`,
   ].join("\n");
   const bodyHtml = `${escapeHtml(greeting)}<br>${escapeHtml(ready)}<br>${escapeHtml(confirm)}`;
   return {
@@ -48,6 +50,7 @@ export function buildVerificationEmail(input: {
       actionLabel: "Confirm email",
       actionUrl: verifyUrl,
       supportEmail,
+      siteUrl,
       logoUrl,
       reason: REASON,
     }),

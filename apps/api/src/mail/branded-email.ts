@@ -2,9 +2,8 @@
 // peri #858bee, ink #1b2037, cloud #f5f6fc, and Inter with a system-ui fallback.
 // "fac" and "rove" are peri. The "t" is ink. An empty logo URL uses that text
 // mark. A set logo URL is an image, and its alt text is the wordmark when the
-// image does not load. Callers own the wording and the action URL.
-
-export const FACTROVE_SITE_URL = "https://factrove.app";
+// image does not load. Callers own the wording, the action URL, and the
+// footer link. The footer text stays "Factrove". The href is the instance origin.
 
 const FONT = "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif";
 const WRAP = "word-break:break-word; overflow-wrap:anywhere;";
@@ -19,6 +18,8 @@ export type BrandedEmailInput = {
   actionLabel: string;
   actionUrl: string;
   supportEmail: string;
+  // Instance origin. The footer link text stays "Factrove".
+  siteUrl: string;
   logoUrl: string;
   reason: string;
 };
@@ -30,7 +31,7 @@ export function renderBrandedEmail(input: BrandedEmailInput): string {
   const actionLabel = escapeHtml(input.actionLabel);
   const supportEmail = escapeHtml(input.supportEmail);
   const reason = escapeHtml(input.reason);
-  const siteUrl = escapeHtml(FACTROVE_SITE_URL);
+  const siteUrl = escapeHtml(input.siteUrl.trim());
   return [
     "<!DOCTYPE html>",
     '<html lang="en" xmlns="http://www.w3.org/1999/xhtml">',

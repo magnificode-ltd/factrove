@@ -54,6 +54,7 @@ export class InviteMailer implements OnApplicationShutdown {
       recipient: { email, name: recipient.name },
       signInUrl: `${this.config.webOrigin}/login`,
       supportEmail: this.config.emailFromAddress,
+      siteUrl: this.config.webOrigin,
       logoUrl: this.config.emailLogoUrl,
     }));
   }
@@ -67,6 +68,7 @@ export class InviteMailer implements OnApplicationShutdown {
       recipient: { email, name: message.name },
       resetUrl: message.resetUrl,
       supportEmail: this.config.emailFromAddress,
+      siteUrl: this.config.webOrigin,
       logoUrl: this.config.emailLogoUrl,
     }));
   }
@@ -80,6 +82,7 @@ export class InviteMailer implements OnApplicationShutdown {
       recipient: { email, name: message.name },
       verifyUrl: message.verifyUrl,
       supportEmail: this.config.emailFromAddress,
+      siteUrl: this.config.webOrigin,
       logoUrl: this.config.emailLogoUrl,
     }));
   }

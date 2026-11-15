@@ -26,6 +26,7 @@ describe("verification email", () => {
       recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada <script> " },
       verifyUrl: verifyUrl ?? "",
       supportEmail: "support@factrove.app",
+      siteUrl: WEB_ORIGIN,
     });
     expect(message.subject).toBe(VERIFICATION_EMAIL_SUBJECT);
     expect(message.purpose).toBe("Verification email");
@@ -35,6 +36,10 @@ describe("verification email", () => {
     expect(message.html).toContain("Hi Ada &lt;script&gt;,");
     expect(message.html).toContain("Confirm email");
     expect(message.html).toContain(`href="${verifyUrl}"`);
+    expect(message.html).toContain(`href="${WEB_ORIGIN}" style="color:#5e64d6; word-break:break-word; overflow-wrap:anywhere;">Factrove</a>`);
+    expect(message.text).toContain(`Factrove: ${WEB_ORIGIN}`);
+    expect(message.html).not.toContain("https://factrove.app");
+    expect(message.text).not.toContain("https://factrove.app");
     expect(message.html).toContain("#858bee");
     expect(message.html).toContain("fac<b");
     expect(message.html).not.toContain("<script>");

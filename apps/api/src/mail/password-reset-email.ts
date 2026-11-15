@@ -11,12 +11,14 @@ export function buildPasswordResetEmail(input: {
   recipient: { email: string; name: string };
   resetUrl: string;
   supportEmail: string;
+  siteUrl: string;
   logoUrl?: string | null;
 }): OutboundEmail {
   const email = input.recipient.email.trim();
   const name = oneLine(input.recipient.name);
   const resetUrl = input.resetUrl.trim();
   const supportEmail = input.supportEmail.trim();
+  const siteUrl = input.siteUrl.trim();
   const logoUrl = input.logoUrl?.trim() ?? "";
   const greeting = name.length > 0 ? `Hi ${name},` : "Hi,";
   const request = `We received a request to reset the password for ${email}. This link expires in ${PASSWORD_RESET_EXPIRES_LABEL}.`;
@@ -33,7 +35,7 @@ export function buildPasswordResetEmail(input: {
     ignore,
     REASON,
     `Contact ${supportEmail} if you need help.`,
-    "Factrove: https://factrove.app",
+    `Factrove: ${siteUrl}`,
   ].join("\n");
   const bodyHtml = `${escapeHtml(greeting)}<br>${escapeHtml(request)}<br>${escapeHtml(ignore)}`;
   return {
@@ -48,6 +50,7 @@ export function buildPasswordResetEmail(input: {
       actionLabel: "Reset your password",
       actionUrl: resetUrl,
       supportEmail,
+      siteUrl,
       logoUrl,
       reason: REASON,
     }),
