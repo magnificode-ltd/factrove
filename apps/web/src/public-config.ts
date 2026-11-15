@@ -2,11 +2,14 @@ const DEFAULT_PUBLIC_API_URL = "http://localhost:3001";
 
 export const DEFAULT_SOURCE_CODE_URL = "https://github.com/magnificode-ltd/factrove";
 
+export const DEFAULT_DOCS_BASE_URL = "https://factrove.mintlify.app";
+
 type RuntimeEnv = {
   BROWSER_API_URL?: string;
   INTERNAL_API_URL?: string;
   NEXT_PUBLIC_API_URL?: string;
   SOURCE_CODE_URL?: string;
+  DOCS_BASE_URL?: string;
 };
 
 export function readPublicApiOrigin(value: string | undefined): string | undefined {
@@ -61,6 +64,36 @@ export function sourceCodeUrl(env?: RuntimeEnv): string {
     console.warn("SOURCE_CODE_URL must be an absolute http(s) URL without a username or password.");
   }
   return override ?? DEFAULT_SOURCE_CODE_URL;
+}
+
+export function readDocsBaseUrl(value: string | undefined): string | undefined {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0) {
+    return undefined;
+  }
+  // URL.search and URL.hash are empty for a bare trailing "?" or "#", and
+  // docsUrl would then append its path after that marker.
+  if (raw.includes("?") || raw.includes("#")) {
+    return undefined;
+  }
+  const href = readSourceCodeUrl(raw);
+  if (!href) {
+    return undefined;
+  }
+  return href.replace(/\/+$/, "");
+}
+
+// Base URL for docs links such as the CLI reference. Read when a page renders
+// so an install can set DOCS_BASE_URL without rebuilding the web app.
+// Unset, empty, or a URL with a query or hash keeps the public docs site.
+// A trailing slash is dropped.
+export function docsBaseUrl(env?: RuntimeEnv): string {
+  const source = runtimeEnv(env);
+  const override = readDocsBaseUrl(source.DOCS_BASE_URL);
+  if (source.DOCS_BASE_URL?.trim() && !override) {
+    console.warn("DOCS_BASE_URL must be an absolute http(s) URL without a username, password, query, or hash.");
+  }
+  return override ?? DEFAULT_DOCS_BASE_URL;
 }
 
 // Origin the Next.js server uses for its own fetches. INTERNAL_API_URL and BROWSER_API_URL

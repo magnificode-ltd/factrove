@@ -434,8 +434,8 @@ describe("share unlock grants", () => {
     expect(readShareTicket(ticket, { ...scope, shareTokenHash: "b".repeat(64) }, key, nowMs)).toBeNull();
     expect(readShareTicket(ticket, { ...scope, artifactId: otherArtifactId }, key, nowMs)).toBeNull();
     expect(mintShareTicket(scope, key, nowMs)).not.toBe(ticket);
-    const url = ticketedContentUrl("https://api.factrove.app", artifactId, "t".repeat(43), ticket);
-    expect(url).toBe(`https://api.factrove.app/api/v1/public/artifacts/${artifactId}/${"t".repeat(43)}/content?ticket=${ticket}`);
+    const url = ticketedContentUrl("https://api.example.com", artifactId, "t".repeat(43), ticket);
+    expect(url).toBe(`https://api.example.com/api/v1/public/artifacts/${artifactId}/${"t".repeat(43)}/content?ticket=${ticket}`);
   });
 
   it("honors a ticket a few times, then refuses it until it expires and leaves the ledger", () => {

@@ -67,7 +67,7 @@ const config: ApiConfig = {
   trustedProxies: [],
   shareTokenKey: null,
   emailTransport: "log",
-  emailFromAddress: "support@factrove.app",
+  emailFromAddress: "library@example.com",
   emailFromName: "Factrove",
   emailLogoUrl: null,
   emailLogFullLinks: false,
@@ -341,7 +341,7 @@ describe("API configuration", () => {
     }).publicBaseUrl).toBe("https://factrove.example.com");
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      PUBLIC_BASE_URL: "https://factrove.app",
+      PUBLIC_BASE_URL: "https://library.example.com",
     })).toThrow(/same host/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
@@ -366,19 +366,19 @@ describe("API configuration", () => {
     })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      PUBLIC_BASE_URL: "https://factrove.app/share",
+      PUBLIC_BASE_URL: "https://library.example.com/share",
     })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      PUBLIC_BASE_URL: "https://factrove.app/?share=1",
+      PUBLIC_BASE_URL: "https://library.example.com/?share=1",
     })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      PUBLIC_BASE_URL: "https://factrove.app/#share",
+      PUBLIC_BASE_URL: "https://library.example.com/#share",
     })).toThrow(/PUBLIC_BASE_URL/);
     expect(() => readApiConfig({
       BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-      PUBLIC_BASE_URL: "ftp://factrove.app",
+      PUBLIC_BASE_URL: "ftp://library.example.com",
     })).toThrow(/PUBLIC_BASE_URL/);
   });
 });
@@ -3727,37 +3727,37 @@ describe("HTTP API", () => {
   it("builds share links and framing from a localhost base URL or a public domain", async () => {
     const bytes = new TextEncoder().encode("<p>domain</p>");
     const artifact = await upload(baseUrl, "domain.html", bytes);
-    config.publicBaseUrl = "https://factrove.app";
+    config.publicBaseUrl = "https://library.example.com";
     try {
       const created = shareEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}/share`, {
         method: "POST",
       })).json());
       const token = created.share.shareUrl?.split("/").at(-1) ?? "";
-      expect(created.share.shareUrl).toBe(`https://factrove.app/share/${artifact.id}/${token}`);
+      expect(created.share.shareUrl).toBe(`https://library.example.com/share/${artifact.id}/${token}`);
       const detail = artifactEnvelopeSchema.parse(await (await ownerFetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`)).json());
-      expect(detail.artifact.viewerUrl).toBe(`https://factrove.app/artifacts/${artifact.id}`);
+      expect(detail.artifact.viewerUrl).toBe(`https://library.example.com/artifacts/${artifact.id}`);
 
       const content = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`);
       expect(content.status).toBe(200);
       const policy = content.headers.get("content-security-policy") ?? "";
-      expect(policy).toContain("frame-ancestors https://factrove.app http://localhost:3000");
+      expect(policy).toContain("frame-ancestors https://library.example.com http://localhost:3000");
       expect(policy).toContain("sandbox allow-scripts");
       expect(policy).not.toContain("allow-same-origin");
 
       const allowed = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`, {
-        headers: { origin: "https://factrove.app" },
+        headers: { origin: "https://library.example.com" },
       });
-      expect(allowed.headers.get("access-control-allow-origin")).toBe("https://factrove.app");
+      expect(allowed.headers.get("access-control-allow-origin")).toBe("https://library.example.com");
       expect(allowed.headers.get("access-control-allow-credentials")).toBeNull();
       const preflight = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}/content`, {
         method: "OPTIONS",
         headers: {
-          origin: "https://factrove.app",
+          origin: "https://library.example.com",
           "access-control-request-method": "GET",
         },
       });
       expect(preflight.status).toBe(204);
-      expect(preflight.headers.get("access-control-allow-origin")).toBe("https://factrove.app");
+      expect(preflight.headers.get("access-control-allow-origin")).toBe("https://library.example.com");
       expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
       expect(preflight.headers.get("access-control-allow-methods")).toBe("GET,HEAD,OPTIONS");
       const local = await globalThis.fetch(`${baseUrl}/api/v1/public/artifacts/${artifact.id}/${token}`, {

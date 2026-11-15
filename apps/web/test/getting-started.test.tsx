@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ContextEnvelope } from "@factrove/contracts";
-import { DOCS_BASE_URL } from "../src/docs";
+import { docsUrl } from "../src/docs";
 import { gettingStartedCopy } from "../src/library/getting-started";
 import { LibraryScreen } from "../src/library/library-screen";
 
@@ -14,6 +14,7 @@ afterEach(() => {
   delete process.env.BROWSER_API_URL;
   delete process.env.NEXT_PUBLIC_API_URL;
   delete process.env.INTERNAL_API_URL;
+  delete process.env.DOCS_BASE_URL;
 });
 
 describe("getting started copy", () => {
@@ -21,18 +22,18 @@ describe("getting started copy", () => {
     const copy = gettingStartedCopy({ apiOrigin: "https://api.example.com" });
     expect(copy.installCommand).toBe("npm i -g factrove");
     expect(copy.npxCommand).toBe("npx factrove");
-    expect(copy.defaultApiUrl).toBe("https://api.factrove.app");
     expect(copy.configureCommand).toBe("factrove configure --api-url https://api.example.com");
     expect(copy.uploadCommand).toBe("factrove upload plan.html");
     expect(copy.orgUploadCommand).toBe("factrove upload plan.html --access org_shared");
-    expect(copy.docsUrl).toBe(`${DOCS_BASE_URL}/cli-reference/overview`);
+    expect(copy.docsUrl).toBe(docsUrl("/cli-reference/overview"));
     expect(copy.agentPrompt).toContain("npm i -g factrove");
+    expect(copy.agentPrompt).toContain("The API origin for this app is https://api.example.com.");
     expect(copy.agentPrompt).toContain(copy.configureCommand);
     expect(copy.agentPrompt).toContain(copy.uploadCommand);
     expect(copy.agentPrompt).toContain(`printf '%s\\n' "$FACTROVE_API_KEY" | ${copy.configureCommand}`);
     expect(copy.agentPrompt).toContain("npx factrove");
     expect(copy.agentPrompt).toContain("ftrv");
-    expect(copy.agentPrompt).toContain("https://api.factrove.app");
+    expect(copy.agentPrompt).not.toContain("api.factrove.app");
     expect(copy.agentPrompt).toContain("Do not pass the key with --api-key");
     expect(copy.agentPrompt).not.toContain("git clone");
     expect(copy.agentPrompt).not.toContain("pnpm factrove");
@@ -78,11 +79,23 @@ describe("getting started copy", () => {
     expect(html).toContain("Copy upload");
     expect(html).toContain("Copy npx");
     expect(html).toContain("Copy prompt");
-    expect(html).toContain("suggests the value from the environment or the saved profile");
-    expect(html).toContain("https://api.factrove.app");
+    expect(html).toContain("The API origin for this app is https://api.example.com.");
+    expect(html).not.toContain("api.factrove.app");
     expect(html).toContain("ftrv");
     expect(html).not.toContain("Without it, the CLI uses");
     expect(html).toContain('href="/account/api-keys"');
-    expect(html).toContain(`href="${DOCS_BASE_URL}/cli-reference/overview"`);
+    expect(html).toContain(`href="${docsUrl("/cli-reference/overview")}"`);
+  });
+
+  it("uses DOCS_BASE_URL for the CLI reference and keeps the default when it is empty", () => {
+    process.env.DOCS_BASE_URL = "https://docs.example.com/factrove/";
+    const custom = gettingStartedCopy({ apiOrigin: "http://localhost:3001" });
+    expect(custom.docsUrl).toBe("https://docs.example.com/factrove/cli-reference/overview");
+    expect(custom.agentPrompt).toContain("http://localhost:3001");
+    expect(custom.agentPrompt).not.toContain("api.factrove.app");
+    process.env.DOCS_BASE_URL = "   ";
+    expect(gettingStartedCopy({ apiOrigin: "http://localhost:3001" }).docsUrl).toBe(
+      "https://factrove.mintlify.app/cli-reference/overview",
+    );
   });
 });

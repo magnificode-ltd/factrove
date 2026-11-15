@@ -22,6 +22,6 @@ Readers could not tell which pages applied to a server they run and which applie
 ## Assumptions
 
 - The CLI default API origin is `https://api.factrove.app` (`DEFAULT_API_URL`). That is the Factrove Cloud API. Confirmed in `apps/cli/src/parse-args.ts`.
-- The hosted web origin is not configured in this repository. Cloud pages use `https://cloud.factrove.example` as a placeholder and say so. `https://factrove.app` is the site linked from invite email and an example public base URL in tests. It is not documented here as the Cloud signup origin.
+- The hosted web origin is not configured in this repository. Cloud pages use `https://cloud.factrove.example` as a placeholder and say so. Auth email footers link to `WEB_ORIGIN`. It is not documented here as the Cloud signup origin.
 - No pricing or billing is documented. Confirmed by the absence of billing in this repository and by the docs instruction not to invent it.
 - `ftrv` is a bin of the `factrove` npm package. There is no separate `ftrv` package. The npx package name is `factrove`.

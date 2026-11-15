@@ -19,11 +19,11 @@ describe("public base URL links", () => {
   it("uses localhost or a domain plus the artifact id, and a separate token", () => {
     const id = "123e4567-e89b-42d3-a456-426614174000";
     expect(artifactViewerUrl("http://localhost:3000", id)).toBe(`http://localhost:3000/artifacts/${id}`);
-    expect(artifactViewerUrl("https://factrove.app", id)).toBe(`https://factrove.app/artifacts/${id}`);
+    expect(artifactViewerUrl("https://library.example.com", id)).toBe(`https://library.example.com/artifacts/${id}`);
     const token = createShareToken();
     expect(isShareToken(token)).toBe(true);
     expect(token).not.toBe(id);
-    expect(artifactShareUrl("https://factrove.app", id, token)).toBe(`https://factrove.app/share/${id}/${token}`);
+    expect(artifactShareUrl("https://library.example.com", id, token)).toBe(`https://library.example.com/share/${id}/${token}`);
     expect(artifactShareUrl("http://localhost:3000", id, token)).toBe(`http://localhost:3000/share/${id}/${token}`);
     expect(publicContentUrl("http://localhost:3001", id, token)).toBe(
       `http://localhost:3001/api/v1/public/artifacts/${id}/${token}/content`,
@@ -36,14 +36,14 @@ describe("public base URL links", () => {
 
   it("frames both the public origin and the owner app when they differ", () => {
     expect(browserOrigins("http://localhost:3000", "http://localhost:3000")).toEqual(["http://localhost:3000"]);
-    expect(browserOrigins("http://localhost:3000", "https://factrove.app")).toEqual([
-      "https://factrove.app",
+    expect(browserOrigins("http://localhost:3000", "https://library.example.com")).toEqual([
+      "https://library.example.com",
       "http://localhost:3000",
     ]);
-    const policy = contentSecurityPolicy(browserOrigins("http://localhost:3000", "https://factrove.app"));
+    const policy = contentSecurityPolicy(browserOrigins("http://localhost:3000", "https://library.example.com"));
     expect(policy).toContain("sandbox allow-scripts");
     expect(policy).not.toContain("allow-same-origin");
-    expect(policy).toContain("frame-ancestors https://factrove.app http://localhost:3000");
+    expect(policy).toContain("frame-ancestors https://library.example.com http://localhost:3000");
     expect(policy).not.toContain("*");
   });
 });
