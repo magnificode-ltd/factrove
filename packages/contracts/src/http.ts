@@ -668,7 +668,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "List artifacts for the caller",
     description:
-      "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
+      "`view=mine` (default) is artifacts the caller created. A session lists those artifacts in every organization. An API key lists only the ones that already belong to the key's organization. `view=org` is org_shared artifacts in the caller's current organization, including other creators. For an API key that organization is the key's. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
     security: "sessionOrApiKey",
     queryParameters: [
       {

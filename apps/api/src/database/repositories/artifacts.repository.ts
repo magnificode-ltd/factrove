@@ -167,21 +167,28 @@ export class ArtifactsRepository {
 
   // Removes the row only while the revision and object key read by the caller are still current.
   // A replace that committed a new object returns false and leaves that row in place.
+  // An API key also requires the organization it read. The row lock is the same one the
+  // share update takes, so a re-home that commits before this statement keeps the row.
   async deleteIfUnchanged(input: {
     id: string;
     creatorUserId: string;
     contentRevision: number;
     objectKey: string;
+    organizationId?: string;
   }): Promise<boolean> {
-    const deleted = await this.prisma.artifact.deleteMany({
-      where: {
-        id: input.id,
-        creatorUserId: input.creatorUserId,
-        contentRevision: input.contentRevision,
-        objectKey: input.objectKey,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
+      const deleted = await tx.artifact.deleteMany({
+        where: {
+          id: input.id,
+          creatorUserId: input.creatorUserId,
+          contentRevision: input.contentRevision,
+          objectKey: input.objectKey,
+          ...(input.organizationId === undefined ? {} : { organizationId: input.organizationId }),
+        },
+      });
+      return deleted.count === 1;
     });
-    return deleted.count === 1;
   }
 
   async findById(id: string): Promise<ArtifactRecord | null> {

@@ -19,6 +19,7 @@ import { createFirstOrganization, signUp, TEST_AUTH_SECRET } from "./auth-sessio
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
+let beforeBlobDelete: (() => Promise<void>) | undefined;
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
 const migrationPath = fileURLToPath(new URL("../prisma/migrations/20261115200000_org_owned_api_keys/migration.sql", import.meta.url));
 const migrationSql = readFileSync(migrationPath, "utf8");
@@ -544,6 +545,39 @@ describe("organization-owned API keys", () => {
     });
     expect(JSON.stringify(await listed.json())).toContain(artifact.id);
   });
+
+  it("does not delete a key's artifact after it moves to another organization", async () => {
+    const user = await signUp(baseUrl, {
+      email: "delete-race@example.com",
+      password: "delete-race-password",
+      name: "Delete Race",
+    });
+    const orgA = await createFirstOrganization(baseUrl, user.cookie, "Delete Org A");
+    const keyA = await createKey(baseUrl, user.cookie, "delete-a");
+    expect((await prisma.apikey.findUniqueOrThrow({ where: { id: keyA.id } })).referenceId).toBe(orgA.id);
+    const uploaded = await uploadHtml(baseUrl, keyA.key, "<p>stay</p>");
+    expect(uploaded.status).toBe(201);
+    const artifactId = ((await uploaded.json()) as { artifact: { id: string } }).artifact.id;
+    const orgB = "delete-race-org-b";
+    await prisma.organization.create({
+      data: { id: orgB, name: "Delete Org B", slug: orgB, createdAt: new Date() },
+    });
+    beforeBlobDelete = async () => {
+      await prisma.artifact.update({ where: { id: artifactId }, data: { organizationId: orgB } });
+    };
+    try {
+      const removed = await fetch(`${baseUrl}/api/v1/artifacts/${artifactId}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${keyA.key}` },
+      });
+      expect(removed.status).toBe(404);
+      const row = await prisma.artifact.findUnique({ where: { id: artifactId } });
+      expect(row?.organizationId).toBe(orgB);
+      expect(row?.creatorUserId).toBe(user.userId);
+    } finally {
+      beforeBlobDelete = undefined;
+    }
+  });
 });
 
 async function runMigration(): Promise<void> {
@@ -688,6 +722,11 @@ async function createApp(appConfig: ApiConfig): Promise<INestApplication> {
       return { body: (async function* stream() { yield body; })() };
     },
     async delete(objectKey) {
+      const hook = beforeBlobDelete;
+      beforeBlobDelete = undefined;
+      if (hook) {
+        await hook();
+      }
       objects.delete(objectKey);
     },
   };

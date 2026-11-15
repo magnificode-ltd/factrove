@@ -234,13 +234,17 @@ export class ArtifactsService {
         creatorUserId: record.creatorUserId,
         contentRevision: record.contentRevision,
         objectKey: record.objectKey,
+        ...(actor.via === "api-key" ? { organizationId: actor.organization.id } : {}),
       });
       if (removed) {
         return;
       }
       const current = await this.artifacts.findById(record.id);
-      if (!current || !this.ownsInKeyOrganization(actor, current)) {
+      if (!current) {
         return;
+      }
+      if (!this.ownsInKeyOrganization(actor, current)) {
+        throw artifactNotFound();
       }
       record = current;
     }
