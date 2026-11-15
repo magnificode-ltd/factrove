@@ -36,7 +36,7 @@ class RequireActorGuard implements CanActivate {
   constructor(@Inject(ActorService) private readonly actors: ActorService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    await this.actors.requireActor(context.switchToHttp().getRequest<HeaderRequest>());
+    await this.actors.requireCurrentOrganization(context.switchToHttp().getRequest<HeaderRequest>());
     return true;
   }
 }

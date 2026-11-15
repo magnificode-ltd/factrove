@@ -8,6 +8,7 @@ export type LibraryModel =
   | { status: "ready"; view: LibraryView; context: ContextEnvelope; items: ArtifactDto[] }
   | { status: "empty"; view: LibraryView; context: ContextEnvelope }
   | { status: "no-organization"; view: "org"; context: ContextEnvelope }
+  | { status: "setup-required"; view: LibraryView }
   | { status: "signed-out"; view: LibraryView }
   | { status: "unavailable"; view: LibraryView; message: string };
 
@@ -28,6 +29,13 @@ export async function loadLibrary(client: FactroveClient, view: LibraryView): Pr
     if (error instanceof FactroveApiError && error.status === 401) {
       return { status: "signed-out", view };
     }
+    if (isOrganizationSetupRequired(error)) {
+      return { status: "setup-required", view };
+    }
     return { status: "unavailable", view, message: unavailableMessage(error) };
   }
+}
+
+export function isOrganizationSetupRequired(error: unknown): boolean {
+  return error instanceof FactroveApiError && error.status === 403 && error.code === "ORGANIZATION_SETUP_REQUIRED";
 }

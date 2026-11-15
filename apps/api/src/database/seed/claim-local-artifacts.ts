@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { localUserFixture } from "./seed-local-identities.js";
 
@@ -53,45 +52,38 @@ export async function claimLocalArtifacts(prisma: PrismaClient, email: string): 
       );
     }
 
-    const artifacts = await tx.artifact.findMany({
+    const pending = await tx.artifact.count({
       where: { creatorUserId: localUserFixture.id },
-      select: { organizationId: true },
     });
-    const organizationIds = [
-      ...new Set(artifacts.flatMap((artifact) => (artifact.organizationId ? [artifact.organizationId] : []))),
-    ];
+    if (pending === 0) {
+      return {
+        userId: user.id,
+        email: user.email,
+        artifactsClaimed: 0,
+        membershipsAdded: 0,
+      };
+    }
 
-    let membershipsAdded = 0;
-    for (const organizationId of organizationIds) {
-      const existing = await tx.member.findFirst({
-        where: { userId: user.id, organizationId },
-        select: { id: true },
-      });
-      if (existing) {
-        continue;
-      }
-      await tx.member.create({
-        data: {
-          id: randomUUID(),
-          organizationId,
-          userId: user.id,
-          role: "member",
-          createdAt: new Date(),
-        },
-      });
-      membershipsAdded += 1;
+    const memberships = await tx.member.findMany({
+      where: { userId: user.id },
+      select: { organizationId: true },
+      take: 2,
+    });
+    const organizationId = memberships.length === 1 ? memberships[0]?.organizationId : undefined;
+    if (!organizationId) {
+      throw new ClaimLocalArtifactsError("That account must belong to exactly one organization.");
     }
 
     const updated = await tx.artifact.updateMany({
       where: { creatorUserId: localUserFixture.id },
-      data: { creatorUserId: user.id },
+      data: { creatorUserId: user.id, organizationId },
     });
 
     return {
       userId: user.id,
       email: user.email,
       artifactsClaimed: updated.count,
-      membershipsAdded,
+      membershipsAdded: 0,
     };
   });
 }

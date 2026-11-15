@@ -16,7 +16,9 @@ export default async function OnboardingPage() {
     if (error instanceof FactroveApiError && error.status === 401) {
       redirect("/login?next=/onboarding");
     }
-    throw error;
+    if (!(error instanceof FactroveApiError && error.status === 403 && error.code === "ORGANIZATION_SETUP_REQUIRED")) {
+      throw error;
+    }
   }
 
   return (

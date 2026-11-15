@@ -72,7 +72,7 @@
           "Auth"
         ],
         "summary": "Return the caller and current organization",
-        "description": "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership, or null when they have none or more than one. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+        "description": "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership. Zero memberships is `403 ORGANIZATION_SETUP_REQUIRED`. More than one membership and no active organization that matches one of them is `409 ORGANIZATION_SELECTION_REQUIRED`. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
         "security": [
           {
             "bearerAuth": []
@@ -111,6 +111,26 @@
                     "code": "UNAUTHENTICATED",
                     "message": "Sign in to continue."
                   }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, with no organization membership. Code `ORGANIZATION_SETUP_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Authenticated, with several memberships and no active organization that matches one of them. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -318,7 +338,7 @@
           "Auth"
         ],
         "summary": "Create an API key",
-        "description": "Requires a browser session. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+        "description": "Requires a browser session that already belongs to an organization. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is 409 `ORGANIZATION_SELECTION_REQUIRED`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
         "security": [
           {
             "sessionCookie": []
@@ -399,7 +419,7 @@
           "Auth"
         ],
         "summary": "List API keys for the session",
-        "description": "Requires a browser session. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
+        "description": "Requires a browser session that already belongs to an organization. A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
         "security": [
           {
             "sessionCookie": []
@@ -619,7 +639,7 @@
             }
           },
           "403": {
-            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -690,7 +710,7 @@
           "Artifacts"
         ],
         "summary": "List artifacts for the caller",
-        "description": "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. With no current organization, `view=org` is an empty list. Sorted by createdAt descending, then id descending. The whole list is returned.",
+        "description": "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
         "security": [
           {
             "bearerAuth": []
@@ -774,6 +794,26 @@
                     "code": "UNAUTHENTICATED",
                     "message": "Sign in to continue."
                   }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, with no organization membership. Code `ORGANIZATION_SETUP_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Authenticated, with several memberships and no active organization that matches one of them. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -901,7 +941,7 @@
             }
           },
           "403": {
-            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1288,7 +1328,7 @@
             }
           },
           "403": {
-            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1418,7 +1458,7 @@
             }
           },
           "403": {
-            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1505,7 +1545,7 @@
           "Artifacts"
         ],
         "summary": "Get artifact metadata",
-        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+        "description": "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. An authenticated caller with no organization gets `403 ORGANIZATION_SETUP_REQUIRED` before the artifact is loaded. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
         "security": [
           {
             "bearerAuth": []
@@ -1698,7 +1738,7 @@
             }
           },
           "403": {
-            "description": "Cookie write from a disallowed origin. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1970,7 +2010,7 @@
             }
           },
           "403": {
-            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from an origin that is not allowed is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2098,7 +2138,7 @@
             }
           },
           "403": {
-            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from an origin that is not allowed is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2228,7 +2268,7 @@
             }
           },
           "403": {
-            "description": "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+            "description": "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from an origin that is not allowed is `FORBIDDEN`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2716,6 +2756,8 @@
                 "enum": [
                   "INVALID_REQUEST",
                   "ORGANIZATION_REQUIRED",
+                  "ORGANIZATION_SETUP_REQUIRED",
+                  "ORGANIZATION_SELECTION_REQUIRED",
                   "ORGANIZATION_EXISTS",
                   "ORGANIZATION_CHANGED",
                   "UNAUTHENTICATED",
@@ -2734,7 +2776,7 @@
                   "CONVERSION_UNAVAILABLE",
                   "UNLOCK_UNAVAILABLE"
                 ],
-                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code. 409 ORGANIZATION_EXISTS: POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created. 409 ORGANIZATION_CHANGED: PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code. 403 ORGANIZATION_SETUP_REQUIRED: The caller is authenticated and has no organization membership. Product routes and API key create, list, and delete return this until POST /api/v1/onboarding/organization creates the first organization. Health, public shares, get-session, and sign-out do not. 409 ORGANIZATION_SELECTION_REQUIRED: The caller is authenticated, has more than one organization membership, and the session has no active organization that matches one of them. An API key has no active organization and uses the same rule. 409 ORGANIZATION_EXISTS: POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created. 409 ORGANIZATION_CHANGED: PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
               },
               "message": {
                 "type": "string"
@@ -2753,6 +2795,8 @@
         "enum": [
           "INVALID_REQUEST",
           "ORGANIZATION_REQUIRED",
+          "ORGANIZATION_SETUP_REQUIRED",
+          "ORGANIZATION_SELECTION_REQUIRED",
           "ORGANIZATION_EXISTS",
           "ORGANIZATION_CHANGED",
           "UNAUTHENTICATED",

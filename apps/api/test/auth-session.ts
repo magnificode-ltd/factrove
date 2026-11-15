@@ -3,20 +3,27 @@ import type { PrismaClient } from "@prisma/client";
 
 export const TEST_AUTH_SECRET = "factrove-test-auth-secret-32chars-min";
 
-export type SignedInUser = {
+export type SignedUpUser = {
   userId: string;
   email: string;
   name: string;
   cookie: string;
+};
+
+export type ApiKeyUser = SignedUpUser & {
   apiKey: string;
   prefix: string;
   keyId: string;
 };
 
-export async function signUpWithApiKey(
+export type SignedInUser = ApiKeyUser & {
+  organizationId: string;
+};
+
+export async function signUp(
   baseUrl: string,
-  input: { email: string; password: string; name: string; keyName: string },
-): Promise<SignedInUser> {
+  input: { email: string; password: string; name: string },
+): Promise<SignedUpUser> {
   const response = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
     method: "POST",
     headers: {
@@ -38,7 +45,19 @@ export async function signUpWithApiKey(
   if (!userId) {
     throw new Error(`sign-up did not return a user: ${text}`);
   }
-  const cookie = cookieHeader(response);
+  return {
+    userId,
+    email: input.email,
+    name: input.name,
+    cookie: cookieHeader(response),
+  };
+}
+
+export async function createSessionApiKey(
+  baseUrl: string,
+  cookie: string,
+  keyName: string,
+): Promise<{ apiKey: string; prefix: string; keyId: string }> {
   const keyResponse = await fetch(`${baseUrl}/api/auth/api-key/create`, {
     method: "POST",
     headers: {
@@ -46,7 +65,7 @@ export async function signUpWithApiKey(
       cookie,
       origin: "http://localhost:3000",
     },
-    body: JSON.stringify({ name: input.keyName }),
+    body: JSON.stringify({ name: keyName }),
   });
   const keyText = await keyResponse.text();
   if (!keyResponse.ok) {
@@ -57,20 +76,65 @@ export async function signUpWithApiKey(
     throw new Error(`api key create did not return a key: ${keyText}`);
   }
   return {
-    userId,
-    email: input.email,
-    name: input.name,
-    cookie,
     apiKey: created.key,
     prefix: created.start ?? created.key.slice(0, 12),
     keyId: created.id,
   };
 }
 
+export async function createFirstOrganization(
+  baseUrl: string,
+  cookie: string,
+  name: string,
+): Promise<{ id: string; name: string }> {
+  const response = await fetch(`${baseUrl}/api/v1/onboarding/organization`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      cookie,
+      origin: "http://localhost:3000",
+    },
+    body: JSON.stringify({ name }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`organization create failed ${response.status}: ${text}`);
+  }
+  const body = JSON.parse(text) as { organization?: { id?: string; name?: string } };
+  const id = body.organization?.id;
+  const organizationName = body.organization?.name;
+  if (!id || !organizationName) {
+    throw new Error(`organization create did not return an organization: ${text}`);
+  }
+  return { id, name: organizationName };
+}
+
+export async function signUpWithApiKey(
+  baseUrl: string,
+  input: { email: string; password: string; name: string; keyName: string },
+): Promise<SignedInUser> {
+  const session = await signUp(baseUrl, input);
+  const organization = await createFirstOrganization(baseUrl, session.cookie, `${input.name}'s organization`);
+  const key = await createSessionApiKey(baseUrl, session.cookie, input.keyName);
+  return { ...session, ...key, organizationId: organization.id };
+}
+
+export async function signUpInOrganization(
+  baseUrl: string,
+  prisma: PrismaClient,
+  input: { email: string; password: string; name: string; keyName: string },
+  organizationId: string,
+): Promise<SignedInUser> {
+  const session = await signUp(baseUrl, input);
+  await addMembership(prisma, session.userId, organizationId);
+  const key = await createSessionApiKey(baseUrl, session.cookie, input.keyName);
+  return { ...session, ...key, organizationId };
+}
+
 export async function createUserWithApiKey(
   prisma: PrismaClient,
   input: { email: string; name: string; keyName: string },
-): Promise<SignedInUser> {
+): Promise<ApiKeyUser> {
   const userId = randomUUID();
   const now = new Date();
   await prisma.user.create({
@@ -108,6 +172,14 @@ export async function createUserWithApiKey(
     prefix: apiKey.slice(0, 12),
     keyId,
   };
+}
+
+export async function addOwnedOrganization(prisma: PrismaClient, userId: string, slug: string): Promise<string> {
+  await prisma.organization.create({
+    data: { id: slug, name: slug, slug, createdAt: new Date() },
+  });
+  await addMembership(prisma, userId, slug);
+  return slug;
 }
 
 export async function addMembership(prisma: PrismaClient, userId: string, organizationId: string): Promise<void> {

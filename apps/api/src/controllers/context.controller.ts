@@ -18,7 +18,7 @@ export class ContextController {
 
   @Get("context")
   async context(@Req() request: HeaderRequest): Promise<ContextEnvelope> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     return contextEnvelopeSchema.parse({ user: actor.user, organization: actor.organization });
   }
 }

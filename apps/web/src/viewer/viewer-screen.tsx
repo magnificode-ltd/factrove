@@ -19,6 +19,9 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
   const [organization, setOrganization] = useState<ContextEnvelope["organization"]>(
     state.status === "ready" ? state.organization ?? null : null
   );
+  if (state.status === "setup-required") {
+    return null;
+  }
   if (state.status === "signed-out") {
     return <SignInGate message={state.message} returnTo={state.returnTo} />;
   }
@@ -150,7 +153,7 @@ function ReadyArtifact({ state }: { state: Extract<ViewerModel, { status: "ready
   return <ArtifactFrame key={artifact.contentUrl} contentUrl={artifact.contentUrl} />;
 }
 
-function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" }> }) {
+function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" | "setup-required" }> }) {
   const calm = state.status === "missing";
   return (
     <div className="ft-enter flex h-full items-center px-6 sm:px-10">

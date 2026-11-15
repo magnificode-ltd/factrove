@@ -131,6 +131,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261021090000_add_share_password",
       "20261021170000_add_artifact_object_key",
       "20261021193000_add_artifact_name",
+      "20261115190000_backfill_organizations",
     ]);
   });
 
@@ -540,16 +541,19 @@ describe("PostgreSQL artifact persistence", () => {
     ).rejects.toThrow(/artifact_share_columns_paired_check|23514/);
   });
 
-  it("rejects missing creators, org_shared without an organization, and unknown access values", async () => {
-    const personal = await repository.create(artifactInput({ organizationId: null, accessType: "private" }));
-    expect(personal.organizationId).toBeNull();
-
+  it("rejects missing creators, a null organization, and unknown access values", async () => {
     await expect(repository.create(artifactInput({ creatorUserId: "missing-user" }))).rejects.toMatchObject({
       code: "P2003",
     });
-    await expect(repository.create(artifactInput({ accessType: "org_shared", organizationId: null }))).rejects.toThrow(
-      /artifact_org_shared_requires_organization_check|23514/,
-    );
+    const missingOrganization = randomUUID();
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "artifact" ("id", "creator_user_id", "organization_id", "access_type", "mime_type", "size_bytes", "object_key", "updated_at")
+         VALUES ($1::uuid, $2, NULL, 'private', 'text/html', 1, $1::text || '.html', NOW())`,
+        missingOrganization,
+        localUserFixture.id,
+      ),
+    ).rejects.toThrow(/null value|23502/);
     await expect(repository.create(artifactInput({ sizeBytes: -1 }))).rejects.toThrow(
       /artifact_size_bytes_nonnegative_check|23514/,
     );
