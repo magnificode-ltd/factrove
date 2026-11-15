@@ -2,15 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   browserApiUrl,
   cliApiOrigin,
+  DEFAULT_DOCS_BASE_URL,
   DEFAULT_SOURCE_CODE_URL,
+  docsBaseUrl,
   publicConfigScript,
+  readDocsBaseUrl,
   readPublicApiOrigin,
   readSourceCodeUrl,
   serverApiUrl,
   sourceCodeUrl,
 } from "../src/public-config";
 
-const keys = ["BROWSER_API_URL", "INTERNAL_API_URL", "NEXT_PUBLIC_API_URL", "SOURCE_CODE_URL"] as const;
+const keys = ["BROWSER_API_URL", "INTERNAL_API_URL", "NEXT_PUBLIC_API_URL", "SOURCE_CODE_URL", "DOCS_BASE_URL"] as const;
 
 afterEach(() => {
   for (const key of keys) {
@@ -70,6 +73,24 @@ describe("public API origin", () => {
     expect(sourceCodeUrl({ SOURCE_CODE_URL: "https://git.example.com/fork" })).toBe("https://git.example.com/fork");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(sourceCodeUrl({ SOURCE_CODE_URL: "not a url" })).toBe(DEFAULT_SOURCE_CODE_URL);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("uses the public docs site unless DOCS_BASE_URL is an absolute http(s) URL", () => {
+    expect(readDocsBaseUrl(" https://docs.example.com/factrove/ ")).toBe("https://docs.example.com/factrove");
+    expect(readDocsBaseUrl("https://docs.example.com")).toBe("https://docs.example.com");
+    expect(readDocsBaseUrl("http://user:secret@docs.example.com")).toBeUndefined();
+    expect(readDocsBaseUrl("javascript:alert(1)")).toBeUndefined();
+    expect(readDocsBaseUrl("")).toBeUndefined();
+    expect(readDocsBaseUrl("   ")).toBeUndefined();
+    expect(docsBaseUrl({})).toBe(DEFAULT_DOCS_BASE_URL);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "" })).toBe(DEFAULT_DOCS_BASE_URL);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "   " })).toBe(DEFAULT_DOCS_BASE_URL);
+    expect(docsBaseUrl({ DOCS_BASE_URL: "https://docs.example.com/factrove/" })).toBe(
+      "https://docs.example.com/factrove",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(docsBaseUrl({ DOCS_BASE_URL: "not a url" })).toBe(DEFAULT_DOCS_BASE_URL);
     expect(warn).toHaveBeenCalledOnce();
   });
 

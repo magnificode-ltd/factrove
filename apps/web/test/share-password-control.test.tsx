@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { ShareControl } from "../src/components/share-control";
 
 const id = "123e4567-e89b-42d3-a456-426614174000";
-const shareUrl = `https://factrove.app/share/${id}/${"a".repeat(43)}`;
+const shareUrl = `https://library.example.com/share/${id}/${"a".repeat(43)}`;
 let root: Root | undefined;
 
 afterEach(() => {
