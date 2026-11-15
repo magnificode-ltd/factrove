@@ -102,7 +102,7 @@ export function OrganizationEmpty({
         <p className="text-lg leading-relaxed">No organization-shared artifacts for {organizationName}.</p>
         <p className="text-base leading-relaxed">
           After the CLI is configured, upload with <Code>--access org_shared</Code>. That needs a current
-          organization membership. Signup does not create one. Install and configure are in the{" "}
+          organization membership. Signup does not create one. Name it in the web app after you sign in. Install and configure are in the{" "}
           <a href={copy.docsUrl} className={textLink} target="_blank" rel="noreferrer">CLI reference</a>.
         </p>
         <CommandRow value={copy.orgUploadCommand} label="Copy upload" />

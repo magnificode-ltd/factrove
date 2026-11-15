@@ -118,6 +118,118 @@
         }
       }
     },
+    "/api/v1/onboarding/organization": {
+      "post": {
+        "operationId": "createOrganization",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create the signed-in user's first organization",
+        "description": "Session cookie only. An API key is rejected. The body is `{ \"name\" }` and nothing else. The name is NFC-normalized, then rejected when it contains U+0000–U+001F, U+007F–U+009F, U+2028, or U+2029 before trimming, or when the trimmed value is not 1 to 80 Unicode code points. The server generates a unique slug. The user becomes the owner and the session's active organization is set to the new organization. A user who already has a membership gets 409 and no second organization. Cookie writes require an allowed Origin. Limited to 10 requests per 60 seconds per client address.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Send { \"name\": \"<organization name>\" }. The name is one line of 1 to 80 characters.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The organization was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrganizationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Wrong JSON shape, or a name that fails validation. Shape failures use `Send { \"name\": \"<organization name>\" }. The name is one line of 1 to 80 characters.` An invalid name uses `name must be one line of 1 to 80 characters.`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Artifact id must be a UUID."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The cookie Origin or Referer is not allowed. Code `FORBIDDEN`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "FORBIDDEN",
+                    "message": "This request origin is not allowed."
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The user already has an organization. Code `ORGANIZATION_EXISTS`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many create attempts from this client address. Code `RATE_LIMITED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many requests. Try again later."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/sign-up/email": {
       "post": {
         "operationId": "signUpEmail",
@@ -2604,6 +2716,7 @@
                 "enum": [
                   "INVALID_REQUEST",
                   "ORGANIZATION_REQUIRED",
+                  "ORGANIZATION_EXISTS",
                   "ORGANIZATION_CHANGED",
                   "UNAUTHENTICATED",
                   "PASSWORD_REQUIRED",
@@ -2621,7 +2734,7 @@
                   "CONVERSION_UNAVAILABLE",
                   "UNLOCK_UNAVAILABLE"
                 ],
-                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code. 409 ORGANIZATION_CHANGED: PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+                "description": "400/404 INVALID_REQUEST: The request is missing a required field, has the wrong shape, or failed validation. Typical causes are a missing file, an invalid access type, view, format, or artifact id, or invalid UTF-8. Unmatched non-public product routes also return 404 INVALID_REQUEST with message Not found. 400 ORGANIZATION_REQUIRED: The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code. 409 ORGANIZATION_EXISTS: POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created. 409 ORGANIZATION_CHANGED: PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead. 401 UNAUTHENTICATED: The product route needs a session cookie or Authorization: Bearer API key, and neither was accepted. PATCH /api/v1/artifacts/{id} also returns this when the session was revoked or expired before the conditional update read it, and does not write. A revocation that commits after that snapshot does not cancel the share. 401 PASSWORD_REQUIRED: The public share is password protected and the request did not present a valid unlock grant or content ticket. 401 PASSWORD_INCORRECT: The password sent to the public unlock route did not match. 403 FORBIDDEN: A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL. 404 ARTIFACT_NOT_FOUND: The artifact id is unknown, the caller cannot read it, or the public share token is not active. Rename and delete also use this body when the caller is not the creator, including an organization admin or another member who can read an org_shared artifact. Those cases share this body. 409 CONTENT_CONFLICT: Another replace of the same artifact revision finished first. Upload again to replace the current content. Delete returns this code when concurrent replaces prevent deletion after eight attempts. Retry DELETE. 413 FILE_TOO_LARGE: The upload is larger than the 10 MiB HTML limit. A JSON body larger than 102,400 bytes uses the same code with message The request is too large. 413 CONTENT_TOO_LARGE: Stored HTML is larger than the Markdown conversion input limit. 415 UNSUPPORTED_FILE_TYPE: The upload is not a .html or .htm file. 422 CONTENT_TOO_COMPLEX: Markdown conversion exceeded its time, memory, nesting, or output limit. 429 RATE_LIMITED: Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not. 500 INTERNAL_ERROR: An unexpected persistence or service failure. 503 STORAGE_UNAVAILABLE: Object storage failed. A failed upload leaves no artifact row. A failed artifact delete keeps the row. The object may already be gone, so retry DELETE. 503 CONVERSION_UNAVAILABLE: The Markdown conversion worker pool is full. This response does not include Retry-After. 503 UNLOCK_UNAVAILABLE: Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
               },
               "message": {
                 "type": "string"
@@ -2640,6 +2753,7 @@
         "enum": [
           "INVALID_REQUEST",
           "ORGANIZATION_REQUIRED",
+          "ORGANIZATION_EXISTS",
           "ORGANIZATION_CHANGED",
           "UNAUTHENTICATED",
           "PASSWORD_REQUIRED",
@@ -3362,6 +3476,43 @@
         "required": [
           "email",
           "password"
+        ],
+        "additionalProperties": false
+      },
+      "CreateOrganizationRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "CreateOrganizationResponse": {
+        "type": "object",
+        "properties": {
+          "organization": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "organization"
         ],
         "additionalProperties": false
       }

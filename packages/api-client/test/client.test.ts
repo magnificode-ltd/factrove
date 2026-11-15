@@ -24,6 +24,25 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("Factrove API client", () => {
+  it("posts an organization name for the signed-in user", async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetchStub = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedInit = init;
+      return jsonResponse({ organization: { id: "org-1", name: "Ada Lab" } }, 201);
+    });
+    const client = createFactroveClient({
+      baseUrl: "http://localhost:3001",
+      cookie: "session=1",
+      fetch: fetchStub as typeof fetch
+    });
+    await expect(client.createOrganization("Ada Lab")).resolves.toEqual({
+      organization: { id: "org-1", name: "Ada Lab" }
+    });
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.body).toBe(JSON.stringify({ name: "Ada Lab" }));
+    expect(new Headers(capturedInit?.headers).get("cookie")).toBe("session=1");
+  });
+
   it("posts the documented multipart fields and leaves boundary headers to fetch", async () => {
     let capturedUrl = "";
     let capturedInit: RequestInit | undefined;

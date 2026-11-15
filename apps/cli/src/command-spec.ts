@@ -402,7 +402,7 @@ export const cliReferenceNotes: Record<string, string> = {
     "",
     "`--artifactId` replaces content and prints the same id. The API keeps the current access and any share token. `--access` with `--artifactId` is rejected before a request is sent. Only the owner can replace. Anyone else gets `404 ARTIFACT_NOT_FOUND`.",
     "",
-    "The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. See [Concepts](/concepts#organization-membership).",
+    "The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. Name it in the web app after you sign in. See [Concepts](/concepts#organization-membership).",
     "",
     "Another replace of the same revision returns `409 CONTENT_CONFLICT`. A replace can return `500` after the new object is already committed. GET the artifact before retrying. Replacement does not keep version history and normally deletes the previous object.",
     "",

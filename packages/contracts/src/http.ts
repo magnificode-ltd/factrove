@@ -21,7 +21,11 @@ import {
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   publicUnlockRequestSchema,
-  shareEnvelopeSchema
+  shareEnvelopeSchema,
+  CREATE_ORGANIZATION_REQUEST_MESSAGE,
+  ORGANIZATION_NAME_MESSAGE,
+  createOrganizationRequestSchema,
+  createOrganizationResponseSchema
 } from "./index.js";
 
 export const createApiKeyRequestSchema = z.object({
@@ -219,7 +223,9 @@ export const namedSchemas: Record<string, z.ZodType> = {
   DeleteApiKeyRequest: deleteApiKeyRequestSchema,
   DeleteApiKeyResponse: deleteApiKeyResponseSchema,
   SignUpEmailRequest: signUpEmailRequestSchema,
-  SignInEmailRequest: signInEmailRequestSchema
+  SignInEmailRequest: signInEmailRequestSchema,
+  CreateOrganizationRequest: createOrganizationRequestSchema,
+  CreateOrganizationResponse: createOrganizationResponseSchema
 };
 
 export const httpOperations: HttpOperation[] = [
@@ -256,6 +262,50 @@ export const httpOperations: HttpOperation[] = [
       },
       "401": {
         description: "Missing or invalid credentials. Code `UNAUTHENTICATED`.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "createOrganization",
+    method: "post",
+    path: "/api/v1/onboarding/organization",
+    tags: ["Auth"],
+    summary: "Create the signed-in user's first organization",
+    description:
+      "Session cookie only. An API key is rejected. The body is `{ \"name\" }` and nothing else. The name is NFC-normalized, then rejected when it contains U+0000–U+001F, U+007F–U+009F, U+2028, or U+2029 before trimming, or when the trimmed value is not 1 to 80 Unicode code points. The server generates a unique slug. The user becomes the owner and the session's active organization is set to the new organization. A user who already has a membership gets 409 and no second organization. Cookie writes require an allowed Origin. Limited to 10 requests per 60 seconds per client address.",
+    security: "session",
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: CREATE_ORGANIZATION_REQUEST_MESSAGE,
+      schema: createOrganizationRequestSchema,
+      schemaName: "CreateOrganizationRequest"
+    },
+    responses: {
+      "201": {
+        description: "The organization was created.",
+        schema: createOrganizationResponseSchema,
+        schemaName: "CreateOrganizationResponse"
+      },
+      "400": {
+        description: `Wrong JSON shape, or a name that fails validation. Shape failures use \`${CREATE_ORGANIZATION_REQUEST_MESSAGE}\` An invalid name uses \`${ORGANIZATION_NAME_MESSAGE}\``,
+        schemaName: "ApiError"
+      },
+      "401": {
+        description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.",
+        schemaName: "ApiError"
+      },
+      "403": {
+        description: "The cookie Origin or Referer is not allowed. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "The user already has an organization. Code `ORGANIZATION_EXISTS`.",
+        schemaName: "ApiError"
+      },
+      "429": {
+        description: "Too many create attempts from this client address. Code `RATE_LIMITED`.",
         schemaName: "ApiError"
       }
     }
