@@ -40,7 +40,7 @@ function LoginForm() {
   return (
     <AuthScreen
       title="Sign in"
-      lede="Pick up the HTML your agents have already published."
+      lede="Sign in to your Factrove library."
       footer={
         <>
           New here?{" "}
