@@ -74,5 +74,6 @@ These items are outside the local MVP task list. They follow the same contract a
 | 14 | [Password-protected links](post-mvp/14-password-protected-links.md) | Implemented in this change | Optional Argon2id link password, public unlock with scoped grants and content tickets, attempt throttling, CLI password flags, web password controls and visitor password page |
 | 15 | [Shareable links](post-mvp/15-shareable-links.md) | Done | `PUBLIC_BASE_URL`, owner share and revoke, anonymous public HTML, CLI `share`, web Share control |
 | 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented in this change | Better Auth sign-in, sessions, hashed API keys, owner and member access |
+| 81 | [Organizations before billing](org-first-plan.md) | In progress. The first pull request mounts the organization plugin and rejects the management routes this work does not ship. | Signup stays unchanged. A later guard requires one organization before product routes. Billing stays deferred. |
 
 Task 20 supersedes the unauthenticated local actor in the MVP outcome above. The MVP itself did not require login.
