@@ -38,6 +38,14 @@ afterEach(() => {
   resetPassword.mockReset();
 });
 
+describe("sign in", () => {
+  it("shows the sign-in subtitle", () => {
+    const html = renderToStaticMarkup(<LoginPage />);
+    expect(html).toContain("Sign in");
+    expect(html).toContain("Sign in to your Factrove library.");
+  });
+});
+
 describe("forgot password", () => {
   it("links to forgot password from sign in and keeps the return path", () => {
     const html = renderToStaticMarkup(<LoginPage />);
