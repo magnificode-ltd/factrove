@@ -523,15 +523,19 @@ DECLARE
   candidate_index integer;
 BEGIN
   -- Lock order, held until this transaction commits (including SET NOT NULL below):
-  -- 1. artifact SHARE ROW EXCLUSIVE
+  -- 1. artifact ACCESS EXCLUSIVE
   -- 2. candidate user rows FOR UPDATE, in id order
   -- 3. organization inserts
-  -- The artifact lock comes first so an upload cannot take ROW EXCLUSIVE on
-  -- artifact and then FOR KEY SHARE on creator_user_id while this function
-  -- still holds user locks. Every candidate user is locked before any
-  -- organization insert so a create that already holds a later user's row
-  -- lock cannot wait on a slug this function inserted for an earlier user.
-  LOCK TABLE artifact IN SHARE ROW EXCLUSIVE MODE;
+  -- ACCESS EXCLUSIVE is required. SHARE ROW EXCLUSIVE and EXCLUSIVE do not
+  -- conflict with ACCESS SHARE or ROW SHARE, so a claim's count or a share's
+  -- SELECT FOR UPDATE can start, then wait on its later UPDATE, while
+  -- SET NOT NULL waits on that read lock. The artifact lock comes first so an
+  -- upload cannot take ROW EXCLUSIVE on artifact and then FOR KEY SHARE on
+  -- creator_user_id while this function still holds user locks. Every
+  -- candidate user is locked before any organization insert so a create that
+  -- already holds a later user's row lock cannot wait on a slug this function
+  -- inserted for an earlier user.
+  LOCK TABLE artifact IN ACCESS EXCLUSIVE MODE;
 
   FOR user_row IN
     SELECT "user".id

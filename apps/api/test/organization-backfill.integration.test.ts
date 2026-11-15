@@ -363,6 +363,70 @@ describe("organization backfill", () => {
     `;
     expect(stored[0]?.creator_user_id).toBe("user-uploader");
   });
+
+  it("does not deadlock when a claim reads and then writes during the backfill and NOT NULL change", async () => {
+    await prisma.$executeRaw`
+      UPDATE artifact SET organization_id = 'local-org' WHERE organization_id IS NULL
+    `;
+    const artifactId = randomUUID();
+    await insertArtifact(prisma, {
+      id: artifactId,
+      creatorUserId: "user-tom-a",
+      organizationId: "local-org",
+    });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const claim = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await claim.connect();
+    await migrator.connect();
+    let claimOpen = false;
+    let migratorOpen = false;
+    try {
+      await claim.query("BEGIN");
+      claimOpen = true;
+      await claim.query(`SET lock_timeout = '4s'`);
+      await claim.query(`SELECT count(*) FROM artifact WHERE creator_user_id = 'local-user'`);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query(`ALTER TABLE artifact ALTER COLUMN organization_id SET NOT NULL`);
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForQueryLock(prisma, "factrove_backfill_organizations");
+      await claim.query(
+        `UPDATE artifact SET size_bytes = 41 WHERE id = $1::uuid`,
+        [artifactId],
+      );
+      await claim.query("COMMIT");
+      claimOpen = false;
+      await backfill;
+    } finally {
+      if (claimOpen) {
+        await claim.query("ROLLBACK").catch(() => undefined);
+      }
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await claim.end();
+      await migrator.end();
+    }
+
+    const nullable = await prisma.$queryRaw<Array<{ is_nullable: string }>>`
+      SELECT is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'artifact'
+        AND column_name = 'organization_id'
+    `;
+    expect(nullable[0]?.is_nullable).toBe("NO");
+    const size = await prisma.$queryRaw<Array<{ size_bytes: number }>>`
+      SELECT size_bytes FROM artifact WHERE id = ${artifactId}::uuid
+    `;
+    expect(size[0]?.size_bytes).toBe(41);
+  });
 });
 
 async function waitForBackfillLock(prisma: PrismaClient): Promise<void> {
