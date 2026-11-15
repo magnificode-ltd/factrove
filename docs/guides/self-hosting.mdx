@@ -128,7 +128,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
 | `EMAIL_TRANSPORT` | no | `log` (default), `smtp`, or `brevo`. `log` writes auth email to the API log and does not send it. Link queries are redacted |
 | `EMAIL_LOG_LINKS` | no | `redacted` (default) or `full`. `full` keeps the query and is refused when `NODE_ENV` is `production` |
-| `EMAIL_FROM_ADDRESS` | no | From address. Default `support@factrove.app` |
+| `EMAIL_FROM_ADDRESS` | when transport is `smtp` or `brevo` | From address and the support contact in the footer. Unset with `log` uses `no-reply@localhost`. Factrove Cloud sets `support@factrove.app` |
 | `EMAIL_FROM_NAME` | no | From name. Default `Factrove` |
 | `EMAIL_LOGO_URL` | no | Absolute http(s) logo for auth email. Empty uses the text wordmark |
 | `SMTP_HOST` | when transport is `smtp` | Hostname or IP of any SMTP server |
@@ -473,7 +473,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up invite and the password reset). Unset transport is `log`. From defaults are `support@factrove.app` and `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up invite and the password reset). Unset transport is `log`. `EMAIL_FROM_ADDRESS` is required for `smtp` and `brevo`. Unset with `log` uses `no-reply@localhost`. The from name defaults to `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages, including the footer |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user, password, and `SMTP_REQUIRE_TLS`. User and password are both set or both empty. Unset `SMTP_REQUIRE_TLS` requires STARTTLS when `SMTP_SECURE` is `false` |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
@@ -510,9 +510,9 @@ Creating an account sends one invite email to that address. The signup page and 
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
-`EMAIL_FROM_ADDRESS` defaults to `support@factrove.app`. `EMAIL_FROM_NAME` defaults to `Factrove`. `docker-compose.yml` passes the same names, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`.
+`EMAIL_FROM_NAME` defaults to `Factrove`. `EMAIL_FROM_ADDRESS` is required when `EMAIL_TRANSPORT` is `smtp` or `brevo`. Leave it unset with `log`. The log then uses `no-reply@localhost`, which is only written to the API log. `docker-compose.yml` passes an empty address when the variable is unset, and `EMAIL_LOG_LINKS` with a default of `redacted`. An empty SMTP block with `EMAIL_TRANSPORT=log` is valid. A leftover `BREVO_API_KEY` is ignored unless the transport is `brevo`. Factrove Cloud sets the from address to `support@factrove.app`.
 
-The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready. A "Sign in to Factrove" button links to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `https://factrove.app`. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
+The message greets the person with "Hi {name}," or "Hi," when the name is blank, then says the Factrove account for that address is ready. A "Sign in to Factrove" button links to `WEB_ORIGIN/login`, with that same URL on its own line. The footer says why the message was sent, gives `EMAIL_FROM_ADDRESS` as the support contact, and links to `WEB_ORIGIN`. The link text is Factrove. The plain-text part ends with `Factrove:` followed by that same origin. The HTML and the plain-text part carry the same words. Nothing in the template adds a query parameter.
 
 Set `WEB_ORIGIN` to the public URL of the web app before you send mail. The sign-in link is that origin plus `/login`. The default `http://localhost:3000` only works for a browser on the same machine.
 
@@ -530,7 +530,6 @@ Log, which is also the default when `EMAIL_TRANSPORT` is unset:
 
 ```bash
 EMAIL_TRANSPORT=log
-EMAIL_FROM_ADDRESS=support@factrove.app
 EMAIL_FROM_NAME=Factrove
 ```
 
@@ -538,7 +537,7 @@ Any SMTP server. Leave `SMTP_USER` and `SMTP_PASSWORD` empty together when that 
 
 ```bash
 EMAIL_TRANSPORT=smtp
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 SMTP_HOST=mail.example.com
 SMTP_PORT=587
@@ -551,7 +550,7 @@ Brevo's SMTP relay. The login and the SMTP key come from the Brevo SMTP settings
 
 ```bash
 EMAIL_TRANSPORT=smtp
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
@@ -564,7 +563,7 @@ Brevo's HTTP API:
 
 ```bash
 EMAIL_TRANSPORT=brevo
-EMAIL_FROM_ADDRESS=support@factrove.app
+EMAIL_FROM_ADDRESS=library@example.com
 EMAIL_FROM_NAME=Factrove
 BREVO_API_KEY=replace-with-a-transactional-key
 ```
@@ -613,7 +612,7 @@ The signup form at `http://localhost:3000/signup` sends the same request. `pnpm 
 
 Forgot password is `/forgot-password`. The sign-in page links to it. The form always shows the same confirmation, so the page does not say whether that address has an account. `POST /api/auth/request-password-reset` does the same: a missing address and a known address both return 200 with the same JSON.
 
-A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...`, not the API origin. The token expires in one hour and works once. `/reset-password` asks for a new password of 8 to 128 characters and rejects a password on the common-password list. An expired or used link shows that state and offers another request. No new environment variable is required. Reset mail uses the same `EMAIL_TRANSPORT`, from address, from name, and logo as the invite.
+A known address gets one email. The link is `WEB_ORIGIN/reset-password?token=...`, not the API origin. The token expires in one hour and works once. `/reset-password` asks for a new password of 8 to 128 characters and rejects a password on the common-password list. An expired or used link shows that state and offers another request. No new environment variable is required. Reset mail uses the same `EMAIL_TRANSPORT`, from address, from name, and logo as the invite. The footer link and the plain-text site line are `WEB_ORIGIN`. The link text is Factrove.
 
 Better Auth limits `POST /api/auth/request-password-reset` to 3 requests per 60 seconds per client address, and `POST /api/auth/reset-password` to 10 per 60 seconds. The request does not wait for the mail provider. A full send queue logs `Password reset email skipped for <address>. The send queue is full.` A provider failure logs `Password reset email failed for <address>.` and does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. With `EMAIL_TRANSPORT=log` the line is `EMAIL_TRANSPORT is log. Password reset email was not sent.` The logged link keeps the path and replaces the query with `?[redacted]`, so the token is not in the log. `EMAIL_LOG_LINKS=full` logs the query only when `NODE_ENV` is not `production`. When SMTP or Brevo accepts it, the line is `Password reset email sent to <address>`. A successful reset signs out every existing session for that account.
 

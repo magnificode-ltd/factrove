@@ -35,6 +35,7 @@ describe("password reset email", () => {
       recipient: { email: `  ${PLUS_EMAIL}  `, name: " Ada <script> " },
       resetUrl: resetUrl ?? "",
       supportEmail: "support@factrove.app",
+      siteUrl: WEB_ORIGIN,
     });
     expect(message.to).toBe(PLUS_EMAIL);
     expect(message.subject).toBe(PASSWORD_RESET_EMAIL_SUBJECT);
@@ -53,7 +54,10 @@ describe("password reset email", () => {
     expect(message.html).toContain("#5e64d6");
     expect(message.html).toContain("prefers-color-scheme: dark");
     expect(message.html).toContain('class="link" href="mailto:support@factrove.app"');
-    expect(message.html).toContain('href="https://factrove.app"');
+    expect(message.html).toContain(`href="${WEB_ORIGIN}" style="color:#5e64d6; word-break:break-word; overflow-wrap:anywhere;">Factrove</a>`);
+    expect(message.text).toContain(`Factrove: ${WEB_ORIGIN}`);
+    expect(message.html).not.toContain("https://factrove.app");
+    expect(message.text).not.toContain("https://factrove.app");
     expect(message.html).not.toContain("<script>");
     expect(message.html).not.toContain(API_ORIGIN);
     expect(message.html).not.toContain("<img");
@@ -66,6 +70,7 @@ describe("password reset email", () => {
       recipient: { email: PLUS_EMAIL, name: "Ada Lovelace" },
       resetUrl,
       supportEmail: "support@factrove.app",
+      siteUrl: WEB_ORIGIN,
     });
     const redacted: string[] = [];
     await new LogEmailSender({
