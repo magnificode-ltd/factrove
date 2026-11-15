@@ -411,8 +411,12 @@ describe("local runtime", () => {
     assert.equal(cli.files.includes("NOTICE"), true);
     const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
     assert.match(compose, /SOURCE_CODE_URL: \$\{SOURCE_CODE_URL:-https:\/\/github\.com\/magnificode-ltd\/factrove\}/);
+    assert.match(compose, /DOCS_BASE_URL: \$\{DOCS_BASE_URL:-https:\/\/factrove\.mintlify\.app\}/);
     const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
     assert.match(apiExample, /^# SOURCE_CODE_URL=https:\/\/github\.com\/magnificode-ltd\/factrove$/m);
+    assert.match(apiExample, /^# DOCS_BASE_URL=https:\/\/factrove\.mintlify\.app$/m);
+    assert.equal(apiExample.includes("support@factrove.app"), false);
+    assert.equal(apiExample.includes("https://factrove.app"), false);
   });
 
   it("copies only NEXT_PUBLIC_API_URL from the application env file", async () => {

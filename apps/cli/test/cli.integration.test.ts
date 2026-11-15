@@ -634,7 +634,7 @@ describe("factrove get", () => {
 
 describe("factrove share", () => {
   const token = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  const shareUrl = `https://factrove.app/share/${artifactId}/${token}`;
+  const shareUrl = `https://library.example.com/share/${artifactId}/${token}`;
 
   it("prints only the public link and does not print it again on revoke", async () => {
     const stub = await startStub((request) => {

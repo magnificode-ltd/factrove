@@ -105,7 +105,7 @@ function workerConfig(): ApiConfig {
     trustedProxies: [],
     shareTokenKey: null,
     emailTransport: "log",
-    emailFromAddress: "support@factrove.app",
+    emailFromAddress: "library@example.com",
     emailFromName: "Factrove",
     emailLogoUrl: null,
     emailLogFullLinks: false,

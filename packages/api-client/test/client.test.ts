@@ -292,7 +292,7 @@ describe("Factrove API client", () => {
     const share = {
       share: {
         shared: true,
-        shareUrl: `https://factrove.app/share/${artifact.id}/${token}`,
+        shareUrl: `https://library.example.com/share/${artifact.id}/${token}`,
         passwordProtected: false
       }
     };
@@ -344,7 +344,7 @@ describe("Factrove API client", () => {
     const grant = "g1.abc.signature";
     const calls: Array<{ url: string; method: string | undefined; headers: Headers; body: unknown }> = [];
     const protectedShare = {
-      share: { shared: true, shareUrl: `https://factrove.app/share/${artifact.id}/${token}`, passwordProtected: true }
+      share: { shared: true, shareUrl: `https://library.example.com/share/${artifact.id}/${token}`, passwordProtected: true }
     };
     const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(input), method: init?.method, headers: new Headers(init?.headers), body: init?.body });
