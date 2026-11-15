@@ -265,9 +265,111 @@ describe("organization backfill", () => {
     });
     expect(memberships).toEqual([{ organizationId: "race-org" }]);
   });
+
+  it("does not deadlock when a later user already holds their row lock and inserts the same slug", async () => {
+    await insertUser(prisma, { id: "ada-a", name: "Ada", email: "ada.a@example.com" });
+    await insertUser(prisma, { id: "ada-b", name: "Ada", email: "ada.b@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const creator = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await creator.connect();
+    await migrator.connect();
+    let migratorOpen = false;
+    try {
+      await creator.query("BEGIN");
+      await creator.query(`SET lock_timeout = '4s'`);
+      await creator.query(`SELECT id FROM "user" WHERE id = 'ada-b' FOR UPDATE`);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForQueryLock(prisma, "factrove_backfill_organizations");
+      await creator.query(
+        `INSERT INTO organization (id, name, slug, "createdAt")
+         VALUES ('ada-b-org', 'Ada''s organization', 'ada-s-organization', CURRENT_TIMESTAMP)`,
+      );
+      await creator.query(
+        `INSERT INTO member (id, "organizationId", "userId", role, "createdAt")
+         VALUES ('ada-b-member', 'ada-b-org', 'ada-b', 'owner', CURRENT_TIMESTAMP)`,
+      );
+      await creator.query("COMMIT");
+      await backfill;
+    } finally {
+      await creator.query("ROLLBACK").catch(() => undefined);
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await creator.end();
+      await migrator.end();
+    }
+
+    const adaA = await ownerOrganization(prisma, "ada-a");
+    const adaB = await ownerOrganization(prisma, "ada-b");
+    expect(adaB.slug).toBe("ada-s-organization");
+    expect(adaA.slug).toBe("ada-s-organization-2");
+    expect(await prisma.member.count({ where: { userId: { in: ["ada-a", "ada-b"] } } })).toBe(2);
+  });
+
+  it("does not deadlock when an upload locks an artifact row while the backfill holds user locks", async () => {
+    await insertUser(prisma, { id: "user-uploader", name: "Uploader", email: "uploader@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    const uploader = new Client({ connectionString: isolated.databaseUrl });
+    await migrator.connect();
+    await uploader.connect();
+    const artifactId = randomUUID();
+    let migratorOpen = false;
+    let uploaderOpen = false;
+    try {
+      await migrator.query("BEGIN");
+      migratorOpen = true;
+      await migrator.query("SELECT factrove_backfill_organizations()");
+      const upload = uploader.query("BEGIN").then(async () => {
+        uploaderOpen = true;
+        await uploader.query(
+          `INSERT INTO artifact (
+             id, creator_user_id, organization_id, access_type, mime_type, size_bytes, object_key, updated_at
+           ) VALUES (
+             $1::uuid, 'user-uploader', NULL, 'private'::"access_type", 'text/html', 4, $2, CURRENT_TIMESTAMP
+           )`,
+          [artifactId, `${artifactId}.html`],
+        );
+      });
+      await waitForQueryLock(prisma, "INSERT INTO artifact");
+      await migrator.query("COMMIT");
+      migratorOpen = false;
+      await upload;
+      await uploader.query("COMMIT");
+      uploaderOpen = false;
+    } finally {
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      if (uploaderOpen) {
+        await uploader.query("ROLLBACK").catch(() => undefined);
+      }
+      await migrator.end();
+      await uploader.end();
+    }
+
+    const stored = await prisma.$queryRaw<Array<{ creator_user_id: string }>>`
+      SELECT creator_user_id FROM artifact WHERE id = ${artifactId}::uuid
+    `;
+    expect(stored[0]?.creator_user_id).toBe("user-uploader");
+  });
 });
 
 async function waitForBackfillLock(prisma: PrismaClient): Promise<void> {
+  await waitForQueryLock(prisma, "factrove_backfill_organizations");
+}
+
+async function waitForQueryLock(prisma: PrismaClient, query: string): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < 8_000) {
     const rows = await prisma.$queryRaw<Array<{ waiting: number }>>`
@@ -276,14 +378,14 @@ async function waitForBackfillLock(prisma: PrismaClient): Promise<void> {
       WHERE waiter.pid <> pg_backend_pid()
         AND waiter.state = 'active'
         AND waiter.wait_event_type = 'Lock'
-        AND waiter.query ILIKE '%factrove_backfill_organizations%'
+        AND waiter.query ILIKE ${`%${query}%`}
     `;
     if (Number(rows[0]?.waiting ?? 0) > 0) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("backfill did not wait on the user lock");
+  throw new Error(`query did not wait on a lock: ${query}`);
 }
 
 async function slugCandidates(prisma: PrismaClient, name: string, suffixes: string[]): Promise<string[]> {

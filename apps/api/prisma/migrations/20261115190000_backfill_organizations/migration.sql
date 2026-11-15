@@ -517,7 +517,22 @@ DECLARE
   locked_id text;
   locked_name text;
   locked_email text;
+  candidate_ids text[] := ARRAY[]::text[];
+  candidate_names text[] := ARRAY[]::text[];
+  candidate_emails text[] := ARRAY[]::text[];
+  candidate_index integer;
 BEGIN
+  -- Lock order, held until this transaction commits (including SET NOT NULL below):
+  -- 1. artifact SHARE ROW EXCLUSIVE
+  -- 2. candidate user rows FOR UPDATE, in id order
+  -- 3. organization inserts
+  -- The artifact lock comes first so an upload cannot take ROW EXCLUSIVE on
+  -- artifact and then FOR KEY SHARE on creator_user_id while this function
+  -- still holds user locks. Every candidate user is locked before any
+  -- organization insert so a create that already holds a later user's row
+  -- lock cannot wait on a slug this function inserted for an earlier user.
+  LOCK TABLE artifact IN SHARE ROW EXCLUSIVE MODE;
+
   FOR user_row IN
     SELECT "user".id
     FROM "user"
@@ -527,19 +542,30 @@ BEGIN
       )
     ORDER BY "user".id
   LOOP
-    -- Same user-row lock as create-first-organization. A concurrent create waits,
-    -- then this recheck skips the user if that create committed a membership.
     SELECT "user".id, "user".name, "user".email
     INTO locked_id, locked_name, locked_email
     FROM "user"
     WHERE "user".id = user_row.id
     FOR UPDATE;
-    IF locked_id IS NULL OR EXISTS (
-      SELECT 1 FROM member WHERE member."userId" = locked_id
-    ) THEN
+    IF locked_id IS NULL THEN
       CONTINUE;
     END IF;
-    display_name := factrove_backfill_display_name(locked_name, locked_email);
+    candidate_ids := array_append(candidate_ids, locked_id);
+    candidate_names := array_append(candidate_names, locked_name);
+    candidate_emails := array_append(candidate_emails, locked_email);
+  END LOOP;
+
+  FOR candidate_index IN 1 .. coalesce(array_length(candidate_ids, 1), 0) LOOP
+    locked_id := candidate_ids[candidate_index];
+    -- Same recheck as create-first-organization. The create may have committed
+    -- a membership before this row lock was acquired.
+    IF EXISTS (SELECT 1 FROM member WHERE member."userId" = locked_id) THEN
+      CONTINUE;
+    END IF;
+    display_name := factrove_backfill_display_name(
+      candidate_names[candidate_index],
+      candidate_emails[candidate_index]
+    );
     suffixes := ARRAY[
       substr(md5(locked_id || 'a' || clock_timestamp()::text || random()::text), 1, 6),
       substr(md5(locked_id || 'b' || clock_timestamp()::text || random()::text), 1, 6),
@@ -579,10 +605,6 @@ BEGIN
       session."activeOrganizationId" IS NULL
       OR session."activeOrganizationId" = ''
     );
-
-  -- Held until this transaction commits, including the NOT NULL change below,
-  -- so a still-running old API cannot insert a null organization_id after the sweep.
-  LOCK TABLE artifact IN SHARE ROW EXCLUSIVE MODE;
 
   UPDATE artifact
   SET organization_id = 'local-org'
