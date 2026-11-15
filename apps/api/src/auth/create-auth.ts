@@ -7,6 +7,7 @@ import type { PrismaClient } from "@prisma/client";
 import { logWithoutThrowing } from "../mail/safe-log.js";
 import { factroveApiKey } from "./api-key-plugin.js";
 import { CLIENT_IP_HEADER } from "./client-ip.js";
+import { factroveOrganization, rejectClosedOrganizationAction } from "./organization-plugin.js";
 
 export type CreatedAccount = {
   email: string;
@@ -46,18 +47,8 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     database: input.database ?? prismaAdapter(input.prisma, {
       provider: "postgresql",
     }),
-    // Organization HTTP routes stay unmounted. This is the same session column the
-    // organization plugin writes. input: false keeps it server-controlled. Membership
-    // is checked when the session is read; a stored id the user does not belong to is ignored.
-    session: {
-      additionalFields: {
-        activeOrganizationId: {
-          type: "string",
-          required: false,
-          input: false,
-        },
-      },
-    },
+    // The organization plugin owns session.activeOrganizationId (input: false).
+    // Membership is checked when the session is read; a stored id the user does not belong to is ignored.
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
@@ -89,10 +80,9 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
         ? { crossSubDomainCookies: { enabled: true, domain: input.cookieDomain } }
         : {}),
     },
-    plugins: [factroveApiKey()],
-    // Account creation is the invite path. Organization routes stay unmounted,
-    // so there is no separate member-invite request. The address is stored in
-    // lower case and a plus tag is kept (name+tag@host).
+    plugins: [factroveOrganization(), factroveApiKey()],
+    // Account creation sends the welcome email. It is not an organization invite.
+    // The address is stored in lower case and a plus tag is kept (name+tag@host).
     databaseHooks: {
       user: {
         create: {
@@ -126,6 +116,7 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        rejectClosedOrganizationAction(ctx.path, ctx.body);
         if (!ctx.path?.includes("/api-key")) {
           return;
         }
