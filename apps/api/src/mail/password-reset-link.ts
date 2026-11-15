@@ -9,9 +9,23 @@ export const PASSWORD_RESET_REQUEST_MAX = 3;
 export const PASSWORD_RESET_SUBMIT_WINDOW_SECONDS = 60;
 export const PASSWORD_RESET_SUBMIT_MAX = 10;
 
+// Same default lifetime as a reset token. Sign-in does not wait for it.
+export const EMAIL_VERIFICATION_EXPIRES_IN_SECONDS = 60 * 60;
+export const EMAIL_VERIFICATION_EXPIRES_LABEL = "one hour";
+export const EMAIL_VERIFICATION_REQUEST_WINDOW_SECONDS = 60;
+export const EMAIL_VERIFICATION_REQUEST_MAX = 3;
+
 const TOKEN_MAX_LENGTH = 4096;
 
 export function passwordResetUrl(webOrigin: string, token: string): string | null {
+  return actionUrl(webOrigin, "/reset-password", token);
+}
+
+export function emailVerificationUrl(webOrigin: string, token: string): string | null {
+  return actionUrl(webOrigin, "/verify-email", token);
+}
+
+function actionUrl(webOrigin: string, pathname: string, token: string): string | null {
   if (!isResetToken(token)) {
     return null;
   }
@@ -21,7 +35,7 @@ export function passwordResetUrl(webOrigin: string, token: string): string | nul
   } catch {
     return null;
   }
-  const url = new URL("/reset-password", origin.origin);
+  const url = new URL(pathname, origin.origin);
   url.searchParams.set("token", token);
   return url.toString();
 }

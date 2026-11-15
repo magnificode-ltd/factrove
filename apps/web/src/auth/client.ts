@@ -20,6 +20,12 @@ export type FactroveAuthClient = {
   signOut: () => Promise<unknown>;
   requestPasswordReset: (input: { email: string }) => Promise<AuthCall>;
   resetPassword: (input: { newPassword: string; token: string }) => Promise<AuthCall>;
+  sendVerificationEmail: (input: { email: string; callbackURL?: string }) => Promise<AuthCall>;
+  verifyEmail: (input: { query: { token: string } }) => Promise<AuthCall>;
+  getSession: () => Promise<{
+    data: { user: { id: string; email: string; name: string; emailVerified: boolean } } | null;
+    error: AuthError;
+  }>;
   apiKey: {
     list: () => Promise<{
       data: { apiKeys: Array<{ id: string; name: string | null; start: string | null }> } | null;
@@ -59,6 +65,9 @@ export const authClient: FactroveAuthClient = {
   signOut: () => client().signOut(),
   requestPasswordReset: (input) => client().requestPasswordReset(input),
   resetPassword: (input) => client().resetPassword(input),
+  sendVerificationEmail: (input) => client().sendVerificationEmail(input),
+  verifyEmail: (input) => client().verifyEmail(input),
+  getSession: () => client().getSession(),
   apiKey: {
     list: () => client().apiKey.list(),
     create: (input) => client().apiKey.create(input),
