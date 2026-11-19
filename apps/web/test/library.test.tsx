@@ -167,6 +167,17 @@ describe("library requests", () => {
     expect(html).not.toContain("list only");
   });
 
+  it("sends a signed-in user with no organization to onboarding", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "ORGANIZATION_SETUP_REQUIRED", message: "Create an organization to continue." } }, 403)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const library = await loadLibrary(client, "mine");
+    const viewer = await loadArtifact(client, mineId);
+    expect(library).toEqual({ status: "setup-required", view: "mine" });
+    expect(viewer).toEqual({ status: "setup-required" });
+  });
+
   it("treats an unauthenticated library as signed out", async () => {
     const fetchImpl = stubFetch(async () =>
       jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } }, 401)

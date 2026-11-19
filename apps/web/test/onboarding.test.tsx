@@ -15,7 +15,8 @@ const redirect = vi.hoisted(() => vi.fn((path: string) => {
 }));
 const api = vi.hoisted(() => ({
   getContext: vi.fn(),
-  listArtifacts: vi.fn()
+  listArtifacts: vi.fn(),
+  getArtifact: vi.fn()
 }));
 
 vi.mock("@/api/client", () => ({
@@ -31,6 +32,7 @@ vi.mock("next/navigation", () => ({ redirect }));
 import { CreateOrganizationForm } from "../src/components/create-organization-form";
 import OnboardingPage from "../src/app/(browse)/onboarding/page";
 import HomePage from "../src/app/(browse)/page";
+import ArtifactPage from "../src/app/(browse)/artifacts/[id]/page";
 
 let root: Root | undefined;
 
@@ -44,14 +46,15 @@ afterEach(() => {
   redirect.mockClear();
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
+  api.getArtifact.mockReset();
 });
 
 describe("create organization page", () => {
   it("asks a signed-in user with no organization for a name", async () => {
-    api.getContext.mockResolvedValue({
-      user: { id: "user-1", name: "Ada" },
-      organization: null
-    });
+    api.getContext.mockRejectedValue(new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    }));
     const html = renderToStaticMarkup(await OnboardingPage());
     expect(html).toContain("Name your organization");
     expect(html).toContain("Organization name");
@@ -90,20 +93,34 @@ describe("create organization page", () => {
   });
 
   it("shows the library to a member and the name page to a user with no organization", async () => {
-    api.getContext.mockResolvedValue({
-      user: { id: "user-1", name: "Ada" },
-      organization: null
-    });
-    api.listArtifacts.mockResolvedValue({ items: [] });
+    api.getContext.mockRejectedValue(new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    }));
+    api.listArtifacts.mockRejectedValue(new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    }));
     await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
 
     api.getContext.mockResolvedValue({
       user: { id: "user-1", name: "Ada" },
       organization: { id: "org-1", name: "Ada Lab" }
     });
+    api.listArtifacts.mockResolvedValue({ items: [] });
     const html = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
     expect(html).toContain("My artifacts");
     expect(html).toContain("Ada Lab");
+
+    api.getContext.mockRejectedValue(new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    }));
+    api.getArtifact.mockRejectedValue(new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    }));
+    await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /onboarding");
   });
 });
 

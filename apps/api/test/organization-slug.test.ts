@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeOrganizationName } from "@factrove/contracts";
+import { backfillOrganizationDisplayName } from "../src/auth/organization-backfill-name.js";
 import { organizationSlugCandidates } from "../src/auth/organization-slug.js";
 
 describe("organization names and slugs", () => {
@@ -26,6 +27,15 @@ describe("organization names and slugs", () => {
     expect(organizationSlugCandidates("Local", () => "abc123")[0]).toBe("local-2");
     expect(organizationSlugCandidates("!!!", () => "abc123")[0]).toBe("org-2");
     expect(organizationSlugCandidates("Árvíz", () => "abc123")[0]).toBe("arviz");
+  });
+
+  it("names a backfilled organization from the user, then the email", () => {
+    expect(backfillOrganizationDisplayName("  Tom  ", "tom@example.com")).toBe("Tom's organization");
+    expect(backfillOrganizationDisplayName("   ", "ada.lovelace@example.com")).toBe("ada.lovelace's organization");
+    expect(backfillOrganizationDisplayName("", "@example.com")).toBe("Organization");
+    expect(backfillOrganizationDisplayName("Tom\nX", "tom@example.com")).toBe("Organization");
+    expect(backfillOrganizationDisplayName("a".repeat(80), "a@example.com")).toBe("Organization");
+    expect(backfillOrganizationDisplayName("\nTom\n", "tom@example.com")).toBe("Tom's organization");
   });
 
   it("keeps a numeric suffix when the stem is already at the length cap", () => {

@@ -15,6 +15,13 @@ import { authPageHref } from "@/auth/return-path";
 
 const loginHref = authPageHref("login", "/account/api-keys");
 
+function organizationSetupRequired(error: { status?: number; code?: string; message?: string } | null | undefined): boolean {
+  if (!error || error.status !== 403) {
+    return false;
+  }
+  return error.code === "ORGANIZATION_SETUP_REQUIRED" || error.message === "Create an organization to continue.";
+}
+
 type ListedKey = {
   id: string;
   name: string | null;
@@ -33,6 +40,10 @@ export default function ApiKeysPage() {
     if (result.error) {
       if (result.error.status === 401) {
         window.location.assign(loginHref);
+        return;
+      }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
         return;
       }
       setError(result.error.message ?? "API keys could not be loaded.");
@@ -61,6 +72,10 @@ export default function ApiKeysPage() {
         window.location.assign(loginHref);
         return;
       }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
+        return;
+      }
       setError(result.error?.message ?? "The API key could not be created.");
       return;
     }
@@ -76,6 +91,10 @@ export default function ApiKeysPage() {
     if (result.error) {
       if (result.error.status === 401) {
         window.location.assign(loginHref);
+        return;
+      }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
         return;
       }
       setError(result.error.message ?? "The API key could not be revoked.");

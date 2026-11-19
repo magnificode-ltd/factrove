@@ -78,7 +78,7 @@ A ready API returns `{"status":"ok"}`. `compose.yaml` is a different file. `dock
 
 ## Create the first user and an API key
 
-The Compose stack does not seed a user. Open `http://localhost:3000/signup` and create an account with a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in. The library then asks you to name an organization at `http://localhost:3000/onboarding`. That organization is the one your account belongs to.
+The Compose stack does not seed a user. Open `http://localhost:3000/signup` and create an account with a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in. The library then asks you to name an organization at `http://localhost:3000/onboarding`. That organization is the one your account belongs to. Until it exists, the library, the viewer, and API key pages return there, and the API rejects product routes with `403 ORGANIZATION_SETUP_REQUIRED`.
 
 Creating the account sends one verification email, which also welcomes the person. Sign-in is not blocked. Forgot password is at `/forgot-password` and uses that same mail setup. With `EMAIL_TRANSPORT` unset or `log`, the API writes that message to its log and does not send it. [Invite email](/self-host/deploy#invite-email) is how to switch on SMTP or Brevo.
 

@@ -2,6 +2,7 @@ import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
 import type { ArtifactDto, ContextEnvelope, ShareState } from "@factrove/contracts";
 import { unavailableMessage } from "@/api/errors";
 import { artifactReturnPath } from "@/auth/return-path";
+import { isOrganizationSetupRequired } from "@/library/load-library";
 
 export type ViewerModel =
   | {
@@ -13,12 +14,16 @@ export type ViewerModel =
     }
   | { status: "missing"; message: string }
   | { status: "signed-out"; message: string; returnTo: string }
+  | { status: "setup-required" }
   | { status: "unavailable"; message: string };
 
 export async function loadArtifact(client: FactroveClient, id: string): Promise<ViewerModel> {
   const returnTo = artifactReturnPath(id);
   const [contextResult, artifactResult] = await Promise.allSettled([client.getContext(), client.getArtifact(id)]);
 
+  if (isSetupRequired(contextResult) || isSetupRequired(artifactResult)) {
+    return { status: "setup-required" };
+  }
   if (artifactResult.status === "fulfilled") {
     const artifact = artifactResult.value.artifact;
     const context = contextResult.status === "fulfilled" ? contextResult.value : null;
@@ -45,6 +50,10 @@ export async function loadArtifact(client: FactroveClient, id: string): Promise<
     return { status: "missing", message };
   }
   return { status: "unavailable", message: unavailableMessage(artifactResult.reason) };
+}
+
+function isSetupRequired(result: PromiseSettledResult<unknown>): boolean {
+  return result.status === "rejected" && isOrganizationSetupRequired(result.reason);
 }
 
 function isUnauthenticated(result: PromiseSettledResult<unknown>): boolean {

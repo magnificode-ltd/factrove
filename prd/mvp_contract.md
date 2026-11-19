@@ -11,7 +11,7 @@ This contract translates [the agreed MVP end state](./MVP_END_STATE.md) into sha
 - NestJS API owns database and S3 credentials. Web/CLI only know HTTP origins.
 - `BETTER_AUTH_SECRET` is required and must be at least 32 characters. It signs session cookies. Content grants use a separate HMAC subkey, `HMAC-SHA256(BETTER_AUTH_SECRET, "factrove:content-grant:v1")`. The committed example is a placeholder, not a credential to reuse outside local development.
 - Explicit, idempotent local seed creates user `local-user` (Local User, `local@example.invalid`) and organization `local-org` (Local Organization, slug `local`) in the Better Auth-generated identity tables. That user has no password and cannot sign in. Seed does not create a membership.
-- `pnpm db:claim-local-artifacts -- --email you@example.com` reassigns artifacts whose creator is `local-user` to an account that can already sign in. The account must have a credential row with a password. Artifact ids stay the same. It adds a membership for each organization those artifacts reference when the account is not already a member. It refuses `local-user`, an account with no password, and an unknown or ambiguous email. It does nothing on a second run and does not print secrets.
+- `pnpm db:claim-local-artifacts -- --email you@example.com` reassigns artifacts whose creator is `local-user` to an account that can already sign in. The account must have a credential row with a password and exactly one organization membership. Artifact ids stay the same. Their `organization_id` becomes that membership's organization. The command adds no membership. It refuses `local-user`, an account with no password, an account that does not have exactly one membership, and an unknown or ambiguous email. It does nothing on a second run and does not print secrets.
 - The API does not impersonate a configured local user. Collection routes require a session or an API key. `GET /api/v1/health` stays public.
 - Requests do not accept creator IDs or organization IDs. The API derives them from the signed-in user or the API-key owner.
 - Better Auth core + organization-plugin schema, including required supporting tables, is generated from `auth-schema.config.ts`. Runtime auth is email and password and mounts the organization plugin. Creating or deleting an organization, inviting or removing members, changing roles, leaving, renaming, and switching or clearing the active organization are rejected. `GET /organization/get-organization` and `GET /organization/get-full-organization` are rejected too. Signup still creates no membership. `POST /api/v1/onboarding/organization` creates the signed-in user's first organization from `{ "name" }`, with that user as owner, and sets it active. A second membership is `409 ORGANIZATION_EXISTS`. An API key is rejected. Membership is enforced by reading the `member` table. There is no one-org uniqueness rule.
@@ -152,8 +152,10 @@ Return the common JSON envelope without stack traces or secrets:
 | Status | Code | Example |
 | --- | --- | --- |
 | 400 | INVALID_REQUEST | Missing/multiple files, invalid access/view/format/ID/name, invalid UTF-8 |
-| 400 | ORGANIZATION_REQUIRED | org_shared without a current organization membership |
+| 400 | ORGANIZATION_REQUIRED | org_shared whose current organization disappeared before the share was saved |
 | 401 | UNAUTHENTICATED | Missing session or API key on a product route |
+| 403 | ORGANIZATION_SETUP_REQUIRED | Authenticated caller with no organization membership |
+| 409 | ORGANIZATION_SELECTION_REQUIRED | Authenticated caller with several memberships and no active organization |
 | 401 | PASSWORD_REQUIRED | Protected public detail or content without a valid grant or ticket |
 | 401 | PASSWORD_INCORRECT | Wrong password on the public unlock route |
 | 403 | FORBIDDEN | Cookie-authenticated write whose origin is not WEB_ORIGIN |

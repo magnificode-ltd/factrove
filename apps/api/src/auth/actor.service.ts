@@ -5,11 +5,23 @@ import { fromNodeHeaders } from "better-auth/node";
 import { PrismaService } from "../database/index.js";
 import { ApiErrorException } from "../services/api-error.js";
 import { AuthService } from "./auth.service.js";
+import {
+  ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
+  ORGANIZATION_SETUP_REQUIRED_MESSAGE,
+  resolveCurrentOrganization,
+  type ResolvedOrganization,
+} from "./current-organization.js";
 
 export type Actor = ContextEnvelope & {
   via: "session" | "api-key";
   // Set for a session cookie. API keys have no session row to lock.
   sessionId: string | null;
+  organizationStatus: ResolvedOrganization["status"];
+};
+
+export type ActorWithOrganization = Actor & {
+  organization: NonNullable<Actor["organization"]>;
+  organizationStatus: "ready";
 };
 
 export type HeaderSource = {
@@ -29,6 +41,23 @@ export class ActorService {
       throw new ApiErrorException(401, "UNAUTHENTICATED", "Sign in to continue.");
     }
     return actor;
+  }
+
+  // Authenticated product routes. Onboarding and auth stay on requireActor.
+  async requireCurrentOrganization(request: HeaderSource): Promise<ActorWithOrganization> {
+    const actor = await this.requireActor(request);
+    this.ensureCurrentOrganization(actor);
+    return actor;
+  }
+
+  ensureCurrentOrganization(actor: Actor): asserts actor is ActorWithOrganization {
+    if (actor.organizationStatus === "ready" && actor.organization) {
+      return;
+    }
+    if (actor.organizationStatus === "selection-required") {
+      throw new ApiErrorException(409, "ORGANIZATION_SELECTION_REQUIRED", ORGANIZATION_SELECTION_REQUIRED_MESSAGE);
+    }
+    throw new ApiErrorException(403, "ORGANIZATION_SETUP_REQUIRED", ORGANIZATION_SETUP_REQUIRED_MESSAGE);
   }
 
   async resolve(request: HeaderSource): Promise<Actor | null> {
@@ -53,10 +82,15 @@ export class ActorService {
     if (!session?.user) {
       return null;
     }
-    const organization = await this.organizationFor(session.user.id, readActiveOrganizationId(session.session));
+    const resolved = await resolveCurrentOrganization(
+      this.prisma,
+      session.user.id,
+      readActiveOrganizationId(session.session),
+    );
     return {
       user: { id: session.user.id, name: session.user.name },
-      organization,
+      organization: resolved.status === "ready" ? resolved.organization : null,
+      organizationStatus: resolved.status,
       via: "session",
       sessionId: readSessionId(session.session),
     };
@@ -74,35 +108,14 @@ export class ActorService {
     if (!user) {
       return null;
     }
-    const organization = await this.organizationFor(user.id, null);
+    const resolved = await resolveCurrentOrganization(this.prisma, user.id, null);
     return {
       user: { id: user.id, name: user.name },
-      organization,
+      organization: resolved.status === "ready" ? resolved.organization : null,
+      organizationStatus: resolved.status,
       via: "api-key",
       sessionId: null,
     };
-  }
-
-  private async organizationFor(userId: string, activeOrganizationId: string | null): Promise<ContextEnvelope["organization"]> {
-    if (activeOrganizationId) {
-      const active = await this.prisma.member.findFirst({
-        where: { userId, organizationId: activeOrganizationId },
-        select: { organization: { select: { id: true, name: true } } },
-      });
-      if (active) {
-        return active.organization;
-      }
-    }
-    const memberships = await this.prisma.member.findMany({
-      where: { userId },
-      select: { organization: { select: { id: true, name: true } } },
-      orderBy: { createdAt: "asc" },
-      take: 2,
-    });
-    if (memberships.length === 1) {
-      return memberships[0]?.organization ?? null;
-    }
-    return null;
   }
 }
 

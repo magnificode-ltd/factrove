@@ -14,7 +14,7 @@ import { PrismaService } from "../src/database/prisma.service.js";
 import { seedLocalIdentities } from "../src/database/seed/seed-local-identities.js";
 import { API_CONFIG, type ApiConfig } from "../src/services/api-config.js";
 import { BLOB_STORE, type BlobStore } from "../src/storage/blob-store.js";
-import { signUpWithApiKey, TEST_AUTH_SECRET } from "./auth-session.js";
+import { createSessionApiKey, signUp, TEST_AUTH_SECRET } from "./auth-session.js";
 import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
 
 const execFileAsync = promisify(execFile);
@@ -81,15 +81,17 @@ describe("create the first organization", () => {
     }
   });
 
-  it("creates one owner organization for a session and leaves other product routes open", async () => {
-    const first = await signUpWithApiKey(baseUrl, {
+  it("creates one owner organization for a session and rejects product routes until then", async () => {
+    const first = await signUp(baseUrl, {
       email: "ada@example.com",
       password: "ada-password-1",
       name: "Ada",
-      keyName: "ada",
     });
     const before = await fetch(`${baseUrl}/api/v1/artifacts`, { headers: { cookie: first.cookie } });
-    expect(before.status).toBe(200);
+    expect(before.status).toBe(403);
+    expect(await before.json()).toEqual({
+      error: { code: "ORGANIZATION_SETUP_REQUIRED", message: "Create an organization to continue." },
+    });
 
     const created = await postOrganization(baseUrl, first.cookie, { name: "  Ada Lab  " });
     expect(created.status).toBe(201);
@@ -117,10 +119,11 @@ describe("create the first organization", () => {
     });
     expect(await prisma.member.count({ where: { userId: first.userId } })).toBe(1);
 
+    const key = await createSessionApiKey(baseUrl, first.cookie, "ada");
     const byKey = await fetch(`${baseUrl}/api/v1/onboarding/organization`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${first.apiKey}`,
+        authorization: `Bearer ${key.apiKey}`,
         "content-type": "application/json",
         origin: "http://localhost:3000",
       },
@@ -131,11 +134,10 @@ describe("create the first organization", () => {
     const invalid = await postOrganization(baseUrl, first.cookie, { name: "Ada\nLab", slug: "ada" });
     expect(invalid.status).toBe(400);
 
-    const second = await signUpWithApiKey(baseUrl, {
+    const second = await signUp(baseUrl, {
       email: "bea@example.com",
       password: "bea-password-1",
       name: "Bea",
-      keyName: "bea",
     });
     const collided = await postOrganization(baseUrl, second.cookie, { name: "Ada Lab" });
     expect(collided.status).toBe(201);

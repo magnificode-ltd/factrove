@@ -65,6 +65,9 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
 }
 
 function LibraryBody({ state, now }: { state: LibraryModel; now: number }) {
+  if (state.status === "setup-required") {
+    return null;
+  }
   if (state.status === "signed-out") {
     return (
       <Card role="status" className="mt-10 max-w-xl bg-white">

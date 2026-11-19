@@ -3,7 +3,7 @@ import type { AccessType, ArtifactView } from "@factrove/contracts";
 export type ArtifactRecord = {
   id: string;
   creatorUserId: string;
-  organizationId: string | null;
+  organizationId: string;
   accessType: AccessType;
   name: string | null;
   mimeType: string;
@@ -21,7 +21,7 @@ export type ArtifactRecord = {
 export type CreateArtifactInput = {
   id: string;
   creatorUserId: string;
-  organizationId: string | null;
+  organizationId: string;
   accessType: AccessType;
   mimeType: string;
   sizeBytes: number;
@@ -31,7 +31,7 @@ export type CreateArtifactInput = {
 };
 
 export type UpdateArtifactInput = {
-  organizationId?: string | null;
+  organizationId?: string;
   accessType?: AccessType;
   mimeType?: string;
   sizeBytes?: number;

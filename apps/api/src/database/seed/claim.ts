@@ -31,9 +31,7 @@ const prisma = new PrismaClient();
 
 try {
   const result = await claimLocalArtifacts(prisma, readEmail(process.argv.slice(2)));
-  process.stdout.write(
-    `Claimed ${result.artifactsClaimed} artifact(s) for ${result.email}.\nAdded ${result.membershipsAdded} organization membership(s).\n`,
-  );
+  process.stdout.write(`Claimed ${result.artifactsClaimed} artifact(s) for ${result.email}.\n`);
 } catch (error) {
   if (error instanceof ClaimLocalArtifactsError) {
     process.stderr.write(`${error.message}\n`);

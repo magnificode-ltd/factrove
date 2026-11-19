@@ -285,18 +285,22 @@ export class ArtifactsRepository {
   }
 
   async list(input: ListArtifactsInput): Promise<ArtifactRecord[]> {
-    if (input.view === "org" && input.organizationId === null) {
-      return [];
+    if (input.view === "org") {
+      if (input.organizationId === null) {
+        return [];
+      }
+      const rows = await this.prisma.artifact.findMany({
+        where: {
+          organizationId: input.organizationId,
+          accessType: "org_shared",
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      return rows.map(toArtifactRecord);
     }
 
     const rows = await this.prisma.artifact.findMany({
-      where:
-        input.view === "mine"
-          ? { creatorUserId: input.userId }
-          : {
-              organizationId: input.organizationId,
-              accessType: "org_shared",
-            },
+      where: { creatorUserId: input.userId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     return rows.map(toArtifactRecord);
