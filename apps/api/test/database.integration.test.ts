@@ -110,6 +110,7 @@ describe("PostgreSQL artifact persistence", () => {
 
   beforeEach(async () => {
     await prisma.artifact.deleteMany();
+    await prisma.apikey.deleteMany();
     await prisma.member.deleteMany();
     await prisma.invitation.deleteMany();
     await prisma.session.deleteMany();
@@ -132,6 +133,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261021170000_add_artifact_object_key",
       "20261021193000_add_artifact_name",
       "20261115190000_backfill_organizations",
+      "20261115200000_org_owned_api_keys",
     ]);
   });
 

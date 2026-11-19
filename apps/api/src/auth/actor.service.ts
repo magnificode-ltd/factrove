@@ -4,6 +4,7 @@ import type { ContextEnvelope } from "@factrove/contracts";
 import { fromNodeHeaders } from "better-auth/node";
 import { PrismaService } from "../database/index.js";
 import { ApiErrorException } from "../services/api-error.js";
+import { createdByUserIdFrom } from "./api-key-scope.js";
 import { AuthService } from "./auth.service.js";
 import {
   ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
@@ -101,18 +102,25 @@ export class ActorService {
     if (!result.valid || !result.key) {
       return null;
     }
-    const user = await this.prisma.user.findUnique({
-      where: { id: result.key.referenceId },
-      select: { id: true, name: true },
-    });
-    if (!user) {
+    const organizationId = result.key.referenceId;
+    const createdByUserId = createdByUserIdFrom(result.key.metadata);
+    if (!organizationId || !createdByUserId) {
       return null;
     }
-    const resolved = await resolveCurrentOrganization(this.prisma, user.id, null);
+    const membership = await this.prisma.member.findFirst({
+      where: { userId: createdByUserId, organizationId },
+      select: {
+        user: { select: { id: true, name: true } },
+        organization: { select: { id: true, name: true } },
+      },
+    });
+    if (!membership) {
+      return null;
+    }
     return {
-      user: { id: user.id, name: user.name },
-      organization: resolved.status === "ready" ? resolved.organization : null,
-      organizationStatus: resolved.status,
+      user: { id: membership.user.id, name: membership.user.name },
+      organization: membership.organization,
+      organizationStatus: "ready",
       via: "api-key",
       sessionId: null,
     };

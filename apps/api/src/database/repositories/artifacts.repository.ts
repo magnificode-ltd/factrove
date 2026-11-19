@@ -83,12 +83,7 @@ export class ArtifactsRepository {
   // path writes. The authorization check is a later statement, so it sees commits that landed while this
   // transaction waited on the artifact. An artifact that is already org_shared is returned
   // with no write and no organization check. Share columns, content, and createdAt are not written.
-  async shareWithOrganization(input: {
-    id: string;
-    creatorUserId: string;
-    organizationId: string;
-    sessionId: string | null;
-  }): Promise<ShareWithOrganizationOutcome> {
+  async shareWithOrganization(input: ShareAuthorizationInput): Promise<ShareWithOrganizationOutcome> {
     try {
       return await this.shareWithOrganizationOnce(input);
     } catch (error) {
@@ -118,12 +113,7 @@ export class ArtifactsRepository {
 
   // Read the same refusal the update would return, without writing. Used after the organization
   // foreign key rejects a write, so the caller gets the outcome that is true now.
-  private classifyRefusedShare(input: {
-    id: string;
-    creatorUserId: string;
-    organizationId: string;
-    sessionId: string | null;
-  }): Promise<ShareWithOrganizationOutcome> {
+  private classifyRefusedShare(input: ShareAuthorizationInput): Promise<ShareWithOrganizationOutcome> {
     return this.prisma.$transaction(
       async (tx) => {
         await applyShareTimeouts(tx);
@@ -137,12 +127,7 @@ export class ArtifactsRepository {
     );
   }
 
-  private shareWithOrganizationOnce(input: {
-    id: string;
-    creatorUserId: string;
-    organizationId: string;
-    sessionId: string | null;
-  }): Promise<ShareWithOrganizationOutcome> {
+  private shareWithOrganizationOnce(input: ShareAuthorizationInput): Promise<ShareWithOrganizationOutcome> {
     return this.prisma.$transaction((tx) => shareWithOrganizationInTransaction(tx, input), {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       timeout: SHARE_TRANSACTION_TIMEOUT_MS,
@@ -182,21 +167,28 @@ export class ArtifactsRepository {
 
   // Removes the row only while the revision and object key read by the caller are still current.
   // A replace that committed a new object returns false and leaves that row in place.
+  // An API key also requires the organization it read. The row lock is the same one the
+  // share update takes, so a re-home that commits before this statement keeps the row.
   async deleteIfUnchanged(input: {
     id: string;
     creatorUserId: string;
     contentRevision: number;
     objectKey: string;
+    organizationId?: string;
   }): Promise<boolean> {
-    const deleted = await this.prisma.artifact.deleteMany({
-      where: {
-        id: input.id,
-        creatorUserId: input.creatorUserId,
-        contentRevision: input.contentRevision,
-        objectKey: input.objectKey,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
+      const deleted = await tx.artifact.deleteMany({
+        where: {
+          id: input.id,
+          creatorUserId: input.creatorUserId,
+          contentRevision: input.contentRevision,
+          objectKey: input.objectKey,
+          ...(input.organizationId === undefined ? {} : { organizationId: input.organizationId }),
+        },
+      });
+      return deleted.count === 1;
     });
-    return deleted.count === 1;
   }
 
   async findById(id: string): Promise<ArtifactRecord | null> {
@@ -300,7 +292,10 @@ export class ArtifactsRepository {
     }
 
     const rows = await this.prisma.artifact.findMany({
-      where: { creatorUserId: input.userId },
+      where: {
+        creatorUserId: input.userId,
+        ...(input.mineOrganizationId ? { organizationId: input.mineOrganizationId } : {}),
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     return rows.map(toArtifactRecord);
@@ -313,6 +308,16 @@ export type ShareWithOrganizationOutcome =
   | { outcome: "unauthenticated" }
   | { outcome: "organization-required" }
   | { outcome: "organization-changed" };
+
+type ShareAuthorizationInput = {
+  id: string;
+  creatorUserId: string;
+  organizationId: string;
+  sessionId: string | null;
+  // Set for an API key. The confirmed organization id has to match it, and the
+  // creator has to still be a member. Null for a browser session.
+  apiKeyOrganizationId: string | null;
+};
 
 // A few seconds, and shorter than the Prisma transaction timeout, so a blocked lock becomes
 // 55P03 or 57014 instead of a late P2028 that the HTTP layer would turn into a 500.
@@ -327,7 +332,7 @@ const ARTIFACT_ORGANIZATION_FOREIGN_KEY = "artifact_organization_id_fkey";
 
 async function shareWithOrganizationInTransaction(
   tx: Prisma.TransactionClient,
-  input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
+  input: ShareAuthorizationInput,
 ): Promise<ShareWithOrganizationOutcome> {
   await applyShareTimeouts(tx);
   // The explicit lock is only this artifact. The organization foreign-key check takes an implicit
@@ -336,6 +341,9 @@ async function shareWithOrganizationInTransaction(
   await tx.$queryRaw`SELECT id FROM artifact WHERE id = ${input.id}::uuid FOR UPDATE`;
   const locked = await tx.artifact.findUnique({ where: { id: input.id } });
   if (!locked || locked.creatorUserId !== input.creatorUserId) {
+    return { outcome: "not-found" };
+  }
+  if (input.apiKeyOrganizationId !== null && locked.organizationId !== input.apiKeyOrganizationId) {
     return { outcome: "not-found" };
   }
   if (locked.accessType === "org_shared") {
@@ -369,12 +377,16 @@ async function shareWithOrganizationInTransaction(
   return classifyShareRefusal(tx, input);
 }
 
-// Same rule as ActorService.organizationFor, evaluated in the UPDATE so the check and the write
-// cannot drift. A session must still be present and unexpired. API keys have no session row and
-// use the sole-membership rule. Plain EXISTS does not lock those rows.
+// Same rule as ActorService, evaluated in the UPDATE so the check and the write
+// cannot drift. A session must still be present and unexpired. Its current
+// organization is the active membership, or the only membership when that id
+// is missing or stale. An API key has no session. The confirmed id and the
+// artifact's current organization both have to be the key's organization, and
+// the creator has to still be a member of it. Plain EXISTS does not lock those rows.
 function shareAuthorizationSql(input: {
   organizationId: string;
   sessionId: string | null;
+  apiKeyOrganizationId: string | null;
 }): Prisma.Sql {
   const confirmedMembership = Prisma.sql`
     EXISTS (
@@ -388,6 +400,18 @@ function shareAuthorizationSql(input: {
     (SELECT COUNT(*)::int FROM "member" WHERE "userId" = artifact.creator_user_id) = 1
     AND ${confirmedMembership}
   `;
+  if (input.apiKeyOrganizationId !== null) {
+    return Prisma.sql`
+      ${input.organizationId} = ${input.apiKeyOrganizationId}
+      AND artifact.organization_id = ${input.apiKeyOrganizationId}
+      AND EXISTS (
+        SELECT 1
+        FROM "member"
+        WHERE "userId" = artifact.creator_user_id
+          AND "organizationId" = ${input.apiKeyOrganizationId}
+      )
+    `;
+  }
   if (input.sessionId === null) {
     return soleMembership;
   }
@@ -428,14 +452,30 @@ function shareAuthorizationSql(input: {
 
 async function classifyShareRefusal(
   tx: Prisma.TransactionClient,
-  input: { id: string; creatorUserId: string; organizationId: string; sessionId: string | null },
+  input: ShareAuthorizationInput,
 ): Promise<ShareWithOrganizationOutcome> {
   const row = await tx.artifact.findUnique({ where: { id: input.id } });
   if (!row || row.creatorUserId !== input.creatorUserId) {
     return { outcome: "not-found" };
   }
+  if (input.apiKeyOrganizationId && row.organizationId !== input.apiKeyOrganizationId) {
+    return { outcome: "not-found" };
+  }
   if (row.accessType === "org_shared") {
     return { outcome: "already", record: toArtifactRecord(row) };
+  }
+  if (input.apiKeyOrganizationId) {
+    const members = await tx.$queryRaw<Array<{ organizationId: string }>>`
+      SELECT "organizationId"
+      FROM "member"
+      WHERE "userId" = ${input.creatorUserId}
+        AND "organizationId" = ${input.apiKeyOrganizationId}
+      LIMIT 1
+    `;
+    if (members.length === 0) {
+      return { outcome: "unauthenticated" };
+    }
+    return { outcome: "organization-changed" };
   }
   if (input.sessionId) {
     const sessions = await tx.$queryRaw<Array<{ id: string }>>`

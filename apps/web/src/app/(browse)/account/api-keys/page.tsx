@@ -119,7 +119,9 @@ export default function ApiKeysPage() {
         <p className="text-sm font-semibold tracking-[0.16em] text-peri-d uppercase">Account</p>
         <h1 className="ft-title mt-2 text-4xl sm:text-5xl">API keys</h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
+          API keys belong to this organization. Any member can create, see, and revoke them.
           A new key is shown once. Factrove stores only a hash of the key.
+          This upgrade removed keys created before they belonged to an organization. Create them again here.
         </p>
         <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <Card className="bg-white">

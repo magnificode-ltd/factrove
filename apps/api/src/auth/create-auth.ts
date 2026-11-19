@@ -18,6 +18,7 @@ import {
 } from "../mail/password-reset-link.js";
 import { logWithoutThrowing } from "../mail/safe-log.js";
 import { factroveApiKey } from "./api-key-plugin.js";
+import { scopeOrganizationApiKeyRequest } from "./api-key-scope.js";
 import { CLIENT_IP_HEADER } from "./client-ip.js";
 import {
   ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
@@ -66,7 +67,7 @@ export type FactroveAuth = {
     } | null>;
     verifyApiKey: (input: { body: { key: string } }) => Promise<{
       valid: boolean;
-      key: { referenceId: string } | null;
+      key: { referenceId: string; metadata?: unknown } | null;
     }>;
   };
 };
@@ -257,6 +258,14 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
             message: ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
             code: "ORGANIZATION_SELECTION_REQUIRED",
           });
+        }
+        const scoped = await scopeOrganizationApiKeyRequest(ctx, {
+          prisma: input.prisma,
+          userId: session.user.id,
+          organizationId: resolved.organization.id,
+        });
+        if (scoped) {
+          return { context: scoped };
         }
       }),
     },

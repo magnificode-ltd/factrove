@@ -133,8 +133,15 @@ export async function signUpInOrganization(
 
 export async function createUserWithApiKey(
   prisma: PrismaClient,
-  input: { email: string; name: string; keyName: string },
-): Promise<ApiKeyUser> {
+  input: {
+    email: string;
+    name: string;
+    keyName: string;
+    organizationId?: string;
+    role?: string;
+    member?: boolean;
+  },
+): Promise<ApiKeyUser & { organizationId: string }> {
   const userId = randomUUID();
   const now = new Date();
   await prisma.user.create({
@@ -147,6 +154,23 @@ export async function createUserWithApiKey(
       updatedAt: now,
     },
   });
+  const organizationId = input.organizationId ?? randomUUID();
+  if (!input.organizationId) {
+    await prisma.organization.create({
+      data: { id: organizationId, name: input.name, slug: organizationId, createdAt: now },
+    });
+  }
+  if (input.member !== false) {
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId,
+        userId,
+        role: input.role ?? (input.organizationId ? "member" : "owner"),
+        createdAt: now,
+      },
+    });
+  }
   const apiKey = `ftrv_${randomBytes(32).toString("base64url")}`;
   const keyId = randomUUID();
   await prisma.apikey.create({
@@ -155,7 +179,8 @@ export async function createUserWithApiKey(
       name: input.keyName,
       start: apiKey.slice(0, 12),
       prefix: "ftrv_",
-      referenceId: userId,
+      referenceId: organizationId,
+      metadata: JSON.stringify({ createdByUserId: userId }),
       key: createHash("sha256").update(apiKey).digest("base64url"),
       enabled: true,
       rateLimitEnabled: false,
@@ -171,6 +196,7 @@ export async function createUserWithApiKey(
     apiKey,
     prefix: apiKey.slice(0, 12),
     keyId,
+    organizationId,
   };
 }
 

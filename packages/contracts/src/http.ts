@@ -252,7 +252,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Return the caller and current organization",
     description:
-      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership. Zero memberships is `403 ORGANIZATION_SETUP_REQUIRED`. More than one membership and no active organization that matches one of them is `409 ORGANIZATION_SELECTION_REQUIRED`. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership. Zero memberships is `403 ORGANIZATION_SETUP_REQUIRED`. More than one membership and no active organization that matches one of them is `409 ORGANIZATION_SELECTION_REQUIRED`. An API key acts in the organization that owns the key. The user is the member who created the key. If that person is no longer a member, the key is `401 UNAUTHENTICATED`. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
     security: "sessionOrApiKey",
     responses: {
       "200": {
@@ -374,7 +374,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an API key",
     description:
-      "Requires a browser session that already belongs to an organization. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is 409 `ORGANIZATION_SELECTION_REQUIRED`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+      "Requires a browser session that already belongs to an organization. The new key belongs to that session's active organization. Any member of the organization can create one. An organization id or creating user in the body is ignored. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is 409 `ORGANIZATION_SELECTION_REQUIRED`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -408,11 +408,11 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "List API keys for the session",
     description:
-      "Requires a browser session that already belongs to an organization. A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
+      "Requires a browser session that already belongs to an organization. Returns the active organization's keys. Any member can list them. An organization id in the query is ignored. A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
     security: "session",
     responses: {
       "200": {
-        description: "Keys for the signed-in user, without `key`.",
+        description: "Keys for the active organization, without `key`.",
         schema: listApiKeysResponseSchema,
         schemaName: "ListApiKeysResponse"
       },
@@ -426,7 +426,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Revoke an API key",
     description:
-      "Requires a browser session. Do not send `Authorization`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. Another user's key id is 404. After delete, that key fails closed on product routes.",
+      "Requires a browser session. Do not send `Authorization`. Deletes a key owned by the active organization. Any member of that organization can delete it. A key owned by another organization is 404. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. After delete, that key fails closed on product routes.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -668,7 +668,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "List artifacts for the caller",
     description:
-      "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
+      "`view=mine` (default) is artifacts the caller created. A session lists those artifacts in every organization. An API key lists only the ones that already belong to the key's organization. `view=org` is org_shared artifacts in the caller's current organization, including other creators. For an API key that organization is the key's. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
     security: "sessionOrApiKey",
     queryParameters: [
       {

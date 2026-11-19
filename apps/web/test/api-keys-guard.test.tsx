@@ -50,6 +50,17 @@ describe("API keys page", () => {
     expect(assigned).toHaveBeenCalledWith("/onboarding");
     assigned.mockRestore();
   });
+
+  it("says keys belong to the organization and that earlier keys were removed", async () => {
+    list.mockResolvedValue({ data: { apiKeys: [] }, error: null });
+    const container = await render(<ApiKeysPage />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain("API keys belong to this organization");
+    expect(container.textContent).toContain("Any member can create, see, and revoke them");
+    expect(container.textContent).toContain("removed keys created before they belonged to an organization");
+  });
 });
 
 async function render(node: ReactNode): Promise<HTMLElement> {

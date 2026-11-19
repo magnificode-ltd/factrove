@@ -8,7 +8,9 @@ description: "Save your API key and API URL."
 ```text
 Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
 
-Saves an API key and API URL for a profile.
+Saves an API key and API URL for a profile. The key belongs to the
+organization it was created for. Keys created before that change stopped
+working and must be created again at /account/api-keys.
 
 Options:
   --api-key <key>     API key. A prompt keeps it out of shell history.
@@ -29,6 +31,8 @@ The help text above is exact. These flags are also accepted, including ones that
 
 The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. `--api-key` prompts when it is omitted.
 
-Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`.
+The key belongs to the organization it was created for. A configured key is that organization. There is no organization flag. Keys created before organization ownership stopped working and must be created again.
+
+Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`. The active organization owns the new key. An organization id in the request is ignored.
 
 Precedence for later commands is in [CLI](/guides/cli). When a command cannot reach the API, see [Troubleshooting](/guides/troubleshooting).
