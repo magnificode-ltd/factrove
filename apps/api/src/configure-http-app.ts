@@ -57,6 +57,12 @@ export function configureHttpApp(app: INestApplication): void {
     assignClientIpForPublicPath(request, config.trustedProxies);
     next();
   });
+  // Mounted by path, like /api/auth, so an absolute-form request target still
+  // matches. Strip a caller-supplied client IP and set it from the socket.
+  app.use("/api/v1/onboarding", (request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIp(request, config.trustedProxies);
+    next();
+  });
   app.use("/api/auth", (request: IncomingMessage, response: ServerResponse) => {
     void toNodeHandler(auth.handler())(request, response);
   });

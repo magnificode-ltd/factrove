@@ -11,6 +11,17 @@ export {
   normalizeArtifactName
 } from "./artifact-name.js";
 
+export {
+  CREATE_ORGANIZATION_REQUEST_MESSAGE,
+  ORGANIZATION_NAME_MAX_LENGTH,
+  ORGANIZATION_NAME_MESSAGE,
+  createOrganizationRequestSchema,
+  createOrganizationResponseSchema,
+  normalizeOrganizationName,
+  organizationNameCodePointLength,
+  type CreateOrganizationResponse
+} from "./organization-name.js";
+
 export const accessTypeSchema = z.enum(["private", "org_shared"]);
 export const artifactViewSchema = z.enum(["mine", "org"]);
 export const contentFormatSchema = z.enum(["html", "markdown"]);

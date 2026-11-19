@@ -13,6 +13,12 @@ export const apiErrorCatalog = [
   },
   {
     status: 409,
+    code: "ORGANIZATION_EXISTS",
+    description:
+      "POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created."
+  },
+  {
+    status: 409,
     code: "ORGANIZATION_CHANGED",
     description:
       "PATCH /api/v1/artifacts/{id} for a private artifact named an organizationId that is not the caller's current membership when the conditional UPDATE reads, or a deadlock, serialization failure, or lock timeout persisted after one retry. The artifact is not written. That UPDATE is the linearization point: an authorization change that commits after its snapshot can land before commit and does not cancel the share. About 16 seconds is the budget for the two attempts, not an endpoint deadline. An artifact that is already org_shared returns 200 instead."
