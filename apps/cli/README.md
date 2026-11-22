@@ -43,7 +43,7 @@ Create the key in the web app at `/account/api-keys`. The secret is shown once. 
 
 ## Develop from this repository
 
-Contributors run the CLI from a checkout with `pnpm factrove`. That command is not the published package. Install, flags, and config precedence are in the [CLI guide](https://github.com/magnificode-ltd/factrove/blob/main/docs/guides/cli.mdx). Publishing is a manual GitHub Actions dispatch: [Release the CLI](https://github.com/magnificode-ltd/factrove/blob/main/docs/guides/releasing-the-cli.mdx).
+Contributors run the CLI from a checkout with `pnpm factrove`. That command is not the published package. Install, flags, and config precedence are in the [CLI guide](https://github.com/magnificode-ltd/factrove/blob/main/docs/guides/cli.mdx). Publishing is a manual GitHub Actions dispatch: [Release the CLI](https://github.com/magnificode-ltd/factrove/blob/main/RELEASING.md).
 
 ## License
 
