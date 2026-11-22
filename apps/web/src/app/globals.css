@@ -142,10 +142,6 @@
   font-weight: 800;
 }
 
-.wm-mark {
-  view-transition-name: factrove-mark;
-}
-
 .wm:focus-visible {
   border-radius: 8px;
 }
@@ -164,44 +160,6 @@
 
 .ft-hero {
   position: relative;
-  isolation: isolate;
-}
-
-.ft-hero::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  top: -5rem;
-  right: 0;
-  left: 0;
-  height: 34rem;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 42% 55% at 12% 18%, color-mix(in srgb, var(--peri) 78%, white), transparent 68%),
-    radial-gradient(ellipse 36% 48% at 88% 0%, color-mix(in srgb, var(--peri) 55%, white), transparent 64%),
-    radial-gradient(ellipse 28% 40% at 58% 42%, var(--lilac), transparent 70%);
-  background-repeat: no-repeat;
-  background-size:
-    78% 88%,
-    68% 78%,
-    56% 70%;
-  mask-image: linear-gradient(to bottom, #000 42%, transparent 100%);
-  animation: ft-drift 16s ease-in-out infinite;
-}
-
-.ft-hero::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 34rem;
-  pointer-events: none;
-  opacity: 0.22;
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  mask-image: linear-gradient(to bottom, #000 30%, transparent);
 }
 
 .ft-tab-pill {
@@ -216,7 +174,6 @@
   box-shadow:
     0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent),
     0 10px 24px -16px color-mix(in srgb, var(--peri-d) 95%, transparent);
-  view-transition-name: library-tab;
 }
 
 .ft-tab-pill[data-tab="org"] {
@@ -224,26 +181,10 @@
 }
 
 .ft-card {
-  --rx: 0deg;
-  --ry: 0deg;
-  --ty: 0px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--card);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
-  transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--ty));
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease;
-}
-
-.ft-shimmer {
-  background-color: var(--lilac);
-  background-image: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.9) 50%, transparent 80%);
-  background-repeat: no-repeat;
-  background-size: 220% 100%;
-  animation: ft-shimmer 1.35s ease-in-out infinite;
 }
 
 .ft-term {
@@ -251,18 +192,6 @@
   background: var(--ink);
   color: var(--cloud);
   box-shadow: 0 18px 40px -28px color-mix(in srgb, var(--ink) 80%, transparent);
-}
-
-.ft-type {
-  display: inline-block;
-  width: 0;
-  overflow: hidden;
-  vertical-align: bottom;
-  white-space: nowrap;
-  border-right: 2px solid var(--peri);
-  animation:
-    ft-type 1.8s steps(25, end) 0.35s forwards,
-    ft-caret 0.9s step-end infinite;
 }
 
 .ft-check {
@@ -287,25 +216,6 @@
 .ft-check[data-copied="true"] .ft-check-on {
   opacity: 1;
   transform: none;
-}
-
-.ft-key {
-  position: relative;
-  overflow: hidden;
-}
-
-.ft-key::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(105deg, transparent 36%, rgba(255, 255, 255, 0.78) 50%, transparent 64%);
-  transform: translateX(-130%);
-  animation: ft-shine 0.95s ease 0.15s both;
-}
-
-.ft-reveal {
-  animation: ft-reveal 0.72s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .ft-vault {
@@ -384,100 +294,6 @@
 
 .ft-orb[data-open="true"] .ft-shackle {
   transform: translateY(-5px) rotate(-24deg);
-}
-
-.ft-lock-chip {
-  transform-origin: 50% 60%;
-}
-
-@view-transition {
-  navigation: auto;
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-}
-
-@keyframes ft-drift {
-  0%,
-  100% {
-    background-position:
-      0% 0%,
-      100% 0%,
-      46% 18%;
-  }
-
-  50% {
-    background-position:
-      14% 10%,
-      78% 8%,
-      58% 28%;
-  }
-}
-
-@keyframes ft-rise {
-  from {
-    opacity: 0;
-    translate: 0 12px;
-  }
-
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
-}
-
-@keyframes ft-pop {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes ft-shimmer {
-  from {
-    background-position: 140% 0;
-  }
-
-  to {
-    background-position: -140% 0;
-  }
-}
-
-@keyframes ft-type {
-  to {
-    width: calc(var(--ft-chars, 25) * 1ch);
-  }
-}
-
-@keyframes ft-caret {
-  50% {
-    border-right-color: transparent;
-  }
-}
-
-@keyframes ft-shine {
-  to {
-    transform: translateX(130%);
-  }
-}
-
-@keyframes ft-reveal {
-  from {
-    opacity: 0;
-    filter: blur(8px);
-  }
-
-  to {
-    opacity: 1;
-    filter: none;
-  }
 }
 
 @keyframes ft-shake {
@@ -576,18 +392,6 @@
   }
 }
 
-@keyframes ft-chip-in {
-  from {
-    opacity: 0;
-    transform: scale(0.55) rotate(-20deg);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .ft-shake {
     animation: ft-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
@@ -617,54 +421,6 @@
     animation: ft-unveil 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .ft-lock-chip {
-    animation: ft-chip-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  }
-
-  .ft-enter {
-    animation: ft-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .ft-list > li {
-    animation: ft-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .ft-list > li:nth-child(1) {
-    animation-delay: 40ms;
-  }
-
-  .ft-list > li:nth-child(2) {
-    animation-delay: 100ms;
-  }
-
-  .ft-list > li:nth-child(3) {
-    animation-delay: 160ms;
-  }
-
-  .ft-list > li:nth-child(4) {
-    animation-delay: 220ms;
-  }
-
-  .ft-list > li:nth-child(5) {
-    animation-delay: 280ms;
-  }
-
-  .ft-list > li:nth-child(n + 6) {
-    animation-delay: 320ms;
-  }
-
-  .ft-pop {
-    animation: ft-pop 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-
-  .ft-card:hover {
-    --ty: -6px;
-    border-color: color-mix(in srgb, var(--peri) 72%, white);
-    box-shadow:
-      0 18px 40px -22px color-mix(in srgb, var(--peri-d) 55%, transparent),
-      0 2px 8px color-mix(in srgb, var(--ink) 5%, transparent);
-  }
-
   .ft-check svg {
     transition:
       opacity 180ms ease,
@@ -677,42 +433,16 @@
     scroll-behavior: auto;
   }
 
-  .ft-hero::before,
-  .ft-shimmer,
-  .ft-type,
-  .ft-key::after,
-  .ft-reveal,
-  .ft-pop,
-  .ft-enter,
-  .ft-list > li,
   .ft-shake,
   .ft-orb,
   .ft-orb::after,
   .ft-shackle,
   .ft-vault-card,
   .ft-unveil,
-  .ft-lock-chip,
-  .animate-pulse,
   .animate-spin,
   [data-sonner-toast] {
     animation: none !important;
     transition: none !important;
-  }
-
-  .ft-type {
-    width: auto;
-    border-right-color: transparent;
-  }
-
-  .ft-card,
-  .ft-card:hover {
-    transform: none;
-  }
-
-  ::view-transition-group(*),
-  ::view-transition-old(*),
-  ::view-transition-new(*) {
-    animation: none !important;
   }
 }
 

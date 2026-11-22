@@ -7,7 +7,7 @@ export default function LibraryError({ reset }: { error: Error & { digest?: stri
   return (
     <div className="ft-canvas min-h-dvh">
       <AppBar />
-      <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+      <main className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
         <h1 className="ft-title text-4xl sm:text-5xl">Artifacts</h1>
         <ModeNote />
         <p role="alert" className="mt-8 max-w-xl text-lg text-destructive">

@@ -152,14 +152,14 @@ export function ShareControl({
             id={panelId}
             role="region"
             aria-label="Public link"
-            className="ft-pop ft-key rounded-[14px] border border-line bg-lilac p-4"
+            className="rounded-[14px] border border-line bg-lilac p-4"
           >
             <p className="text-sm font-medium">
               {share.passwordProtected
                 ? "Anyone with this link and its password can open the artifact without an account."
                 : "Anyone with this link can open the artifact without an account."}
             </p>
-            <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="share-url">
+            <code className="mt-3 block font-mono text-sm break-all" data-testid="share-url">
               {share.shareUrl}
             </code>
             <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -295,7 +295,7 @@ function SharePassword({
           key={protectedLink ? "locked" : "open"}
           aria-hidden="true"
           className={cn(
-            "ft-lock-chip grid size-9 shrink-0 place-items-center rounded-full",
+            "grid size-9 shrink-0 place-items-center rounded-full",
             protectedLink ? "bg-peri-d text-white" : "bg-lilac text-ink"
           )}
         >
@@ -346,7 +346,7 @@ function SharePassword({
         )}
       </div>
       {editing ? (
-        <form className="ft-pop mt-3 grid gap-2" noValidate onSubmit={(event) => void onSubmit(event)}>
+        <form className="mt-3 grid gap-2" noValidate onSubmit={(event) => void onSubmit(event)}>
           <Label htmlFor={inputId}>{protectedLink ? "New link password" : "Link password"}</Label>
           <PasswordInput
             ref={inputRef}

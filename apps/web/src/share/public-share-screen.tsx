@@ -76,7 +76,7 @@ function ReadyShare({
 
 function ShareNotice({ state }: { state: Extract<PublicShareModel, { status: "missing" | "unavailable" }> }) {
   return (
-    <div className="ft-enter flex h-full items-center px-6 sm:px-10">
+    <div className="flex h-full items-center px-6 sm:px-10">
       <p role={state.status === "missing" ? "status" : "alert"} className={state.status === "missing" ? "text-lg" : "text-lg text-destructive"}>
         {state.message}
       </p>

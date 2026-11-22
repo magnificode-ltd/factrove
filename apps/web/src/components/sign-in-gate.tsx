@@ -25,7 +25,7 @@ export function SignInGate({ message, returnTo }: { message: string; returnTo: s
         <main className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8 sm:py-12">
           <Card
             data-testid="sign-in-gate"
-            className="ft-vault-card ft-enter w-full max-w-md overflow-visible bg-white"
+            className="ft-vault-card w-full max-w-md overflow-visible bg-white"
             style={cardSpacing}
           >
             <CardContent className="flex flex-col items-center text-center">
