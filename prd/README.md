@@ -36,7 +36,7 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 ## Scope exclusions
 
-Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, password-protected links, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred. Public links for people outside the owner's Mac are task 15.
+Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, password-protected links, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, billing, and non-HTML rendering are deferred. Public links for people outside the owner's Mac are task 15.
 
 Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary. Local development uses Garage. Real AWS S3 remains the configuration with `S3_ENDPOINT` unset.
 
