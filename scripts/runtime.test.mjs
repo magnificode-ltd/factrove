@@ -280,7 +280,7 @@ describe("local runtime", () => {
     assert.equal(launcher.includes("FACTROVE_API_URL"), false);
     assert.equal(launcher.includes("loadCliEnv"), false);
     const cliPackage = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
-    assert.deepEqual(cliPackage.files, ["dist", "README.md", "LICENSE", "NOTICE"]);
+    assert.deepEqual(cliPackage.files, ["dist", "README.md", "LICENSE"]);
     assert.equal(cliPackage.private, true);
     assert.equal(cliPackage.name, "@factrove/cli");
     assert.deepEqual(cliPackage.engines, { node: ">=24.7.0 <25" });
@@ -390,10 +390,10 @@ describe("local runtime", () => {
     assert.equal(readFileSync(join(repoRoot, "apps/cli/LICENSE"), "utf8"), rootLicense);
     assert.match(rootLicense, /GNU AFFERO GENERAL PUBLIC LICENSE/);
     assert.match(rootLicense, /Copyright \(C\) 2007 Free Software Foundation, Inc\./);
-    const notice = readFileSync(join(repoRoot, "NOTICE"), "utf8");
-    assert.equal(readFileSync(join(repoRoot, "apps/cli/NOTICE"), "utf8"), notice);
-    assert.match(notice, /Copyright \(C\) 2026 Magnificode LTD/);
-    assert.match(notice, /any later version/);
+    assert.match(rootLicense, /Factrove - Share HTML artifacts with humans and reuse artifact context for future agents/);
+    assert.match(rootLicense, /Copyright \(C\) 2026 Magnificode LTD/);
+    assert.equal(existsSync(join(repoRoot, "NOTICE")), false);
+    assert.equal(existsSync(join(repoRoot, "apps/cli/NOTICE")), false);
     const packages = [
       "package.json",
       "apps/api/package.json",
@@ -408,7 +408,7 @@ describe("local runtime", () => {
     }
     const cli = JSON.parse(readFileSync(join(repoRoot, "apps/cli/package.json"), "utf8"));
     assert.equal(cli.files.includes("LICENSE"), true);
-    assert.equal(cli.files.includes("NOTICE"), true);
+    assert.equal(cli.files.includes("NOTICE"), false);
     const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
     assert.match(compose, /SOURCE_CODE_URL: \$\{SOURCE_CODE_URL:-https:\/\/github\.com\/magnificode-ltd\/factrove\}/);
     assert.match(compose, /DOCS_BASE_URL: \$\{DOCS_BASE_URL:-https:\/\/factrove\.mintlify\.app\}/);
@@ -427,14 +427,17 @@ describe("local runtime", () => {
     assert.match(thirdParty, /Copyright \(c\) 2023 shadcn/);
     assert.match(thirdParty, /Permission is hereby granted/);
     assert.match(readFileSync(join(repoRoot, "README.md"), "utf8"), /THIRD_PARTY_NOTICES\.md/);
-    assert.match(readFileSync(join(repoRoot, "NOTICE"), "utf8"), /THIRD_PARTY_NOTICES\.md/);
+    assert.equal(readFileSync(join(repoRoot, "README.md"), "utf8").includes("[NOTICE](NOTICE)"), false);
     const dockerfile = readFileSync(join(repoRoot, "Dockerfile"), "utf8");
+    assert.match(dockerfile, /\/src\/LICENSE /);
+    assert.equal(/\/src\/NOTICE\b/.test(dockerfile), false);
     assert.match(dockerfile, /\/src\/apps\/web\/src\/components\/ui\/LICENSE/);
     assert.match(dockerfile, /\/src\/THIRD_PARTY_NOTICES\.md/);
     const ignore = readFileSync(join(repoRoot, ".dockerignore"), "utf8");
     assert.equal(dockerignoreExcludes(ignore, "docs/self-host/deploy.mdx"), true);
     assert.equal(dockerignoreExcludes(ignore, "prd/org-first-plan.md"), true);
     assert.equal(dockerignoreExcludes(ignore, "apps/web/test/ui.test.tsx"), true);
+    assert.equal(dockerignoreExcludes(ignore, "LICENSE"), false);
     assert.equal(dockerignoreExcludes(ignore, "THIRD_PARTY_NOTICES.md"), false);
     assert.equal(dockerignoreExcludes(ignore, "apps/web/src/components/ui/LICENSE"), false);
     assert.equal(dockerignoreExcludes(ignore, ".agents/skills/frontend-design/LICENSE.txt"), false);

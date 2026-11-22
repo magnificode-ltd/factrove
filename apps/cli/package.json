@@ -4,7 +4,7 @@
   "description": "Command-line client for the Factrove artifact library. The public npm package is generated as factrove.",
   "license": "AGPL-3.0-or-later",
   "private": true,
-  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "files": ["dist", "README.md", "LICENSE"],
   "type": "module",
   "engines": { "node": ">=24.7.0 <25" },
   "scripts": {

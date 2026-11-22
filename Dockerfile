@@ -36,6 +36,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build --chown=node:node /prod/api ./
+COPY --from=build --chown=node:node /src/LICENSE ./LICENSE
 COPY --chown=node:node docker/api-entrypoint.sh /usr/local/bin/factrove-api
 RUN chmod 755 /usr/local/bin/factrove-api
 USER node
@@ -55,7 +56,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build --chown=node:node /src/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /src/apps/web/.next/static ./apps/web/.next/static
-# The UI components are MIT. The notice has to be in the image, not only the source tree.
+# The AGPL text and the MIT notice for the UI components have to be in the image, not only the source tree.
+COPY --from=build --chown=node:node /src/LICENSE ./apps/web/LICENSE
 COPY --from=build --chown=node:node /src/apps/web/src/components/ui/LICENSE ./apps/web/src/components/ui/LICENSE
 COPY --from=build --chown=node:node /src/THIRD_PARTY_NOTICES.md ./apps/web/THIRD_PARTY_NOTICES.md
 RUN if [ ! -f apps/web/server.js ]; then find . -name server.js | head -20; exit 1; fi
