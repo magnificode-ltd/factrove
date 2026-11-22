@@ -122,6 +122,8 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
 | `SOURCE_CODE_URL` | no | Source code link in the web app. Default `https://github.com/magnificode-ltd/factrove`. Read when a page is rendered |
 | `DOCS_BASE_URL` | no | Docs links in the web app. The header Docs link opens this URL. Other links append a path, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. Read when a page is rendered |
+| `POSTHOG_KEY` | no | Public PostHog project key (`phc_...`) for the web app. Unset, empty, or any other value loads nothing and sends no analytics requests. Read when a page is rendered |
+| `POSTHOG_HOST` | no | PostHog API host. Default `https://us.i.posthog.com`. An absolute `http` or `https` origin. Read when a page is rendered. Used only when `POSTHOG_KEY` is a public project key |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
@@ -475,6 +477,8 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
 | `SOURCE_CODE_URL` | Optional URL for the Source code link. Default `https://github.com/magnificode-ltd/factrove`. The web process reads it when rendering a page |
 | `DOCS_BASE_URL` | Optional base URL for docs links. The header Docs link opens this URL. Other links append a path, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. The web process reads it when rendering a page |
+| `POSTHOG_KEY` | Optional public PostHog project key (`phc_...`). Unset, empty, or any other value loads nothing and sends no analytics requests. The web process reads it when rendering a page |
+| `POSTHOG_HOST` | Optional PostHog API host. Default `https://us.i.posthog.com`. An absolute `http` or `https` origin. The web process reads it when rendering a page. Used only when `POSTHOG_KEY` is a public project key |
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
@@ -490,7 +494,9 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 
 `BASE_URL` is read by `pnpm db:seed` and by auth schema generation. The API process uses `API_PUBLIC_ORIGIN` instead.
 
-`pnpm dev` does not copy `BROWSER_API_URL`, `INTERNAL_API_URL`, `SOURCE_CODE_URL`, or `DOCS_BASE_URL` out of `apps/api/.env`. For a production web process, export them in the environment. Set `NEXT_PUBLIC_API_URL` before the build when you are not using `BROWSER_API_URL`. `SOURCE_CODE_URL` and `DOCS_BASE_URL` are read when a page renders, including under `next start`.
+`pnpm dev` does not copy `BROWSER_API_URL`, `INTERNAL_API_URL`, `SOURCE_CODE_URL`, `DOCS_BASE_URL`, `POSTHOG_KEY`, or `POSTHOG_HOST` out of `apps/api/.env`. For a production web process, export them in the environment. Set `NEXT_PUBLIC_API_URL` before the build when you are not using `BROWSER_API_URL`. `SOURCE_CODE_URL`, `DOCS_BASE_URL`, `POSTHOG_KEY`, and `POSTHOG_HOST` are read when a page renders, including under `next start`.
+
+`POSTHOG_KEY` turns on web analytics. Leave it unset and the browser does not load `posthog-js`. The hosted Factrove Cloud web app uses PostHog. A server you run leaves the key unset unless you want analytics. With a key, state stays in memory, cookies stay unset, and there is no banner. The app records the page and route changes only. It does not request feature flags and it does not call the decide endpoint. Query strings, hashes, artifact ids, and share tokens are removed from captured URLs. Page titles, artifact content, names, passwords, Factrove API keys, and email addresses are not sent. Each event still carries the public PostHog project key. Do Not Track skips the library. PostHog drops the events unless the project has cookieless mode turned on. Details are in [Configuration](/self-host/configuration#analytics).
 
 <Warning>
 `pnpm build` and `next build` fix `NEXT_PUBLIC_API_URL` into the client bundle. `next start` cannot change that baked origin. `BROWSER_API_URL` on the web process replaces it for pages rendered after you set the variable.
