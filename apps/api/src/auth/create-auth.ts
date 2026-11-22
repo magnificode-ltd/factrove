@@ -111,6 +111,12 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
           });
       },
     },
+    // Hash verification identifiers (reset-password:<token> and the rest)
+    // before they are written. Better Auth 1.7.7 otherwise stores that
+    // string in verification.identifier. Lookup still uses the raw token.
+    verification: {
+      storeIdentifier: "hashed",
+    },
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,

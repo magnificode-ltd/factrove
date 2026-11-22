@@ -146,4 +146,14 @@ describe("public API paths", () => {
     assignClientIpForPublicPath(privatePath, []);
     expect(privatePath.headers["x-factrove-client-ip"]).toBe("203.0.113.50");
   });
+
+  it("replaces a spoofed client address when the public target is absolute-form", () => {
+    const request = {
+      originalUrl: "http://127.0.0.1:3001/API/V1/PUBLIC/artifacts/00000000-0000-4000-8000-000000000000/token?x=1",
+      headers: { "x-factrove-client-ip": "203.0.113.50" },
+      socket: { remoteAddress: "192.0.2.10" },
+    } as IncomingMessage;
+    assignClientIpForPublicPath(request, []);
+    expect(request.headers["x-factrove-client-ip"]).toBe("192.0.2.10");
+  });
 });

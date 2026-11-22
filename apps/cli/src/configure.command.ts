@@ -20,18 +20,37 @@ export class ConfigureCommand {
       throw new CliError("INVALID_INPUT", "An API key is required.");
     }
     const apiUrl = answers.apiUrl || invocation.suggestedApiUrl;
-    assertHttpUrl(apiUrl);
+    const url = assertHttpUrl(apiUrl);
     await saveProfile({
       profile: invocation.profile,
       env: process.env,
       apiKey,
       apiUrl,
     });
-    process.stdout.write(`Configured profile "${invocation.profile}" for ${apiUrl}.\n`);
+    process.stdout.write(`Configured profile "${invocation.profile}" for ${url.origin}.\n`);
   }
 }
 
-function assertHttpUrl(value: string): void {
+const CREDENTIAL_QUERY_NAMES = new Set([
+  "access_token",
+  "api_key",
+  "api-key",
+  "apikey",
+  "auth",
+  "authorization",
+  "client_secret",
+  "credential",
+  "credentials",
+  "id_token",
+  "password",
+  "passwd",
+  "refresh_token",
+  "secret",
+  "token",
+  "x-api-key",
+]);
+
+function assertHttpUrl(value: string): URL {
   let url: URL;
   try {
     url = new URL(value);
@@ -41,6 +60,22 @@ function assertHttpUrl(value: string): void {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new CliError("INVALID_INPUT", "API URL must be an absolute HTTP or HTTPS URL.");
   }
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new CliError("INVALID_INPUT", "API URL must not include a username or password.");
+  }
+  if (hasCredentialQuery(url)) {
+    throw new CliError("INVALID_INPUT", "API URL must not include a token, password, or API key in the query.");
+  }
+  return url;
+}
+
+function hasCredentialQuery(url: URL): boolean {
+  for (const name of url.searchParams.keys()) {
+    if (CREDENTIAL_QUERY_NAMES.has(name.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function readAnswers(

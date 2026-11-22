@@ -62,4 +62,4 @@ printf '%s' "$LINK_PASSWORD" | pnpm factrove share "$artifact_id" --password-std
 
 ## Content tickets
 
-A signed-in viewer loads HTML through a short `access` query on the content URL. That grant lasts five minutes. Refresh the viewer to mint another one. A password-protected public link uses a separate `ticket` query that lasts 60 seconds and is honored at most three times per API process. Refresh the share page to mint another ticket. Reverse proxies should not log either query.
+A signed-in viewer loads HTML through a short `access` query on the content URL. That grant lasts five minutes and is tied to the current session and the current HTML. Refresh the viewer to mint another one. Replacing the HTML, signing out, or losing access makes the old grant stop working. A password-protected public link uses a separate `ticket` query that lasts 60 seconds and is honored at most three times per API process. Refresh the share page to mint another ticket. Reverse proxies should not log either query.

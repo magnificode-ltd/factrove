@@ -14,8 +14,22 @@ export function isPublicUnlockPath(path: string): boolean {
 }
 
 export function requestPath(request: { originalUrl?: string; url?: string }): string {
-  const raw = request.originalUrl ?? request.url ?? "";
-  return raw.split("?")[0] ?? raw;
+  return pathnameOf(request.originalUrl ?? request.url ?? "");
+}
+
+// Express matches a mounted prefix against the URL pathname, including an
+// absolute-form request target. Classify the same way so a raw target such
+// as http://host/api/v1/public/... is still a public path.
+function pathnameOf(raw: string): string {
+  const withoutHash = raw.split("#", 1)[0] ?? raw;
+  if (withoutHash.startsWith("http://") || withoutHash.startsWith("https://")) {
+    try {
+      return new URL(withoutHash).pathname;
+    } catch {
+      return withoutHash.split("?", 1)[0] ?? withoutHash;
+    }
+  }
+  return withoutHash.split("?", 1)[0] ?? withoutHash;
 }
 
 export function assignClientIpForPublicPath(request: IncomingMessage, trustedProxies: readonly string[]): void {

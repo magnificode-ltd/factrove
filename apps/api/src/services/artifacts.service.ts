@@ -24,11 +24,17 @@ import {
   type PublicUnlockEnvelope,
   type ShareState,
 } from "@factrove/contracts";
+import { Prisma } from "@prisma/client";
 import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
 import { ActorService, type Actor, type ActorWithOrganization, type HeaderSource } from "../auth/actor.service.js";
-import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
+import {
+  artifactContentUrl,
+  contentGrantAllows,
+  grantedContentUrl,
+  type ContentGrantIssuer,
+} from "../auth/content-grant.js";
 import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
 import { PasswordAttemptLimiter } from "../sharing/password-attempt-limit.js";
@@ -130,7 +136,7 @@ export class ArtifactsService {
         objectKey,
         uploadedAt: new Date(),
       });
-      return this.toDto(record, false);
+      return this.toDto(record, null);
     } catch (error) {
       await this.deleteOrphan(id, objectKey);
       throw error;
@@ -155,7 +161,7 @@ export class ArtifactsService {
     const name = readSubmittedName(fields);
 
     const replaced = await this.publishReplacement(record, upload.bytes, name);
-    return this.toDto(replaced, false);
+    return this.toDto(replaced, null);
   }
 
   // Owner only. private -> org_shared in the organization the caller confirmed.
@@ -169,9 +175,9 @@ export class ArtifactsService {
       throw artifactNotFound();
     }
     const confirmed = readShareWithOrganizationBody(readBody());
-    const includeGrant = !this.actors.hasCredentialHeader(request);
+    const issuer = this.grantIssuer(request, actor);
     if (record.accessType === "org_shared") {
-      return this.toDto(record, includeGrant);
+      return this.toDto(record, issuer);
     }
     const outcome = await this.artifacts.shareWithOrganization({
       id: record.id,
@@ -196,7 +202,7 @@ export class ArtifactsService {
     if (outcome.outcome === "organization-changed") {
       throw new ApiErrorException(409, "ORGANIZATION_CHANGED", ORGANIZATION_CHANGED_MESSAGE);
     }
-    return this.toDto(outcome.record, includeGrant);
+    return this.toDto(outcome.record, issuer);
   }
 
   // Owner only. The name changes. Content, access, organization, and share columns do not.
@@ -207,7 +213,8 @@ export class ArtifactsService {
     if (!updated) {
       throw artifactNotFound();
     }
-    return this.toDto(updated, !this.actors.hasCredentialHeader(request));
+    const actor = await this.actors.resolve(request);
+    return this.toDto(updated, this.grantIssuer(request, actor));
   }
 
   // Owner only. The object for the revision that was read is removed first, then the row
@@ -263,7 +270,7 @@ export class ArtifactsService {
       organizationId: actor.organization.id,
       mineOrganizationId: actor.via === "api-key" ? actor.organization.id : undefined,
     });
-    return records.map((record) => this.toDto(record, false));
+    return records.map((record) => this.toDto(record, null));
   }
 
   async shareState(request: HeaderSource, id: string): Promise<ShareState> {
@@ -487,8 +494,9 @@ export class ArtifactsService {
   }
 
   async getById(request: HeaderSource, id: string): Promise<ArtifactDto> {
+    const actor = await this.actors.resolve(request);
     const record = await this.requireReadable(request, id, undefined, "html");
-    return this.toDto(record, !this.actors.hasCredentialHeader(request));
+    return this.toDto(record, this.grantIssuer(request, actor));
   }
 
   async openContent(request: HeaderSource, id: string, format: ContentFormat, accessToken: unknown): Promise<OpenedArtifactContent> {
@@ -542,7 +550,7 @@ export class ArtifactsService {
     if (!record) {
       throw artifactNotFound();
     }
-    if (this.grantCanRead(request, accessToken, record.id, format)) {
+    if (await this.grantCanRead(request, accessToken, record, format)) {
       return record;
     }
     if (!actor || !(await this.canRead(actor, record))) {
@@ -637,15 +645,51 @@ export class ArtifactsService {
     });
   }
 
-  private grantCanRead(request: HeaderSource, accessToken: unknown, artifactId: string, format: ContentFormat): boolean {
+  private grantIssuer(request: HeaderSource, actor: Actor | null): ContentGrantIssuer | null {
+    if (this.actors.hasCredentialHeader(request)) {
+      return null;
+    }
+    if (!actor || actor.via !== "session" || !actor.sessionId) {
+      return null;
+    }
+    return { userId: actor.user.id, sessionId: actor.sessionId };
+  }
+
+  private async grantCanRead(
+    request: HeaderSource,
+    accessToken: unknown,
+    record: ArtifactRecord,
+    format: ContentFormat,
+  ): Promise<boolean> {
     if (format !== "html" || this.actors.hasCredentialHeader(request)) {
       return false;
     }
-    return this.grantAllows(accessToken, artifactId);
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
+      return false;
+    }
+    const issuer = contentGrantAllows(accessToken, record.id, record.contentRevision, this.config.authSecret);
+    if (!issuer || !(await this.sessionIsLive(issuer.userId, issuer.sessionId))) {
+      return false;
+    }
+    return this.canRead({
+      user: { id: issuer.userId, name: "" },
+      organization: null,
+      organizationStatus: "setup-required",
+      via: "session",
+      sessionId: issuer.sessionId,
+    }, record);
   }
 
-  private grantAllows(accessToken: unknown, artifactId: string): boolean {
-    return typeof accessToken === "string" && accessToken.length > 0 && contentGrantAllows(accessToken, artifactId, this.config.authSecret);
+  private async sessionIsLive(userId: string, sessionId: string): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id
+      FROM "session"
+      WHERE id = ${sessionId}
+        AND "userId" = ${userId}
+        AND "expiresAt" > clock_timestamp()
+      LIMIT 1
+    `);
+    return rows.length === 1;
   }
 
   private async canRead(actor: Actor, record: ArtifactRecord): Promise<boolean> {
@@ -665,7 +709,7 @@ export class ArtifactsService {
     return membership !== null;
   }
 
-  private toDto(record: ArtifactRecord, includeGrant: boolean): ArtifactDto {
+  private toDto(record: ArtifactRecord, issuer: ContentGrantIssuer | null): ArtifactDto {
     if (record.uploadedAt === null || record.mimeType !== "text/html") {
       throw new ApiErrorException(500, "INTERNAL_ERROR", "An unexpected error occurred.");
     }
@@ -688,8 +732,13 @@ export class ArtifactsService {
       uploadedAt: record.uploadedAt.toISOString(),
       viewerUrl: artifactViewerUrl(this.config.publicBaseUrl, record.id),
       ...this.shareFlags(record),
-      contentUrl: includeGrant
-        ? grantedContentUrl(this.config.apiPublicOrigin, record.id, this.config.authSecret)
+      contentUrl: issuer
+        ? grantedContentUrl(this.config.apiPublicOrigin, {
+          artifactId: record.id,
+          userId: issuer.userId,
+          sessionId: issuer.sessionId,
+          contentRevision: record.contentRevision,
+        }, this.config.authSecret)
         : artifactContentUrl(this.config.apiPublicOrigin, record.id),
     });
   }

@@ -1,6 +1,6 @@
 import { Catch, HttpException, Logger, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
 import { ApiErrorException, type ApiErrorCode } from "../services/api-error.js";
-import { isPublicApiPath } from "../sharing/public-api-path.js";
+import { isPublicApiPath, requestPath } from "../sharing/public-api-path.js";
 import { BlobStoreUnavailableError } from "../storage/index.js";
 
 type ErrorBody = {
@@ -27,7 +27,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
 
     const request = host.switchToHttp().getRequest<{ originalUrl?: string; url?: string }>();
-    const publicApi = isPublicApiPath(`${request?.originalUrl ?? request?.url ?? ""}`);
+    const publicApi = isPublicApiPath(requestPath(request ?? {}));
     const mapped = mapException(exception, publicApi);
     if (mapped.status >= 500 || exception instanceof BlobStoreUnavailableError) {
       this.logServerError(exception);

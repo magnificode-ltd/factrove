@@ -1043,6 +1043,50 @@ describe("factrove configure", () => {
     expect((await stat(join(created, "config"))).mode & 0o777).toBe(0o600);
   });
 
+  it("prints only the origin and rejects a URL that carries credentials", async () => {
+    const directory = await makeTemp();
+    const key = "ftrv_configure_origin_only";
+    const saved = await runCliInput(
+      ["configure", "--profile", "dev", "--api-key", key, "--api-url", "http://127.0.0.1:3999/api/v1?safe=1"],
+      "",
+      { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "" },
+    );
+    expect(saved.code).toBe(0);
+    expect(saved.stdout).toBe('Configured profile "dev" for http://127.0.0.1:3999.\n');
+    expect(saved.stdout).not.toContain("/api/v1");
+    expect(saved.stdout).not.toContain("safe=1");
+    expect(saved.stdout).not.toContain(key);
+    expect(saved.stderr).not.toContain(key);
+    const config = await readFile(join(directory, "config"), "utf8");
+    expect(config).toContain("api_url = http://127.0.0.1:3999/api/v1?safe=1");
+
+    const rejectedUser = await runCliInput(
+      ["configure", "--api-key", key, "--api-url", "http://cfg-user:cfg-pass-s3cret@127.0.0.1:3999"],
+      "",
+      { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "" },
+    );
+    expect(rejectedUser.code).toBe(1);
+    expect(rejectedUser.stdout).toBe("");
+    expect(rejectedUser.stderr).toContain("INVALID_INPUT");
+    expect(rejectedUser.stderr).not.toContain("cfg-user");
+    expect(rejectedUser.stderr).not.toContain("cfg-pass-s3cret");
+
+    const rejectedQuery = await runCliInput(
+      ["configure", "--api-key", key, "--api-url", "http://127.0.0.1:4001/?token=query-token-s3cret"],
+      "",
+      { FACTROVE_CONFIG_DIR: directory, FACTROVE_API_KEY: "" },
+    );
+    expect(rejectedQuery.code).toBe(1);
+    expect(rejectedQuery.stdout).toBe("");
+    expect(rejectedQuery.stderr).toContain("INVALID_INPUT");
+    expect(rejectedQuery.stderr).not.toContain("query-token-s3cret");
+    const still = await readFile(join(directory, "config"), "utf8");
+    expect(still).toContain("api_url = http://127.0.0.1:3999/api/v1?safe=1");
+    expect(still).not.toContain("4001");
+    expect(still).not.toContain("query-token-s3cret");
+    expect(still).not.toContain("cfg-pass-s3cret");
+  });
+
   it("fails a command that has no API key", async () => {
     const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
     expect(result.code).toBe(1);

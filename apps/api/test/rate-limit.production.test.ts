@@ -135,6 +135,27 @@ describe("sign-in rate limit", () => {
     expect(otherPeer.status).toBe(404);
     expect(otherPeer.body).not.toContain(token);
   });
+
+  it("counts an absolute-form public target against the socket, not a spoofed client IP", async () => {
+    const token = "b".repeat(43);
+    const spoofed = "198.51.100.77";
+    const allowed: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      allowed.push((await publicView(port, "127.0.0.3", token, attempt)).status);
+    }
+    expect(allowed).toEqual([404, 404, 404]);
+    expect((await publicView(port, "127.0.0.3", token, 3)).status).toBe(429);
+
+    const absoluteSamePeer = await publicViewAbsolute(port, "127.0.0.3", token, spoofed);
+    expect(absoluteSamePeer.status).toBe(429);
+    expect(absoluteSamePeer.body).not.toContain(token);
+    expect(absoluteSamePeer.body).not.toContain(spoofed);
+
+    const absoluteOtherPeer = await publicViewAbsolute(port, "127.0.0.4", token, spoofed);
+    expect(absoluteOtherPeer.status).toBe(404);
+    expect(absoluteOtherPeer.body).not.toContain(token);
+    expect(absoluteOtherPeer.body).not.toContain(spoofed);
+  });
 });
 
 function publicView(
@@ -154,6 +175,40 @@ function publicView(
         headers: {
           "x-forwarded-for": `203.0.113.${attempt}`,
           [CLIENT_IP_HEADER]: `198.51.100.${attempt}`,
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        response.on("end", () => {
+          resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function publicViewAbsolute(
+  port: number,
+  localAddress: string,
+  token: string,
+  spoofedIp: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        localAddress,
+        method: "GET",
+        path: `http://127.0.0.1:${port}/api/v1/public/artifacts/00000000-0000-4000-8000-000000000000/${token}`,
+        headers: {
+          "x-forwarded-for": "203.0.113.90",
+          [CLIENT_IP_HEADER]: spoofedIp,
         },
       },
       (response) => {

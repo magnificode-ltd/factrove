@@ -703,7 +703,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Get artifact metadata",
     description:
-      "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. An authenticated caller with no organization gets `403 ORGANIZATION_SETUP_REQUIRED` before the artifact is loaded. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+      "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. An authenticated caller with no organization gets `403 ORGANIZATION_SETUP_REQUIRED` before the artifact is loaded. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. The grant is tied to that session and the current content revision. API-key responses omit that grant.",
     security: "sessionOrApiKey",
     pathParameters: [artifactIdParam],
     responses: {

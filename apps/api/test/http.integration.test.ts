@@ -531,7 +531,12 @@ describe("HTTP API", () => {
     });
 
     const expiredToken = mintContentGrant(
-      artifact.id,
+      {
+        artifactId: artifact.id,
+        userId: owner.userId,
+        sessionId: "expired-session",
+        contentRevision: 0,
+      },
       TEST_AUTH_SECRET,
       Date.now() - (CONTENT_GRANT_TTL_SECONDS + 120) * 1000,
     );
@@ -544,6 +549,104 @@ describe("HTTP API", () => {
       headers: { "x-api-key": owner.apiKey },
     });
     expect(withHeader.status).toBe(404);
+  });
+
+  it("rejects a content grant after the member is removed", async () => {
+    const bytes = new TextEncoder().encode("<p>member-grant</p>");
+    const artifact = await upload(baseUrl, "member-grant.html", bytes, { accessType: "org_shared" });
+    const userId = randomUUID();
+    const now = new Date();
+    await prisma.user.create({
+      data: {
+        id: userId,
+        name: "Member",
+        email: "member-grant@example.invalid",
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    await addMembership(prisma, userId, owner.organizationId);
+    const sessionId = await insertLiveSession(prisma, userId);
+    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const token = mintContentGrant({
+      artifactId: artifact.id,
+      userId,
+      sessionId,
+      contentRevision: stored.contentRevision,
+    }, TEST_AUTH_SECRET);
+    const contentUrl = `${baseUrl}/api/v1/artifacts/${artifact.id}/content?access=${encodeURIComponent(token)}`;
+    const granted = await globalThis.fetch(contentUrl);
+    expect(granted.status).toBe(200);
+    expect(Buffer.from(await granted.arrayBuffer())).toEqual(Buffer.from(bytes));
+
+    await prisma.member.deleteMany({
+      where: { userId, organizationId: owner.organizationId },
+    });
+    const revoked = await globalThis.fetch(contentUrl);
+    expect(revoked.status).toBe(404);
+    expect(await errorOf(revoked)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+  });
+
+  it("rejects a content grant after the issuing session is deleted", async () => {
+    const bytes = new TextEncoder().encode("<p>session-grant</p>");
+    const artifact = await upload(baseUrl, "session-grant.html", bytes);
+    const sessionId = await insertLiveSession(prisma, owner.userId);
+    const stored = await prisma.artifact.findUniqueOrThrow({ where: { id: artifact.id } });
+    const token = mintContentGrant({
+      artifactId: artifact.id,
+      userId: owner.userId,
+      sessionId,
+      contentRevision: stored.contentRevision,
+    }, TEST_AUTH_SECRET);
+    const contentUrl = `${baseUrl}/api/v1/artifacts/${artifact.id}/content?access=${encodeURIComponent(token)}`;
+    const granted = await globalThis.fetch(contentUrl);
+    expect(granted.status).toBe(200);
+    expect(Buffer.from(await granted.arrayBuffer())).toEqual(Buffer.from(bytes));
+
+    await prisma.session.deleteMany({ where: { id: sessionId } });
+    const revoked = await globalThis.fetch(contentUrl);
+    expect(revoked.status).toBe(404);
+    expect(await errorOf(revoked)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+    const ownerDetail = await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { cookie: owner.cookie },
+    });
+    expect(ownerDetail.status).toBe(200);
+  });
+
+  it("rejects a content grant after the content revision changes", async () => {
+    const original = new TextEncoder().encode("<p>revision-before</p>");
+    const next = new TextEncoder().encode("<p>revision-after</p>");
+    const artifact = await upload(baseUrl, "revision-grant.html", original);
+    const before = artifactEnvelopeSchema.parse(await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { cookie: owner.cookie },
+    })).json());
+    expectGrantedContentUrl(before.artifact.contentUrl, artifact.id);
+    const granted = await fetchContentUrl(baseUrl, before.artifact.contentUrl);
+    expect(granted.status).toBe(200);
+    expect(Buffer.from(await granted.arrayBuffer())).toEqual(Buffer.from(original));
+
+    const replaced = await putContent(baseUrl, artifact.id, "after.html", next);
+    expect(replaced.status).toBe(200);
+    const stale = await fetchContentUrl(baseUrl, before.artifact.contentUrl);
+    expect(stale.status).toBe(404);
+    expect(await errorOf(stale)).toEqual({
+      code: "ARTIFACT_NOT_FOUND",
+      message: "Artifact was not found.",
+    });
+
+    const after = artifactEnvelopeSchema.parse(await (await globalThis.fetch(`${baseUrl}/api/v1/artifacts/${artifact.id}`, {
+      headers: { cookie: owner.cookie },
+    })).json());
+    const fresh = await fetchContentUrl(baseUrl, after.artifact.contentUrl);
+    expect(fresh.status).toBe(200);
+    expect(Buffer.from(await fresh.arrayBuffer())).toEqual(Buffer.from(next));
   });
 
   it("preserves fixture bytes for an htm upload under a html object key", async () => {
@@ -1815,7 +1918,12 @@ describe("HTTP API", () => {
   it("rejects a content grant and leaves the stored bytes in place", async () => {
     const original = new TextEncoder().encode("<p>grant</p>");
     const artifact = await upload(baseUrl, "grant.html", original);
-    const grant = mintContentGrant(artifact.id, TEST_AUTH_SECRET);
+    const grant = mintContentGrant({
+      artifactId: artifact.id,
+      userId: owner.userId,
+      sessionId: "unused-session",
+      contentRevision: 0,
+    }, TEST_AUTH_SECRET);
     const form = new FormData();
     form.append("file", new Blob(["<p>stolen</p>"]), "stolen.html");
     const denied = await globalThis.fetch(
@@ -5562,6 +5670,27 @@ function expectPlainContentUrl(value: string, id: string): void {
   const url = new URL(value);
   expect(`${url.origin}${url.pathname}`).toBe(`http://localhost:3001/api/v1/artifacts/${id}/content`);
   expect(url.search).toBe("");
+}
+
+async function insertLiveSession(client: PrismaClient, userId: string): Promise<string> {
+  const id = randomUUID();
+  const now = new Date();
+  await client.session.create({
+    data: {
+      id,
+      expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+      token: randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+      userId,
+    },
+  });
+  return id;
+}
+
+function fetchContentUrl(root: string, contentUrl: string): Promise<Response> {
+  const grantedUrl = new URL(contentUrl);
+  return globalThis.fetch(new URL(`${grantedUrl.pathname}${grantedUrl.search}`, root));
 }
 
 function expectGrantedContentUrl(value: string, id: string): void {
