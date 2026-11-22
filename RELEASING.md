@@ -8,21 +8,25 @@ The workspace package stays `@factrove/cli` and private. The repository root is 
 
 Publishing happens only when someone runs the [Publish CLI](https://github.com/magnificode-ltd/factrove/actions/workflows/publish-cli.yml) workflow by hand from `main`. The workflow file is `.github/workflows/publish-cli.yml`. It has no `push` or `tag` trigger. A dispatch from any other branch is skipped, so it cannot publish.
 
-## Add NPM_TOKEN
+## Configure trusted publishing
 
-The workflow reads the `NPM_TOKEN` repository secret. It does not publish without that secret, and a dry run does not need it.
+Publishing authenticates with npm Trusted Publishing. GitHub Actions provides a short-lived OIDC token to this workflow. A dry run needs no credentials.
 
-Create a granular access token on the npm account that owns the `factrove` package:
+One-time setup on npmjs.com, for the `factrove` package: **Settings → Trusted Publisher → GitHub Actions**.
 
-1. Open the Access Tokens page for that npm account and generate a **Granular Access Token**.
-2. Name it for GitHub Actions, and set an expiration you will rotate.
-3. Under packages, grant **read and write** only for the `factrove` package. Do not grant access to every package on the account.
-4. Tick **Bypass two-factor authentication**. It is off by default. CI cannot publish until that box is ticked. The token is still a granular access token, scoped to read and write on `factrove` only.
-5. In the GitHub repository, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `NPM_TOKEN` and paste the token.
+1. Organization or user: `magnificode-ltd`.
+2. Repository: `factrove`.
+3. Workflow filename: `publish-cli.yml`.
+4. Leave the environment empty. This workflow has no GitHub environment.
+5. Allow this publisher to run `npm publish`. The workflow publishes with that command.
 
-Do not commit the token, and do not put it in the workflow file. The workflow writes it to `~/.npmrc` only for the publish step.
+The publish job sets `id-token: write` and `contents: read`. The runner uses Node 24 from `.nvmrc`. Before a real publish, the job installs `npm@latest` so npm is 11.5.1 or newer. Trusted publishing requires that npm on Node 22.14 or newer, or on Node 24.
 
-The publish command is `npm publish --access public`. It does not pass `--provenance`. The publish step sets `NPM_CONFIG_PROVENANCE` from repository visibility: provenance is on when the repository is public, and off when it is private. npm accepts a publish without provenance from a private repository. `id-token: write` is set so a public repository can sign provenance.
+The publish command is `npm publish --access public`. Provenance is generated automatically when the repository and the package are public. A private repository publishes without a provenance attestation.
+
+Complete the first successful publish within two days of creating the trusted publisher. npm expires an unused configuration after that.
+
+After that publish works, the package setting can be changed to disallow token publishing. On the `factrove` package, open **Settings → Publishing access** and select **Require two-factor authentication and disallow tokens**. Trusted publishing keeps working. Revoke any npm automation token for this package, and delete the `NPM_TOKEN` repository secret if it is still there.
 
 ## Cut a release
 
@@ -40,7 +44,7 @@ The job installs dependencies, builds the CLI, runs the CLI tests, writes the pu
 
 ### Publish
 
-Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance is on when the repository is public and off when it is private. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
+Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then the job installs a current npm and runs `npm publish --access public`. npm signs in through the trusted publisher. Provenance is included when the repository is public. A version that already exists fails before the smoke test, with an error that names the version.
 
 `pnpm cli:pack` from a checkout writes the same `apps/cli/npm/` directory. It does not publish.
 

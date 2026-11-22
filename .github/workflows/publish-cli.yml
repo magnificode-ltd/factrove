@@ -5,7 +5,11 @@ name: Publish CLI
 # This workflow runs only when someone dispatches it from main. It does not run on push or on tags.
 # A dispatch from any other branch is skipped, so it cannot publish.
 # dry-run defaults to true, so a dispatch packs and smoke-tests without publishing.
-# Provenance follows repository visibility: it is on when the repository is public.
+# Publish authenticates with npm Trusted Publishing (OIDC). A dry run needs no credentials.
+# Provenance is generated automatically when the repository is public.
+# Node comes from .nvmrc (Node 24). The publish step installs npm@latest.
+# Leave registry-url unset. setup-node writes an _authToken line when it is set, and npm then skips OIDC.
+# npm's default registry is https://registry.npmjs.org.
 
 on:
   workflow_dispatch:
@@ -20,10 +24,6 @@ on:
         type: boolean
         default: true
 
-permissions:
-  contents: read
-  id-token: write
-
 concurrency:
   group: publish-factrove-npm
   cancel-in-progress: false
@@ -34,6 +34,9 @@ jobs:
     name: Pack and publish factrove
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -119,17 +122,27 @@ jobs:
         working-directory: apps/cli/npm
         env:
           DRY_RUN: ${{ inputs.dry-run }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: ${{ !github.event.repository.private }}
         run: |
           set -euo pipefail
           if [ "$DRY_RUN" != "false" ]; then
             echo "Dry run. Skipping npm publish. Dispatch again with dry-run set to false to publish."
             exit 0
           fi
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::error::NPM_TOKEN repository secret is missing. Add a granular access token with read and write on the factrove package, and tick Bypass two-factor authentication."
-            exit 1
-          fi
-          printf '%s\n' "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "${HOME}/.npmrc"
+          npm install -g npm@latest
+          echo "node $(node --version)"
+          echo "npm $(npm --version)"
+          node --input-type=module -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            const npmOk = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!npmOk) {
+              process.stderr.write(`npm ${process.argv[1]} is older than 11.5.1\n`);
+              process.exit(1);
+            }
+            const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+            const nodeOk = nodeMajor >= 24 || (nodeMajor === 22 && nodeMinor >= 14);
+            if (!nodeOk) {
+              process.stderr.write(`Node ${process.versions.node} is not Node 22.14+ or Node 24+\n`);
+              process.exit(1);
+            }
+          ' "$(npm --version)"
           npm publish --access public
