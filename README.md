@@ -15,7 +15,7 @@ ftrv --help
 npx factrove --help
 ```
 
-With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is the hosted Factrove API. `factrove configure`, `--api-url`, and `FACTROVE_API_URL` override it for a server you run. User setup for that hosted API is [docs/cloud/quickstart.mdx](docs/cloud/quickstart.mdx). User setup for a server you run is [docs/self-host/quickstart.mdx](docs/self-host/quickstart.mdx). The hosted web origin is not set in this repository. Publishing is a manual GitHub Actions dispatch, described in [docs/guides/releasing-the-cli.mdx](docs/guides/releasing-the-cli.mdx). It does not run on push.
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is the hosted Factrove API. `factrove configure`, `--api-url`, and `FACTROVE_API_URL` override it for a server you run. User setup for that hosted API is [docs/cloud/quickstart.mdx](docs/cloud/quickstart.mdx). User setup for a server you run is [docs/self-host/quickstart.mdx](docs/self-host/quickstart.mdx). The hosted web origin is not set in this repository. Publishing is a manual GitHub Actions dispatch, described in [RELEASING.md](RELEASING.md). It does not run on push.
 
 From this repository, `pnpm factrove` runs the CLI in the checkout. That is the command the local setup below uses. It is not a substitute for the published package.
 
@@ -333,7 +333,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Deploy](docs/self-host/deploy.mdx): Docker Compose install, published GHCR images, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
 - [Factrove Cloud quickstart](docs/cloud/quickstart.mdx): sign up, create an API key, and point the same CLI at `https://api.factrove.app`. The hosted web origin on that page is a placeholder.
 - [CLI](docs/guides/cli.mdx): commands, precedence, and a copyable agent workflow.
-- [Release the CLI](docs/guides/releasing-the-cli.mdx): manual npm publish of the `factrove` package. It does not run on push.
+- [Release the CLI](RELEASING.md): manual npm publish of the `factrove` package. It does not run on push. Maintainers only; this file is not on the docs site.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
 - [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
