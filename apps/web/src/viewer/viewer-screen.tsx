@@ -109,7 +109,7 @@ function ViewerTools({
   const share = state.share ?? null;
   const showOrgShare = state.owner === true && accessType === "private" && organization !== null;
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
       {showOrgShare ? (
         <OrgShareControl
           artifactId={artifact.id}

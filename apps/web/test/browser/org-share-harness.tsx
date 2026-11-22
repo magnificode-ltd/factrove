@@ -49,6 +49,24 @@ function artifact(id: string, accessType: ArtifactDto["accessType"], creatorUser
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const method = (init?.method ?? "GET").toUpperCase();
+  if (method === "PATCH" && String(input).endsWith("/name")) {
+    const url = String(input);
+    const parts = url.split("/");
+    const id = decodeURIComponent(parts[parts.length - 2] ?? "");
+    const parsed = typeof init?.body === "string" ? JSON.parse(init.body) as { name?: unknown } : {};
+    const nextName = typeof parsed.name === "string" ? parsed.name : null;
+    const current = artifact(id, id === sharedId ? "org_shared" : "private");
+    return new Response(
+      JSON.stringify({
+        artifact: {
+          ...current,
+          name: nextName,
+          updatedAt: "2026-10-22T12:05:00.000Z"
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }
   if (method === "PATCH") {
     const url = String(input);
     const id = decodeURIComponent(url.split("/").pop() ?? "");

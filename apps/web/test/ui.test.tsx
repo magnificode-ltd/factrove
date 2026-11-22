@@ -61,7 +61,8 @@ describe("ArtifactCard", () => {
     const html = renderToStaticMarkup(<ArtifactCard artifact={artifact} now={now} />);
 
     expect(html).toContain(`href="/artifacts/${artifact.id}"`);
-    expect(html).toContain(artifact.filename);
+    expect(html).toContain(`>${artifact.id}</a>`);
+    expect(html).not.toContain(artifact.filename);
     expect(html).toContain(artifact.id);
     expect(html).toContain("Copy ID");
     expect(html).toContain("2 min ago");
@@ -75,13 +76,14 @@ describe("ArtifactCard", () => {
     const named = { ...artifact, name: "X launch calendar" };
     const now = Date.parse("2026-10-11T10:02:00.000Z");
     const card = renderToStaticMarkup(<ArtifactCard artifact={named} now={now} />);
-    expect(card).toContain("X launch calendar");
+    expect(card).toContain(">X launch calendar</a>");
     expect(card).toContain(named.id);
+    expect(card).not.toContain(`>${named.id}</a>`);
     expect(card).not.toContain(named.filename);
 
     const viewer = renderToStaticMarkup(<ViewerScreen state={{ status: "ready", artifact: named }} />);
     expect(viewer).toContain("Back to library");
-    expect(viewer).toContain("X launch calendar");
+    expect(viewer).toContain(">X launch calendar</h1>");
     expect(viewer).toContain(named.id);
     expect(viewer).not.toContain(named.filename);
 
@@ -102,9 +104,29 @@ describe("ArtifactCard", () => {
         }}
       />
     );
-    expect(share).toContain("X launch calendar");
+    expect(share).toContain(">X launch calendar</h1>");
     expect(share).not.toContain("Back to library");
     expect(share).not.toContain(named.filename);
+
+    const unnamedShare = renderToStaticMarkup(
+      <PublicShareScreen
+        state={{
+          status: "ready",
+          artifact: {
+            id: artifact.id,
+            filename: artifact.filename,
+            name: "   ",
+            mimeType: "text/html",
+            sizeBytes: artifact.sizeBytes,
+            uploadedAt: artifact.uploadedAt,
+            contentUrl: `http://localhost:3001/api/v1/public/artifacts/${artifact.id}/token/content`,
+            passwordProtected: false
+          }
+        }}
+      />
+    );
+    expect(unnamedShare).toContain(`>${artifact.id}</h1>`);
+    expect(unnamedShare).not.toContain(artifact.filename);
   });
 });
 
