@@ -45,9 +45,15 @@ describe("Docs link", () => {
       expect(html.indexOf(">Docs</a>")).toBeLessThan(html.indexOf(">Source code</a>"));
     }
 
-    expect(signedIn.indexOf("Sign out")).toBeLessThan(signedIn.indexOf(">Docs</a>"));
-    expect(signedIn.indexOf('href="/account/api-keys"')).toBeLessThan(signedIn.indexOf(">Docs</a>"));
-    expect(signedOut.indexOf(">Create account</a>")).toBeLessThan(signedOut.indexOf(">Docs</a>"));
+    expect(signedIn.indexOf(">Docs</a>")).toBeLessThan(signedIn.indexOf('aria-label="Refresh"'));
+    expect(signedIn.indexOf('aria-label="Refresh"')).toBeLessThan(signedIn.indexOf('href="/account/api-keys"'));
+    expect(signedIn).toContain('aria-label="Account menu for Local User"');
+    expect(signedIn).toContain("border-b");
+    expect(signedIn).toContain("bg-white");
+    expect(signedIn).not.toContain(">Sign out<");
+    expect(signedOut.indexOf(">Docs</a>")).toBeLessThan(signedOut.indexOf('aria-label="Refresh"'));
+    expect(signedOut.indexOf('aria-label="Refresh"')).toBeLessThan(signedOut.indexOf(">Sign in</a>"));
+    expect(signedOut.indexOf(">Sign in</a>")).toBeLessThan(signedOut.indexOf(">Create account</a>"));
     expect(auth).toContain(">Docs</a>");
     expect(gate).toContain(">Docs</a>");
   });

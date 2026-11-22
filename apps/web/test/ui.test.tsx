@@ -30,7 +30,7 @@ const artifact: ArtifactDto = {
 };
 
 describe("LibraryTabs", () => {
-  it("marks the current list and slides the pill between the two links", () => {
+  it("marks the current list with the pill on the active link", () => {
     const mine = renderToStaticMarkup(<LibraryTabs view="mine" />);
     const org = renderToStaticMarkup(<LibraryTabs view="org" />);
     const none = renderToStaticMarkup(<LibraryTabs view="none" />);
@@ -195,5 +195,12 @@ describe("contrast tokens", () => {
     expect(css).toContain("--primary: var(--peri-d)");
     expect(css).toContain("--peri-d: #5e64d6");
     expect(css).toContain(".ft-card:focus-within");
+    const hover = css.match(/\.ft-card:hover\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(hover).toContain("background");
+    expect(hover).not.toContain("transform");
+    expect(hover).not.toContain("transition");
+    const orgPill = css.match(/\.ft-tab-pill\[data-tab="org"\]\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(orgPill).toContain("left:");
+    expect(orgPill).not.toContain("transform");
   });
 });

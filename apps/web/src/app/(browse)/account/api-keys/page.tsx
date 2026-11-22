@@ -109,7 +109,7 @@ export default function ApiKeysPage() {
     <div className="ft-canvas min-h-dvh">
       <AppBar>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" className="h-10">
+          <Button asChild variant="outline" className="h-8 bg-white">
             <a href="/">Back to library</a>
           </Button>
           <SignOutButton />
