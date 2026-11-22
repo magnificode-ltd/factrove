@@ -21,13 +21,13 @@ Those two entries are for an API you run. `https://api.example.com` is a placeho
 | Browser session | Cookie from `POST /api/auth/sign-in/email` or sign-up |
 | CLI and other clients | `Authorization: Bearer <api-key>` |
 
-`x-api-key` does not authenticate. A present `Authorization` header that is not a valid key does not fall back to the session cookie. API key create, list, and delete require a browser session and reject `Authorization`.
+`x-api-key` does not authenticate. A present `Authorization` header that is not a valid key does not fall back to the session cookie. API key create, list, and delete require a browser session and reject `Authorization`. They use the session's active organization. Any member of that organization can manage its keys. An organization id in the body or query is ignored. A request authenticated with a key acts in the organization that owns the key, as the member who created it. If that person is no longer a member, the key is `401 UNAUTHENTICATED`. `POST /api/v1/onboarding/organization` also requires a browser session. Send `{ "name" }`. The name is one line of 1 to 80 characters. The response is `{ "organization": { "id", "name" } }`. The server chooses the slug, makes the caller the owner, and sets that organization active on the session. A caller who already has an organization gets `409 ORGANIZATION_EXISTS`. An API key gets `401 UNAUTHENTICATED`. Other authenticated product routes return `403 ORGANIZATION_SETUP_REQUIRED` until that organization exists, and `409 ORGANIZATION_SELECTION_REQUIRED` when several memberships have no active organization. Health, public shares, get-session, and sign-out do not. The migration that gives keys to the organization deletes every existing key. Create them again after upgrading.
 
 Cookie-authenticated writes (`POST`, `PUT`, `DELETE`, and other non-GET/HEAD/OPTIONS methods) also need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is `403 FORBIDDEN` with message `This request origin is not allowed.` Bearer requests skip that check. The public unlock route ignores a leftover session cookie.
 
 ## Create an API key from a session
 
-People can create a key in the web app at `/account/api-keys`. The secret is shown once. Agents can use the same session route. Do not send `Authorization` on these calls. Send `Origin` set to `WEB_ORIGIN` or `PUBLIC_BASE_URL`. On an `https` API origin the session cookie is named `__Secure-better-auth.session_token`. On `http` it is `better-auth.session_token`. A cookie jar records whichever name the server set.
+People can create a key in the web app at `/account/api-keys`. The key belongs to the active organization. The secret is shown once. Agents can use the same session route. Name the organization before creating the key. Do not send `Authorization` on these calls. Send `Origin` set to `WEB_ORIGIN` or `PUBLIC_BASE_URL`. On an `https` API origin the session cookie is named `__Secure-better-auth.session_token`. On `http` it is `better-auth.session_token`. A cookie jar records whichever name the server set. Keys created before they belonged to an organization were deleted by that upgrade.
 
 Sign-up signs the new account in (`autoSignIn` is on) and stores the cookie. Passwords are 8 to 128 characters. Replace the email and password before you run this. A plus-address such as `name+tag@example.com` is valid. The stored address is lower case and keeps the plus tag. A successful sign-up sends one verification email to that address. That message also welcomes the person, and sign-in is not blocked. With `EMAIL_TRANSPORT` unset or `log`, the API logs the message and does not send it. The live-check commands, with the invitee address as a parameter, are in [Invite email](/self-host/deploy#invite-email). If the email is already registered, sign-up returns 422 and does not send another message. Use the sign-in request instead, with the same cookie jar and `Origin`.
 
@@ -41,11 +41,18 @@ curl -sS -c "$jar" -X POST "$api/api/auth/sign-up/email" \
   -H "Origin: $origin" \
   -d '{"name":"Local Owner","email":"owner@example.com","password":"replace-this-password"}'
 
+curl -sS -b "$jar" -X POST "$api/api/v1/onboarding/organization" \
+  -H "Content-Type: application/json" \
+  -H "Origin: $origin" \
+  -d '{"name":"Local Lab"}'
+
 curl -sS -b "$jar" -X POST "$api/api/auth/api-key/create" \
   -H "Content-Type: application/json" \
   -H "Origin: $origin" \
   -d '{"name":"cli"}'
 ```
+
+The key belongs to Local Lab. A body field other than `name` does not choose a different organization or a different creating user.
 
 Sign in an existing account:
 

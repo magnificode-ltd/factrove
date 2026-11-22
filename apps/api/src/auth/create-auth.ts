@@ -18,7 +18,13 @@ import {
 } from "../mail/password-reset-link.js";
 import { logWithoutThrowing } from "../mail/safe-log.js";
 import { factroveApiKey } from "./api-key-plugin.js";
+import { scopeOrganizationApiKeyRequest } from "./api-key-scope.js";
 import { CLIENT_IP_HEADER } from "./client-ip.js";
+import {
+  ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
+  ORGANIZATION_SETUP_REQUIRED_MESSAGE,
+  resolveCurrentOrganization,
+} from "./current-organization.js";
 import { factroveOrganization, rejectClosedOrganizationAction } from "./organization-plugin.js";
 
 export type CreatedAccount = {
@@ -61,13 +67,14 @@ export type FactroveAuth = {
     } | null>;
     verifyApiKey: (input: { body: { key: string } }) => Promise<{
       valid: boolean;
-      key: { referenceId: string } | null;
+      key: { referenceId: string; metadata?: unknown } | null;
     }>;
   };
 };
 
 export function createAuth(input: CreateAuthInput): FactroveAuth {
-  return betterAuth({
+  const gate: { api?: FactroveAuth["api"] } = {};
+  const auth = betterAuth({
     baseURL: input.baseURL,
     secret: input.secret,
     trustedOrigins: input.trustedOrigins,
@@ -166,6 +173,23 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     // Account creation sends the welcome email. It is not an organization invite.
     // The address is stored in lower case and a plus tag is kept (name+tag@host).
     databaseHooks: {
+      session: {
+        create: {
+          // A user with exactly one membership signs in to that organization.
+          // Several memberships stay unset. The client cannot send this field.
+          before: async (session) => {
+            const userId = session.userId;
+            if (!userId || activeOrganizationIdFrom(session.activeOrganizationId) || !canReadMemberships(input.prisma)) {
+              return;
+            }
+            const resolved = await resolveCurrentOrganization(input.prisma, userId, null);
+            if (resolved.status !== "ready") {
+              return;
+            }
+            return { data: { ...session, activeOrganizationId: resolved.organization.id } };
+          },
+        },
+      },
       user: {
         create: {
           after: async (user) => {
@@ -207,9 +231,56 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
             message: "API key management requires a browser session.",
           });
         }
+        const api = gate.api;
+        if (!api) {
+          return;
+        }
+        const session = await api.getSession({ headers: ctx.headers ?? new Headers() });
+        if (!session?.user) {
+          return;
+        }
+        if (!canReadMemberships(input.prisma)) {
+          return;
+        }
+        const resolved = await resolveCurrentOrganization(
+          input.prisma,
+          session.user.id,
+          activeOrganizationIdFrom(session.session.activeOrganizationId),
+        );
+        if (resolved.status === "setup-required") {
+          throw new APIError("FORBIDDEN", {
+            message: ORGANIZATION_SETUP_REQUIRED_MESSAGE,
+            code: "ORGANIZATION_SETUP_REQUIRED",
+          });
+        }
+        if (resolved.status === "selection-required") {
+          throw new APIError("CONFLICT", {
+            message: ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
+            code: "ORGANIZATION_SELECTION_REQUIRED",
+          });
+        }
+        const scoped = await scopeOrganizationApiKeyRequest(ctx, {
+          prisma: input.prisma,
+          userId: session.user.id,
+          organizationId: resolved.organization.id,
+        });
+        if (scoped) {
+          return { context: scoped };
+        }
       }),
     },
   }) as unknown as FactroveAuth;
+  gate.api = auth.api;
+  return auth;
+}
+
+function activeOrganizationIdFrom(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function canReadMemberships(prisma: PrismaClient): boolean {
+  const member = prisma.member as { findMany?: unknown; findFirst?: unknown } | undefined;
+  return typeof member?.findMany === "function" && typeof member.findFirst === "function";
 }
 
 function isPasswordReset(path: string | undefined): boolean {

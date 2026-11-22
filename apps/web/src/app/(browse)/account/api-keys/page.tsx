@@ -15,6 +15,13 @@ import { authPageHref } from "@/auth/return-path";
 
 const loginHref = authPageHref("login", "/account/api-keys");
 
+function organizationSetupRequired(error: { status?: number; code?: string; message?: string } | null | undefined): boolean {
+  if (!error || error.status !== 403) {
+    return false;
+  }
+  return error.code === "ORGANIZATION_SETUP_REQUIRED" || error.message === "Create an organization to continue.";
+}
+
 type ListedKey = {
   id: string;
   name: string | null;
@@ -33,6 +40,10 @@ export default function ApiKeysPage() {
     if (result.error) {
       if (result.error.status === 401) {
         window.location.assign(loginHref);
+        return;
+      }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
         return;
       }
       setError(result.error.message ?? "API keys could not be loaded.");
@@ -61,6 +72,10 @@ export default function ApiKeysPage() {
         window.location.assign(loginHref);
         return;
       }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
+        return;
+      }
       setError(result.error?.message ?? "The API key could not be created.");
       return;
     }
@@ -78,6 +93,10 @@ export default function ApiKeysPage() {
         window.location.assign(loginHref);
         return;
       }
+      if (organizationSetupRequired(result.error)) {
+        window.location.assign("/onboarding");
+        return;
+      }
       setError(result.error.message ?? "The API key could not be revoked.");
       return;
     }
@@ -90,17 +109,19 @@ export default function ApiKeysPage() {
     <div className="ft-canvas min-h-dvh">
       <AppBar>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" className="h-10">
+          <Button asChild variant="outline" className="h-8 bg-white">
             <a href="/">Back to library</a>
           </Button>
           <SignOutButton />
         </div>
       </AppBar>
-      <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+      <main className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
         <p className="text-sm font-semibold tracking-[0.16em] text-peri-d uppercase">Account</p>
         <h1 className="ft-title mt-2 text-4xl sm:text-5xl">API keys</h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
+          API keys belong to this organization. Any member can create, see, and revoke them.
           A new key is shown once. Factrove stores only a hash of the key.
+          This upgrade removed keys created before they belonged to an organization. Create them again here.
         </p>
         <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <Card className="bg-white">
@@ -115,9 +136,9 @@ export default function ApiKeysPage() {
           </Card>
           <div className="grid gap-4">
             {secret ? (
-              <div role="status" className="ft-pop ft-key rounded-[14px] border border-line bg-lilac p-5">
+              <div role="status" className="rounded-[14px] border border-line bg-lilac p-5">
                 <p className="text-sm font-medium">Copy this key now. It will not be shown again.</p>
-                <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
+                <code className="mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
                   {secret}
                 </code>
                 <div className="mt-4">

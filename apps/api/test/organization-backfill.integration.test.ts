@@ -1,0 +1,570 @@
+import "reflect-metadata";
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { Client } from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { backfillOrganizationDisplayName } from "../src/auth/organization-backfill-name.js";
+import { organizationSlugCandidates } from "../src/auth/organization-slug.js";
+import { claimLocalArtifacts } from "../src/database/seed/claim-local-artifacts.js";
+import { localOrganizationFixture, localUserFixture, seedLocalIdentities } from "../src/database/seed/seed-local-identities.js";
+import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } from "./isolated-database.js";
+
+const execFileAsync = promisify(execFile);
+const apiRoot = fileURLToPath(new URL("..", import.meta.url));
+
+describe("organization backfill", () => {
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+  let isolated: IsolatedDatabase | undefined;
+  let prisma: PrismaClient;
+
+  beforeAll(async () => {
+    isolated = await createIsolatedDatabase();
+    process.env.DATABASE_URL = isolated.databaseUrl;
+    await execFileAsync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
+      cwd: apiRoot,
+      env: { ...process.env, DATABASE_URL: isolated.databaseUrl },
+    });
+    prisma = new PrismaClient({ datasources: { db: { url: isolated.databaseUrl } } });
+    await prisma.$connect();
+    await seedLocalIdentities(prisma);
+    await prisma.$executeRaw`ALTER TABLE artifact ALTER COLUMN organization_id DROP NOT NULL`;
+  });
+
+  afterAll(async () => {
+    await prisma?.$disconnect();
+    if (isolated) {
+      await dropIsolatedDatabase(isolated);
+    }
+    if (previousDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = previousDatabaseUrl;
+    }
+  });
+
+  it("uses the same slug and display-name rules as create-first-organization", async () => {
+    const names = [
+      "Ada Lab",
+      "Local",
+      "!!!",
+      "Árvíz",
+      "b".repeat(47),
+      "c".repeat(48),
+      "Tom's organization",
+      "1️⃣UP",
+      "1️⃣UP's organization",
+      "A\u0301 Lab",
+      "é",
+    ];
+    for (const name of names) {
+      const expected = organizationSlugCandidates(name, () => "abc123");
+      const actual = await slugCandidates(prisma, name, ["abc123"]);
+      expect(actual).toEqual(expected);
+    }
+    const namesAndEmails: Array<[string, string]> = [
+      ["  Tom  ", "tom@example.com"],
+      ["   ", "ada.lovelace@example.com"],
+      ["", "@example.com"],
+      ["Tom\nX", "tom@example.com"],
+      ["a".repeat(80), "a@example.com"],
+      ["\nTom\n", "tom@example.com"],
+    ];
+    for (const [name, email] of namesAndEmails) {
+      const rows = await prisma.$queryRaw<Array<{ display_name: string }>>`
+        SELECT factrove_backfill_display_name(${name}, ${email}) AS display_name
+      `;
+      expect(rows[0]?.display_name).toBe(backfillOrganizationDisplayName(name, email));
+    }
+  });
+
+  it("stops when a null artifact has a creator with several memberships", async () => {
+    const userId = "user-many";
+    await expect(prisma.$transaction(async (tx) => {
+      await insertUser(tx, { id: userId, name: "Many", email: "many@example.com" });
+      await insertOrganization(tx, { id: "many-a", name: "Many A", slug: "many-a" });
+      await insertOrganization(tx, { id: "many-b", name: "Many B", slug: "many-b" });
+      await insertMember(tx, { id: "many-member-a", organizationId: "many-a", userId });
+      await insertMember(tx, { id: "many-member-b", organizationId: "many-b", userId });
+      await insertArtifact(tx, { id: randomUUID(), creatorUserId: userId, organizationId: null });
+      await tx.$queryRaw`SELECT factrove_backfill_organizations()`;
+    })).rejects.toThrow(/organization_id is null for creator user-many/);
+    expect(await prisma.user.findUnique({ where: { id: userId } })).toBeNull();
+  });
+
+  it("creates one owner organization per user, fills artifacts, and can run again", async () => {
+    await insertUser(prisma, { id: "user-tom-a", name: "  Tom  ", email: "tom.a@example.com" });
+    await insertUser(prisma, { id: "user-tom-b", name: "Tom", email: "tom.b@example.com" });
+    await insertUser(prisma, { id: "user-blank", name: "   ", email: "ada.lovelace@example.com" });
+    await insertUser(prisma, { id: "user-bad", name: "Tom\nX", email: "bad@example.com" });
+    await insertUser(prisma, { id: "user-kept", name: "Kept", email: "kept@example.com" });
+    await insertOrganization(prisma, { id: "kept-org", name: "Kept Lab", slug: "kept-lab" });
+    await insertMember(prisma, { id: "kept-member", organizationId: "kept-org", userId: "user-kept" });
+    await insertSession(prisma, { id: "session-tom-a", userId: "user-tom-a", activeOrganizationId: null });
+    await insertSession(prisma, { id: "session-tom-b", userId: "user-tom-b", activeOrganizationId: "" });
+    await insertSession(prisma, { id: "session-kept", userId: "user-kept", activeOrganizationId: "kept-org" });
+    await insertSession(prisma, { id: "session-kept-empty", userId: "user-kept", activeOrganizationId: null });
+    const keptArtifact = randomUUID();
+    const blankArtifact = randomUUID();
+    const localArtifact = randomUUID();
+    await insertArtifact(prisma, { id: keptArtifact, creatorUserId: "user-kept", organizationId: "kept-org" });
+    await insertArtifact(prisma, { id: blankArtifact, creatorUserId: "user-blank", organizationId: null });
+    await insertArtifact(prisma, { id: localArtifact, creatorUserId: localUserFixture.id, organizationId: null });
+
+    await prisma.$queryRaw`SELECT factrove_backfill_organizations()`;
+
+    const tomA = await ownerOrganization(prisma, "user-tom-a");
+    const tomB = await ownerOrganization(prisma, "user-tom-b");
+    const blank = await ownerOrganization(prisma, "user-blank");
+    const bad = await ownerOrganization(prisma, "user-bad");
+    expect(tomA).toMatchObject({ name: "Tom's organization", slug: "tom-s-organization" });
+    expect(tomB).toMatchObject({ name: "Tom's organization", slug: "tom-s-organization-2" });
+    expect(blank).toMatchObject({ name: "ada.lovelace's organization", slug: "ada-lovelace-s-organization" });
+    expect(bad).toMatchObject({ name: "Organization", slug: "organization" });
+    expect(await prisma.member.count({ where: { userId: localUserFixture.id } })).toBe(0);
+    expect(await prisma.member.count({ where: { userId: "user-kept" } })).toBe(1);
+    expect(await prisma.organization.count({ where: { id: "kept-org" } })).toBe(1);
+
+    const tomSession = await prisma.session.findUniqueOrThrow({ where: { id: "session-tom-a" } });
+    const tomBSession = await prisma.session.findUniqueOrThrow({ where: { id: "session-tom-b" } });
+    const keptSession = await prisma.session.findUniqueOrThrow({ where: { id: "session-kept" } });
+    expect(tomSession.activeOrganizationId).toBe(tomA.id);
+    expect(tomBSession.activeOrganizationId).toBe(tomB.id);
+    expect(keptSession.activeOrganizationId).toBe("kept-org");
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: "session-kept-empty" } })).activeOrganizationId).toBe("kept-org");
+
+    const keptRow = await prisma.artifact.findUniqueOrThrow({ where: { id: keptArtifact } });
+    const blankRow = await prisma.artifact.findUniqueOrThrow({ where: { id: blankArtifact } });
+    const localRow = await prisma.artifact.findUniqueOrThrow({ where: { id: localArtifact } });
+    expect(keptRow.organizationId).toBe("kept-org");
+    expect(blankRow.organizationId).toBe(blank.id);
+    expect(localRow.organizationId).toBe(localOrganizationFixture.id);
+
+    const organizationIds = [tomA.id, tomB.id, blank.id, bad.id];
+    const before = await prisma.organization.findMany({
+      where: { id: { in: organizationIds } },
+      select: { id: true, slug: true, name: true },
+      orderBy: { id: "asc" },
+    });
+    await prisma.$queryRaw`SELECT factrove_backfill_organizations()`;
+    expect(await prisma.member.count({ where: { userId: { in: ["user-tom-a", "user-tom-b", "user-blank", "user-bad", "user-kept", localUserFixture.id] } } })).toBe(5);
+    expect(await prisma.organization.findMany({
+      where: { id: { in: organizationIds } },
+      select: { id: true, slug: true, name: true },
+      orderBy: { id: "asc" },
+    })).toEqual(before);
+    expect((await prisma.session.findUniqueOrThrow({ where: { id: "session-tom-a" } })).activeOrganizationId).toBe(tomA.id);
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: keptArtifact } })).organizationId).toBe("kept-org");
+  });
+
+  it("points claimed artifacts at the account's only organization and adds no membership", async () => {
+    const pending = randomUUID();
+    await insertArtifact(prisma, { id: pending, creatorUserId: localUserFixture.id, organizationId: localOrganizationFixture.id });
+    await insertAccount(prisma, { id: "account-none", userId: "user-blank" });
+    await prisma.member.deleteMany({ where: { userId: "user-blank" } });
+    await expect(claimLocalArtifacts(prisma, "ada.lovelace@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+    expect((await prisma.artifact.findUniqueOrThrow({ where: { id: pending } })).creatorUserId).toBe(localUserFixture.id);
+
+    await insertMember(prisma, { id: "blank-member", organizationId: "kept-org", userId: "user-blank" });
+    await insertOrganization(prisma, { id: "blank-extra", name: "Extra", slug: "blank-extra" });
+    await insertMember(prisma, { id: "blank-extra-member", organizationId: "blank-extra", userId: "user-blank" });
+    await expect(claimLocalArtifacts(prisma, "ada.lovelace@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+
+    await insertAccount(prisma, { id: "account-tom", userId: "user-tom-a" });
+    const beforeMembers = await prisma.member.count({ where: { userId: "user-tom-a" } });
+    const claimed = await claimLocalArtifacts(prisma, "tom.a@example.com");
+    expect(claimed.membershipsAdded).toBe(0);
+    expect(claimed.artifactsClaimed).toBeGreaterThan(0);
+    expect(await prisma.member.count({ where: { userId: "user-tom-a" } })).toBe(beforeMembers);
+    const moved = await prisma.artifact.findUniqueOrThrow({ where: { id: pending } });
+    const tom = await ownerOrganization(prisma, "user-tom-a");
+    expect(moved.creatorUserId).toBe("user-tom-a");
+    expect(moved.organizationId).toBe(tom.id);
+
+    const again = await claimLocalArtifacts(prisma, "tom.a@example.com");
+    expect(again.artifactsClaimed).toBe(0);
+    expect(again.membershipsAdded).toBe(0);
+  });
+
+  it("rejects a claim with the wrong number of organizations when nothing is left to claim", async () => {
+    await prisma.artifact.updateMany({
+      where: { creatorUserId: localUserFixture.id },
+      data: { creatorUserId: "user-tom-a" },
+    });
+    expect(await prisma.artifact.count({ where: { creatorUserId: localUserFixture.id } })).toBe(0);
+
+    await insertUser(prisma, { id: "user-zero", name: "Zero", email: "zero@example.com" });
+    await insertAccount(prisma, { id: "account-zero", userId: "user-zero" });
+    await expect(claimLocalArtifacts(prisma, "zero@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+
+    await insertUser(prisma, { id: "user-several", name: "Several", email: "several@example.com" });
+    await insertAccount(prisma, { id: "account-several", userId: "user-several" });
+    await insertOrganization(prisma, { id: "several-a", name: "Several A", slug: "several-a" });
+    await insertOrganization(prisma, { id: "several-b", name: "Several B", slug: "several-b" });
+    await insertMember(prisma, { id: "several-member-a", organizationId: "several-a", userId: "user-several" });
+    await insertMember(prisma, { id: "several-member-b", organizationId: "several-b", userId: "user-several" });
+    await expect(claimLocalArtifacts(prisma, "several@example.com")).rejects.toThrow(
+      "That account must belong to exactly one organization.",
+    );
+
+    const quiet = await claimLocalArtifacts(prisma, "tom.a@example.com");
+    expect(quiet.artifactsClaimed).toBe(0);
+    expect(quiet.membershipsAdded).toBe(0);
+  });
+
+  it("does not add a second membership when organization creation commits first", async () => {
+    const userId = "user-race";
+    await insertUser(prisma, { id: userId, name: "Race", email: "race@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const holder = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await holder.connect();
+    await migrator.connect();
+    let migratorOpen = false;
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`SELECT id FROM "user" WHERE id = $1 FOR UPDATE`, [userId]);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForBackfillLock(prisma);
+      await holder.query(
+        `INSERT INTO organization (id, name, slug, "createdAt") VALUES ('race-org', 'Race Lab', 'race-lab', CURRENT_TIMESTAMP)`,
+      );
+      await holder.query(
+        `INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('race-member', 'race-org', $1, 'owner', CURRENT_TIMESTAMP)`,
+        [userId],
+      );
+      await holder.query("COMMIT");
+      await backfill;
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await holder.end();
+      await migrator.end();
+    }
+
+    const memberships = await prisma.member.findMany({
+      where: { userId },
+      select: { organizationId: true },
+    });
+    expect(memberships).toEqual([{ organizationId: "race-org" }]);
+  });
+
+  it("does not deadlock when a later user already holds their row lock and inserts the same slug", async () => {
+    await insertUser(prisma, { id: "ada-a", name: "Ada", email: "ada.a@example.com" });
+    await insertUser(prisma, { id: "ada-b", name: "Ada", email: "ada.b@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const creator = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await creator.connect();
+    await migrator.connect();
+    let migratorOpen = false;
+    try {
+      await creator.query("BEGIN");
+      await creator.query(`SET lock_timeout = '4s'`);
+      await creator.query(`SELECT id FROM "user" WHERE id = 'ada-b' FOR UPDATE`);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForQueryLock(prisma, "factrove_backfill_organizations");
+      await creator.query(
+        `INSERT INTO organization (id, name, slug, "createdAt")
+         VALUES ('ada-b-org', 'Ada''s organization', 'ada-s-organization', CURRENT_TIMESTAMP)`,
+      );
+      await creator.query(
+        `INSERT INTO member (id, "organizationId", "userId", role, "createdAt")
+         VALUES ('ada-b-member', 'ada-b-org', 'ada-b', 'owner', CURRENT_TIMESTAMP)`,
+      );
+      await creator.query("COMMIT");
+      await backfill;
+    } finally {
+      await creator.query("ROLLBACK").catch(() => undefined);
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await creator.end();
+      await migrator.end();
+    }
+
+    const adaA = await ownerOrganization(prisma, "ada-a");
+    const adaB = await ownerOrganization(prisma, "ada-b");
+    expect(adaB.slug).toBe("ada-s-organization");
+    expect(adaA.slug).toBe("ada-s-organization-2");
+    expect(await prisma.member.count({ where: { userId: { in: ["ada-a", "ada-b"] } } })).toBe(2);
+  });
+
+  it("does not deadlock when an upload locks an artifact row while the backfill holds user locks", async () => {
+    await insertUser(prisma, { id: "user-uploader", name: "Uploader", email: "uploader@example.com" });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    const uploader = new Client({ connectionString: isolated.databaseUrl });
+    await migrator.connect();
+    await uploader.connect();
+    const artifactId = randomUUID();
+    let migratorOpen = false;
+    let uploaderOpen = false;
+    try {
+      await migrator.query("BEGIN");
+      migratorOpen = true;
+      await migrator.query("SELECT factrove_backfill_organizations()");
+      const upload = uploader.query("BEGIN").then(async () => {
+        uploaderOpen = true;
+        await uploader.query(
+          `INSERT INTO artifact (
+             id, creator_user_id, organization_id, access_type, mime_type, size_bytes, object_key, updated_at
+           ) VALUES (
+             $1::uuid, 'user-uploader', NULL, 'private'::"access_type", 'text/html', 4, $2, CURRENT_TIMESTAMP
+           )`,
+          [artifactId, `${artifactId}.html`],
+        );
+      });
+      await waitForQueryLock(prisma, "INSERT INTO artifact");
+      await migrator.query("COMMIT");
+      migratorOpen = false;
+      await upload;
+      await uploader.query("COMMIT");
+      uploaderOpen = false;
+    } finally {
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      if (uploaderOpen) {
+        await uploader.query("ROLLBACK").catch(() => undefined);
+      }
+      await migrator.end();
+      await uploader.end();
+    }
+
+    const stored = await prisma.$queryRaw<Array<{ creator_user_id: string }>>`
+      SELECT creator_user_id FROM artifact WHERE id = ${artifactId}::uuid
+    `;
+    expect(stored[0]?.creator_user_id).toBe("user-uploader");
+  });
+
+  it("does not deadlock when a claim reads and then writes during the backfill and NOT NULL change", async () => {
+    await prisma.$executeRaw`
+      UPDATE artifact SET organization_id = 'local-org' WHERE organization_id IS NULL
+    `;
+    const artifactId = randomUUID();
+    await insertArtifact(prisma, {
+      id: artifactId,
+      creatorUserId: "user-tom-a",
+      organizationId: "local-org",
+    });
+    if (!isolated) {
+      throw new Error("isolated database is missing");
+    }
+    const claim = new Client({ connectionString: isolated.databaseUrl });
+    const migrator = new Client({ connectionString: isolated.databaseUrl });
+    await claim.connect();
+    await migrator.connect();
+    let claimOpen = false;
+    let migratorOpen = false;
+    try {
+      await claim.query("BEGIN");
+      claimOpen = true;
+      await claim.query(`SET lock_timeout = '4s'`);
+      await claim.query(`SELECT count(*) FROM artifact WHERE creator_user_id = 'local-user'`);
+      const backfill = migrator.query("BEGIN").then(async () => {
+        migratorOpen = true;
+        await migrator.query("SELECT factrove_backfill_organizations()");
+        await migrator.query(`ALTER TABLE artifact ALTER COLUMN organization_id SET NOT NULL`);
+        await migrator.query("COMMIT");
+        migratorOpen = false;
+      });
+      await waitForQueryLock(prisma, "factrove_backfill_organizations");
+      await claim.query(
+        `UPDATE artifact SET size_bytes = 41 WHERE id = $1::uuid`,
+        [artifactId],
+      );
+      await claim.query("COMMIT");
+      claimOpen = false;
+      await backfill;
+    } finally {
+      if (claimOpen) {
+        await claim.query("ROLLBACK").catch(() => undefined);
+      }
+      if (migratorOpen) {
+        await migrator.query("ROLLBACK").catch(() => undefined);
+      }
+      await claim.end();
+      await migrator.end();
+    }
+
+    const nullable = await prisma.$queryRaw<Array<{ is_nullable: string }>>`
+      SELECT is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'artifact'
+        AND column_name = 'organization_id'
+    `;
+    expect(nullable[0]?.is_nullable).toBe("NO");
+    const size = await prisma.$queryRaw<Array<{ size_bytes: number }>>`
+      SELECT size_bytes FROM artifact WHERE id = ${artifactId}::uuid
+    `;
+    expect(size[0]?.size_bytes).toBe(41);
+  });
+});
+
+async function waitForBackfillLock(prisma: PrismaClient): Promise<void> {
+  await waitForQueryLock(prisma, "factrove_backfill_organizations");
+}
+
+async function waitForQueryLock(prisma: PrismaClient, query: string): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 8_000) {
+    const rows = await prisma.$queryRaw<Array<{ waiting: number }>>`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS waiter
+      WHERE waiter.pid <> pg_backend_pid()
+        AND waiter.state = 'active'
+        AND waiter.wait_event_type = 'Lock'
+        AND waiter.query ILIKE ${`%${query}%`}
+    `;
+    if (Number(rows[0]?.waiting ?? 0) > 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`query did not wait on a lock: ${query}`);
+}
+
+async function slugCandidates(prisma: PrismaClient, name: string, suffixes: string[]): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ slugs: string[] | string }>>`
+    SELECT factrove_slug_candidates(${name}, ARRAY[${Prisma.join(suffixes)}]::text[]) AS slugs
+  `;
+  const value = rows[0]?.slugs;
+  if (Array.isArray(value)) {
+    return value;
+  }
+  const text = typeof value === "string" ? value : "";
+  return text.replace(/^\{|\}$/g, "").split(",").filter((item) => item.length > 0);
+}
+
+async function ownerOrganization(prisma: PrismaClient, userId: string): Promise<{ id: string; name: string; slug: string }> {
+  const member = await prisma.member.findFirstOrThrow({
+    where: { userId, role: "owner" },
+    include: { organization: true },
+  });
+  return member.organization;
+}
+
+type SqlClient = PrismaClient | Prisma.TransactionClient;
+
+async function insertUser(
+  prisma: SqlClient,
+  input: { id: string; name: string; email: string },
+): Promise<void> {
+  const now = new Date();
+  await prisma.user.create({
+    data: {
+      id: input.id,
+      name: input.name,
+      email: input.email,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+}
+
+async function insertOrganization(
+  prisma: SqlClient,
+  input: { id: string; name: string; slug: string },
+): Promise<void> {
+  await prisma.organization.create({
+    data: { id: input.id, name: input.name, slug: input.slug, createdAt: new Date() },
+  });
+}
+
+async function insertMember(
+  prisma: SqlClient,
+  input: { id: string; organizationId: string; userId: string },
+): Promise<void> {
+  await prisma.member.create({
+    data: {
+      id: input.id,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      role: "owner",
+      createdAt: new Date(),
+    },
+  });
+}
+
+async function insertSession(
+  prisma: SqlClient,
+  input: { id: string; userId: string; activeOrganizationId: string | null },
+): Promise<void> {
+  const now = new Date();
+  await prisma.session.create({
+    data: {
+      id: input.id,
+      expiresAt: new Date(now.getTime() + 86_400_000),
+      token: input.id,
+      createdAt: now,
+      updatedAt: now,
+      userId: input.userId,
+      activeOrganizationId: input.activeOrganizationId === "" ? "" : input.activeOrganizationId,
+    },
+  });
+}
+
+async function insertAccount(prisma: SqlClient, input: { id: string; userId: string }): Promise<void> {
+  const now = new Date();
+  await prisma.account.create({
+    data: {
+      id: input.id,
+      accountId: input.userId,
+      providerId: "credential",
+      userId: input.userId,
+      password: "hashed-password",
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+}
+
+async function insertArtifact(
+  prisma: SqlClient,
+  input: { id: string; creatorUserId: string; organizationId: string | null },
+): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO artifact (
+      id, creator_user_id, organization_id, access_type, mime_type, size_bytes, object_key, updated_at
+    )
+    VALUES (
+      ${input.id}::uuid,
+      ${input.creatorUserId},
+      ${input.organizationId},
+      'private'::"access_type",
+      'text/html',
+      4,
+      ${`${input.id}.html`},
+      CURRENT_TIMESTAMP
+    )
+  `;
+}

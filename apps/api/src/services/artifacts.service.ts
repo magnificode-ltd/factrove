@@ -27,7 +27,7 @@ import {
 import { ArtifactsRepository, PrismaService, type ArtifactRecord } from "../database/index.js";
 import { convertHtmlToMarkdown } from "../rendering/convert-html-to-markdown.js";
 import { HtmlConversionError, readBoundedHtml } from "../rendering/html-to-markdown.js";
-import { ActorService, type Actor, type HeaderSource } from "../auth/actor.service.js";
+import { ActorService, type Actor, type ActorWithOrganization, type HeaderSource } from "../auth/actor.service.js";
 import { artifactContentUrl, contentGrantAllows, grantedContentUrl } from "../auth/content-grant.js";
 import { artifactObjectKey, immutableContentKey, rejectHtmlUpload, storedObjectKey } from "../rendering/html-policy.js";
 import { argon2VerifyGate } from "../sharing/argon2-gate.js";
@@ -89,21 +89,13 @@ export class ArtifactsService {
   ) {}
 
   async upload(request: HeaderSource, file: unknown, body: unknown): Promise<ArtifactDto> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     const fields = formFields(body);
     assertNoIdentityFields(fields);
     const accessType = readAccessType(fields);
     const upload = readUpload(file);
     if (!upload) {
       throw new ApiErrorException(400, "INVALID_REQUEST", "Send exactly one file.");
-    }
-
-    if (accessType === "org_shared" && actor.organization === null) {
-      throw new ApiErrorException(
-        400,
-        "ORGANIZATION_REQUIRED",
-        "Organization sharing requires membership in an organization.",
-      );
     }
 
     const violation = rejectHtmlUpload(upload.filename, upload.bytes);
@@ -130,7 +122,7 @@ export class ArtifactsService {
       const record = await this.artifacts.create({
         id,
         creatorUserId: actor.user.id,
-        organizationId: actor.organization?.id ?? null,
+        organizationId: actor.organization.id,
         accessType,
         mimeType: "text/html",
         sizeBytes: upload.bytes.byteLength,
@@ -171,9 +163,9 @@ export class ArtifactsService {
   // A private row re-checks membership and the session in the update statement. A session that
   // was revoked or expired before that write is 401 and does not write.
   async shareWithOrganization(request: HeaderSource, id: string, readBody: () => unknown): Promise<ArtifactDto> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     const record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     const confirmed = readShareWithOrganizationBody(readBody());
@@ -186,6 +178,7 @@ export class ArtifactsService {
       creatorUserId: actor.user.id,
       organizationId: confirmed.organizationId,
       sessionId: actor.sessionId,
+      apiKeyOrganizationId: actor.via === "api-key" ? actor.organization.id : null,
     });
     if (outcome.outcome === "not-found") {
       throw artifactNotFound();
@@ -223,9 +216,9 @@ export class ArtifactsService {
   // A missing object still allows the conditional row delete. A storage error keeps the row.
   // The object may already be gone when that error is reported. Retry DELETE.
   async deleteArtifact(request: HeaderSource, id: string): Promise<void> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     let record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     for (let attempt = 0; attempt < DELETE_REPLACE_ATTEMPTS; attempt += 1) {
@@ -241,13 +234,17 @@ export class ArtifactsService {
         creatorUserId: record.creatorUserId,
         contentRevision: record.contentRevision,
         objectKey: record.objectKey,
+        ...(actor.via === "api-key" ? { organizationId: actor.organization.id } : {}),
       });
       if (removed) {
         return;
       }
       const current = await this.artifacts.findById(record.id);
-      if (!current || current.creatorUserId !== actor.user.id) {
+      if (!current) {
         return;
+      }
+      if (!this.ownsInKeyOrganization(actor, current)) {
+        throw artifactNotFound();
       }
       record = current;
     }
@@ -259,11 +256,12 @@ export class ArtifactsService {
   }
 
   async list(request: HeaderSource, view: ArtifactView): Promise<ArtifactDto[]> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     const records = await this.artifacts.list({
       view,
       userId: actor.user.id,
-      organizationId: actor.organization?.id ?? null,
+      organizationId: actor.organization.id,
+      mineOrganizationId: actor.via === "api-key" ? actor.organization.id : undefined,
     });
     return records.map((record) => this.toDto(record, false));
   }
@@ -536,6 +534,10 @@ export class ArtifactsService {
     accessToken: unknown,
     format: ContentFormat,
   ): Promise<ArtifactRecord> {
+    const actor = await this.actors.resolve(request);
+    if (actor) {
+      this.actors.ensureCurrentOrganization(actor);
+    }
     const record = await this.artifacts.findById(id);
     if (!record) {
       throw artifactNotFound();
@@ -543,7 +545,6 @@ export class ArtifactsService {
     if (this.grantCanRead(request, accessToken, record.id, format)) {
       return record;
     }
-    const actor = await this.actors.resolve(request);
     if (!actor || !(await this.canRead(actor, record))) {
       throw artifactNotFound();
     }
@@ -551,12 +552,21 @@ export class ArtifactsService {
   }
 
   private async requireOwner(request: HeaderSource, id: string): Promise<ArtifactRecord> {
-    const actor = await this.actors.requireActor(request);
+    const actor = await this.actors.requireCurrentOrganization(request);
     const record = await this.artifacts.findById(id);
-    if (!record || actor.user.id !== record.creatorUserId) {
+    if (!record || !this.ownsInKeyOrganization(actor, record)) {
       throw artifactNotFound();
     }
     return record;
+  }
+
+  // A session may use an artifact the person created in any of their organizations.
+  // An API key may use one only when that artifact already belongs to the key's organization.
+  private ownsInKeyOrganization(actor: ActorWithOrganization, record: ArtifactRecord): boolean {
+    if (actor.user.id !== record.creatorUserId) {
+      return false;
+    }
+    return actor.via !== "api-key" || record.organizationId === actor.organization.id;
   }
 
   private chargePublicView(clientIp: string | null, kind: "view" | "content"): void {
@@ -639,10 +649,13 @@ export class ArtifactsService {
   }
 
   private async canRead(actor: Actor, record: ArtifactRecord): Promise<boolean> {
+    if (actor.via === "api-key" && record.organizationId !== actor.organization?.id) {
+      return false;
+    }
     if (actor.user.id === record.creatorUserId) {
       return true;
     }
-    if (record.accessType !== "org_shared" || record.organizationId === null) {
+    if (record.accessType !== "org_shared") {
       return false;
     }
     const membership = await this.prisma.member.findFirst({

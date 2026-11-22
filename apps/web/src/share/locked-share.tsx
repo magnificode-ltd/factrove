@@ -80,7 +80,7 @@ export function LockedShare({
   return (
     <div className="ft-vault flex h-full items-center justify-center overflow-y-auto px-5 py-10">
       <div
-        className="ft-vault-card ft-enter w-full max-w-md rounded-[22px] border border-line bg-white px-6 py-8 sm:px-8"
+        className="ft-vault-card w-full max-w-md rounded-[22px] border border-line bg-white px-6 py-8 sm:px-8"
         data-state={opening ? "opening" : "locked"}
         data-testid="share-lock"
       >

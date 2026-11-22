@@ -3,7 +3,7 @@ import type { AccessType, ArtifactView } from "@factrove/contracts";
 export type ArtifactRecord = {
   id: string;
   creatorUserId: string;
-  organizationId: string | null;
+  organizationId: string;
   accessType: AccessType;
   name: string | null;
   mimeType: string;
@@ -21,7 +21,7 @@ export type ArtifactRecord = {
 export type CreateArtifactInput = {
   id: string;
   creatorUserId: string;
-  organizationId: string | null;
+  organizationId: string;
   accessType: AccessType;
   mimeType: string;
   sizeBytes: number;
@@ -31,7 +31,7 @@ export type CreateArtifactInput = {
 };
 
 export type UpdateArtifactInput = {
-  organizationId?: string | null;
+  organizationId?: string;
   accessType?: AccessType;
   mimeType?: string;
   sizeBytes?: number;
@@ -42,4 +42,7 @@ export type ListArtifactsInput = {
   view: ArtifactView;
   userId: string;
   organizationId: string | null;
+  // Set for an API key. view=mine then includes only that organization.
+  // A session leaves this unset and still lists the creator's artifacts in every organization.
+  mineOrganizationId?: string;
 };

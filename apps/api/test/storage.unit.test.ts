@@ -39,14 +39,14 @@ describe("S3 storage configuration", () => {
   it("keeps regional AWS settings when S3_ENDPOINT is unset", () => {
     expect(
       readS3StorageConfig({
-        S3_BUCKET: "factrove-dev-uploads",
-        S3_REGION: "eu-central-1",
+        S3_BUCKET: "example-bucket",
+        S3_REGION: "us-east-1",
         AWS_ENDPOINT_URL: "http://127.0.0.1:9000",
         AWS_ENDPOINT_URL_S3: "http://127.0.0.1:9000",
       }),
     ).toEqual({
-      bucket: "factrove-dev-uploads",
-      region: "eu-central-1",
+      bucket: "example-bucket",
+      region: "us-east-1",
       forcePathStyle: false,
     });
   });
@@ -238,8 +238,8 @@ describe("S3 storage configuration", () => {
     process.env.AWS_ENDPOINT_URL = "http://127.0.0.1:9000";
     process.env.AWS_ENDPOINT_URL_S3 = "http://127.0.0.1:9000";
     const client = createS3Client({
-      bucket: "factrove-dev-uploads",
-      region: "eu-central-1",
+      bucket: "example-bucket",
+      region: "us-east-1",
       credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
     });
     let host = "";
@@ -257,7 +257,7 @@ describe("S3 storage configuration", () => {
     );
 
     try {
-      await client.send(new GetObjectCommand({ Bucket: "factrove-dev-uploads", Key: "x.html" }));
+      await client.send(new GetObjectCommand({ Bucket: "example-bucket", Key: "x.html" }));
       expect.fail("request should stop before it is sent");
     } catch (error) {
       expect(error).toMatchObject({ message: "stop-before-send" });
@@ -267,7 +267,7 @@ describe("S3 storage configuration", () => {
       restoreEnv("AWS_ENDPOINT_URL_S3", previousS3Endpoint);
     }
 
-    expect(host).toBe("factrove-dev-uploads.s3.eu-central-1.amazonaws.com");
+    expect(host).toBe("example-bucket.s3.us-east-1.amazonaws.com");
   });
 
   it("sends path-style requests to S3_ENDPOINT and ignores ambient AWS endpoint URLs", async () => {

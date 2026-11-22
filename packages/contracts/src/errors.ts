@@ -12,6 +12,24 @@ export const apiErrorCatalog = [
       "The caller asked to share with an organization but has no current organization membership. Upload with accessType org_shared and PATCH /api/v1/artifacts/{id} for a private artifact both use this code."
   },
   {
+    status: 403,
+    code: "ORGANIZATION_SETUP_REQUIRED",
+    description:
+      "The caller is authenticated and has no organization membership. Product routes and API key create, list, and delete return this until POST /api/v1/onboarding/organization creates the first organization. Health, public shares, get-session, and sign-out do not."
+  },
+  {
+    status: 409,
+    code: "ORGANIZATION_SELECTION_REQUIRED",
+    description:
+      "The caller is authenticated, has more than one organization membership, and the session has no active organization that matches one of them. An API key has no active organization and uses the same rule."
+  },
+  {
+    status: 409,
+    code: "ORGANIZATION_EXISTS",
+    description:
+      "POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created."
+  },
+  {
     status: 409,
     code: "ORGANIZATION_CHANGED",
     description:

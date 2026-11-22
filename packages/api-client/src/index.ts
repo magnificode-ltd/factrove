@@ -4,6 +4,7 @@ import {
   artifactListEnvelopeSchema,
   contentMediaTypes,
   contextEnvelopeSchema,
+  createOrganizationResponseSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   SHARE_GRANT_HEADER,
@@ -14,6 +15,7 @@ import {
   type ContentFormat,
   type ContentMediaType,
   type ContextEnvelope,
+  type CreateOrganizationResponse,
   type PublicArtifactEnvelope,
   type PublicUnlockEnvelope,
   type ShareEnvelope
@@ -66,6 +68,8 @@ export interface ArtifactContent {
 
 export interface FactroveClient {
   getContext(): Promise<ContextEnvelope>;
+  /** Creates the signed-in user's first organization. Session cookie only. */
+  createOrganization(name: string): Promise<CreateOrganizationResponse>;
   uploadArtifact(input: UploadArtifactInput): Promise<ArtifactEnvelope>;
   /** Replaces the current HTML for an existing artifact. Does not change access or the share token. */
   replaceArtifactContent(id: string, input: ReplaceArtifactContentInput): Promise<ArtifactEnvelope>;
@@ -233,6 +237,16 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
 
   return {
     getContext: () => request("/context", { method: "GET" }, contextEnvelopeSchema),
+    createOrganization: (name) =>
+      request(
+        "/onboarding/organization",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name })
+        },
+        createOrganizationResponseSchema
+      ),
     uploadArtifact: ({ file, filename, accessType, name }) => {
       const form = new FormData();
       form.append("file", file, filename);

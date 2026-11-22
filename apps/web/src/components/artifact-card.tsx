@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type PointerEvent } from "react";
+import { useEffect, useState } from "react";
 import type { AccessType, ArtifactDto, ContextEnvelope } from "@factrove/contracts";
 import { ArtifactActions } from "@/components/artifact-actions";
 import { CopyButton } from "@/components/copy-button";
@@ -27,32 +27,19 @@ export function ArtifactCard({
     setAudience(organization);
   }, [organization]);
   const uploaded = formatUploadedAt(artifact.uploadedAt);
-
-  function onMove(event: PointerEvent<HTMLLIElement>) {
-    if (event.pointerType === "touch") return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const px = (event.clientX - rect.left) / rect.width - 0.5;
-    const py = (event.clientY - rect.top) / rect.height - 0.5;
-    event.currentTarget.style.setProperty("--rx", `${(-py * 5).toFixed(2)}deg`);
-    event.currentTarget.style.setProperty("--ry", `${(px * 6).toFixed(2)}deg`);
-  }
-
-  function onLeave(event: PointerEvent<HTMLLIElement>) {
-    event.currentTarget.style.setProperty("--rx", "0deg");
-    event.currentTarget.style.setProperty("--ry", "0deg");
-  }
+  const label = artifactLabel({ ...artifact, name });
 
   return (
-    <li className="ft-card relative" onPointerMove={onMove} onPointerLeave={onLeave} onPointerCancel={onLeave}>
-      <div className="relative grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <li className="ft-card relative">
+      <div className="relative flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
         <a
-          className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+          className="min-w-40 flex-1 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
+          title={label}
         >
-          {artifactLabel({ ...artifact, name })}
+          {label}
         </a>
-        <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
+        <div className="pointer-events-none relative z-10 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
           <code className="font-mono text-[13px] tracking-tight text-ink">{artifact.id}</code>
           {canShare ? (
             <span className="pointer-events-auto relative z-10">

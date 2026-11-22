@@ -21,7 +21,11 @@ import {
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   publicUnlockRequestSchema,
-  shareEnvelopeSchema
+  shareEnvelopeSchema,
+  CREATE_ORGANIZATION_REQUEST_MESSAGE,
+  ORGANIZATION_NAME_MESSAGE,
+  createOrganizationRequestSchema,
+  createOrganizationResponseSchema
 } from "./index.js";
 
 export const createApiKeyRequestSchema = z.object({
@@ -191,7 +195,7 @@ const ownerShareReadErrors = {
 const ownerShareWriteErrors = {
   ...ownerShareReadErrors,
   "403": {
-    description: "Cookie-authenticated write from an origin that is not allowed. Code `FORBIDDEN`.",
+    description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from an origin that is not allowed is `FORBIDDEN`.",
     schemaName: "ApiError"
   }
 } as const;
@@ -219,7 +223,9 @@ export const namedSchemas: Record<string, z.ZodType> = {
   DeleteApiKeyRequest: deleteApiKeyRequestSchema,
   DeleteApiKeyResponse: deleteApiKeyResponseSchema,
   SignUpEmailRequest: signUpEmailRequestSchema,
-  SignInEmailRequest: signInEmailRequestSchema
+  SignInEmailRequest: signInEmailRequestSchema,
+  CreateOrganizationRequest: createOrganizationRequestSchema,
+  CreateOrganizationResponse: createOrganizationResponseSchema
 };
 
 export const httpOperations: HttpOperation[] = [
@@ -246,7 +252,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Return the caller and current organization",
     description:
-      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership, or null when they have none or more than one. An API key has no active organization and uses the sole-membership rule. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
+      "Reads the session cookie or `Authorization: Bearer` API key. A session uses `activeOrganizationId` when the caller is a member of that organization. Otherwise the organization is the caller's only membership. Zero memberships is `403 ORGANIZATION_SETUP_REQUIRED`. More than one membership and no active organization that matches one of them is `409 ORGANIZATION_SELECTION_REQUIRED`. An API key acts in the organization that owns the key. The user is the member who created the key. If that person is no longer a member, the key is `401 UNAUTHENTICATED`. A present Authorization header that is not a valid key does not fall back to the session cookie. `x-api-key` does not authenticate.",
     security: "sessionOrApiKey",
     responses: {
       "200": {
@@ -256,6 +262,58 @@ export const httpOperations: HttpOperation[] = [
       },
       "401": {
         description: "Missing or invalid credentials. Code `UNAUTHENTICATED`.",
+        schemaName: "ApiError"
+      },
+      "403": {
+        description: "Authenticated, with no organization membership. Code `ORGANIZATION_SETUP_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Authenticated, with several memberships and no active organization that matches one of them. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "createOrganization",
+    method: "post",
+    path: "/api/v1/onboarding/organization",
+    tags: ["Auth"],
+    summary: "Create the signed-in user's first organization",
+    description:
+      "Session cookie only. An API key is rejected. The body is `{ \"name\" }` and nothing else. The name is NFC-normalized, then rejected when it contains U+0000–U+001F, U+007F–U+009F, U+2028, or U+2029 before trimming, or when the trimmed value is not 1 to 80 Unicode code points. The server generates a unique slug. The user becomes the owner and the session's active organization is set to the new organization. A user who already has a membership gets 409 and no second organization. Cookie writes require an allowed Origin. Limited to 10 requests per 60 seconds per client address.",
+    security: "session",
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: CREATE_ORGANIZATION_REQUEST_MESSAGE,
+      schema: createOrganizationRequestSchema,
+      schemaName: "CreateOrganizationRequest"
+    },
+    responses: {
+      "201": {
+        description: "The organization was created.",
+        schema: createOrganizationResponseSchema,
+        schemaName: "CreateOrganizationResponse"
+      },
+      "400": {
+        description: `Wrong JSON shape, or a name that fails validation. Shape failures use \`${CREATE_ORGANIZATION_REQUEST_MESSAGE}\` An invalid name uses \`${ORGANIZATION_NAME_MESSAGE}\``,
+        schemaName: "ApiError"
+      },
+      "401": {
+        description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.",
+        schemaName: "ApiError"
+      },
+      "403": {
+        description: "The cookie Origin or Referer is not allowed. Code `FORBIDDEN`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "The user already has an organization. Code `ORGANIZATION_EXISTS`.",
+        schemaName: "ApiError"
+      },
+      "429": {
+        description: "Too many create attempts from this client address. Code `RATE_LIMITED`.",
         schemaName: "ApiError"
       }
     }
@@ -316,7 +374,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an API key",
     description:
-      "Requires a browser session. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
+      "Requires a browser session that already belongs to an organization. The new key belongs to that session's active organization. Any member of the organization can create one. An organization id or creating user in the body is ignored. Do not send `Authorization`. A request that also sends it is 401 with message `API key management requires a browser session.` A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is 409 `ORGANIZATION_SELECTION_REQUIRED`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN` before Better Auth runs. The secret is returned once in `key`. The plugin stores only a hash. Keys use the `ftrv_` prefix and do not expire. The plugin's own per-key rate limit is off.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -350,11 +408,11 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "List API keys for the session",
     description:
-      "Requires a browser session. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
+      "Requires a browser session that already belongs to an organization. Returns the active organization's keys. Any member can list them. An organization id in the query is ignored. A session with no organization is 403 `ORGANIZATION_SETUP_REQUIRED`. Returns names and starting characters, not the secret. Better Auth JSON `{ apiKeys, total }`.",
     security: "session",
     responses: {
       "200": {
-        description: "Keys for the signed-in user, without `key`.",
+        description: "Keys for the active organization, without `key`.",
         schema: listApiKeysResponseSchema,
         schemaName: "ListApiKeysResponse"
       },
@@ -368,7 +426,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Revoke an API key",
     description:
-      "Requires a browser session. Do not send `Authorization`. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. Another user's key id is 404. After delete, that key fails closed on product routes.",
+      "Requires a browser session. Do not send `Authorization`. Deletes a key owned by the active organization. Any member of that organization can delete it. A key owned by another organization is 404. Cookie writes need `Origin` or `Referer` to be `WEB_ORIGIN` or `PUBLIC_BASE_URL`. A missing or different origin is 403 `FORBIDDEN`. After delete, that key fails closed on product routes.",
     security: "session",
     requestBody: {
       contentType: "application/json",
@@ -419,7 +477,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
-      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "403": { description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.", schemaName: "ApiError" },
       "413": { description: "The file is larger than 10 MiB. Code `FILE_TOO_LARGE`.", schemaName: "ApiError" },
       "415": { description: "The file is not HTML. Code `UNSUPPORTED_FILE_TYPE`.", schemaName: "ApiError" },
       "503": {
@@ -456,7 +514,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
-      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "403": { description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
         schemaName: "ApiError"
@@ -509,7 +567,7 @@ export const httpOperations: HttpOperation[] = [
         description: "Missing credentials, or a session that was revoked or expired before the conditional update read it. Code `UNAUTHENTICATED`. The artifact is not written. A revocation that commits after that snapshot does not cancel a share the statement already accepted.",
         schemaName: "ApiError"
       },
-      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "403": { description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description: "Unknown artifact, or the caller is not the owner. Code `ARTIFACT_NOT_FOUND`.",
         schemaName: "ApiError"
@@ -553,7 +611,7 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ApiError"
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
-      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "403": { description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description:
           "Unknown artifact, or the caller is not the owner. An organization admin or another member who can read the artifact gets this same body. Code `ARTIFACT_NOT_FOUND`.",
@@ -581,7 +639,7 @@ export const httpOperations: HttpOperation[] = [
         description: "The artifact row and its current HTML object are gone. The response has no body."
       },
       "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
-      "403": { description: "Cookie write from a disallowed origin. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "403": { description: "No organization membership is `ORGANIZATION_SETUP_REQUIRED`. A cookie write from a disallowed origin is `FORBIDDEN`.", schemaName: "ApiError" },
       "404": {
         description:
           "Unknown artifact, or the caller is not the owner. An organization admin or another member who can read the artifact gets this same body. Code `ARTIFACT_NOT_FOUND`.",
@@ -610,7 +668,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "List artifacts for the caller",
     description:
-      "`view=mine` (default) is artifacts the caller created. `view=org` is org_shared artifacts in the caller's current organization, including other creators. With no current organization, `view=org` is an empty list. Sorted by createdAt descending, then id descending. The whole list is returned.",
+      "`view=mine` (default) is artifacts the caller created. A session lists those artifacts in every organization. An API key lists only the ones that already belong to the key's organization. `view=org` is org_shared artifacts in the caller's current organization, including other creators. For an API key that organization is the key's. A caller with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Several memberships and no active organization is `409 ORGANIZATION_SELECTION_REQUIRED`. Sorted by createdAt descending, then id descending. The whole list is returned.",
     security: "sessionOrApiKey",
     queryParameters: [
       {
@@ -627,7 +685,15 @@ export const httpOperations: HttpOperation[] = [
         schemaName: "ArtifactListEnvelope"
       },
       "400": { description: "Invalid view. Code `INVALID_REQUEST`.", schemaName: "ApiError" },
-      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" }
+      "401": { description: "Missing credentials. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "Authenticated, with no organization membership. Code `ORGANIZATION_SETUP_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Authenticated, with several memberships and no active organization that matches one of them. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+        schemaName: "ApiError"
+      }
     }
   },
   {
@@ -637,7 +703,7 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Artifacts"],
     summary: "Get artifact metadata",
     description:
-      "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
+      "Owner and, for org_shared artifacts, organization members can read this. Missing credentials, an invalid key, and anyone who cannot read the artifact get the same 404 as an unknown id. This route does not return 401. An authenticated caller with no organization gets `403 ORGANIZATION_SETUP_REQUIRED` before the artifact is loaded. A session-authenticated response may append `?access=` on `contentUrl` so the sandboxed iframe can load HTML without cookies. API-key responses omit that grant.",
     security: "sessionOrApiKey",
     pathParameters: [artifactIdParam],
     responses: {

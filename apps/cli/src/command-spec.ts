@@ -129,7 +129,9 @@ Options:
 
 export const CONFIGURE_HELP = `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
 
-Saves an API key and API URL for a profile.
+Saves an API key and API URL for a profile. The key belongs to the
+organization it was created for. Keys created before that change stopped
+working and must be created again at /account/api-keys.
 
 Options:
   --api-key <key>     API key. A prompt keeps it out of shell history.
@@ -402,7 +404,7 @@ export const cliReferenceNotes: Record<string, string> = {
     "",
     "`--artifactId` replaces content and prints the same id. The API keeps the current access and any share token. `--access` with `--artifactId` is rejected before a request is sent. Only the owner can replace. Anyone else gets `404 ARTIFACT_NOT_FOUND`.",
     "",
-    "The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. See [Concepts](/concepts#organization-membership).",
+    "The file must be non-empty UTF-8 `.html` or `.htm` and at most 10,485,760 bytes. `--access org_shared` requires a current organization membership. Signup does not create one. Name it in the web app after you sign in. See [Concepts](/concepts#organization-membership).",
     "",
     "Another replace of the same revision returns `409 CONTENT_CONFLICT`. A replace can return `500` after the new object is already committed. GET the artifact before retrying. Replacement does not keep version history and normally deletes the previous object.",
     "",
@@ -483,7 +485,9 @@ export const cliReferenceNotes: Record<string, string> = {
     "",
     "The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. `--api-key` prompts when it is omitted.",
     "",
-    "Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`.",
+    "The key belongs to the organization it was created for. A configured key is that organization. There is no organization flag. Keys created before organization ownership stopped working and must be created again.",
+    "",
+    "Create the key in the web app at `/account/api-keys`, or follow [Create an API key from a session](/api-reference/overview#create-an-api-key-from-a-session). Key management uses the session cookie and an allowed `Origin`. It rejects `Authorization`. The active organization owns the new key. An organization id in the request is ignored.",
     "",
     "Precedence for later commands is in [CLI](/guides/cli). When a command cannot reach the API, see [Troubleshooting](/guides/troubleshooting).",
   ].join("\n"),

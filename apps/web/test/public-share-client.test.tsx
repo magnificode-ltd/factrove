@@ -84,7 +84,7 @@ const grant = { token: `g1.${"z".repeat(6)}.${"q".repeat(43)}`, expiresAt: "2099
 const unlockedArtifact = {
   id,
   filename: "secret-plan.html",
-  name: null,
+  name: "Secret plan",
   mimeType: "text/html",
   sizeBytes: 42,
   uploadedAt: "2026-10-18T12:00:00.000Z",
@@ -196,6 +196,7 @@ describe("password-protected public share page", () => {
     expect(container.querySelector('input[name="password"]')?.getAttribute("type")).toBe("password");
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.textContent).not.toContain("secret-plan.html");
+    expect(container.textContent).not.toContain("Secret plan");
     expect(container.textContent).not.toContain("This artifact does not exist.");
     expect(frameRequests).toHaveLength(0);
 
@@ -235,7 +236,8 @@ describe("password-protected public share page", () => {
     expect(readShareGrant(id, token)).toBe(grant.token);
     const detail = api.calls.filter((call) => call.url === apiBase);
     expect(detail.at(-1)).toMatchObject({ grant: grant.token, credentials: "omit" });
-    expect(container.textContent).toContain("secret-plan.html");
+    expect(container.textContent).toContain("Secret plan");
+    expect(container.textContent).not.toContain("secret-plan.html");
     expect(container.textContent).toContain("Unlocked with password");
     expect(container.querySelector('[data-testid="share-content"]')).not.toBeNull();
     expect(frameRequests).toEqual([{ url: unlockedArtifact.contentUrl, credentials: "omit" }]);
@@ -251,7 +253,7 @@ describe("password-protected public share page", () => {
     const again = await render(reload.fetchImpl);
     expect(reload.calls).toHaveLength(1);
     expect(reload.calls[0]?.grant).toBe(grant.token);
-    expect(again.container.textContent).toContain("secret-plan.html");
+    expect(again.container.textContent).toContain("Secret plan");
   });
 
   it("drops a grant the API rejects and asks for the password again", async () => {

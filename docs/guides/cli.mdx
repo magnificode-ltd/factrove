@@ -63,7 +63,7 @@ From this repository the same commands run as `pnpm factrove`. After `npm i -g f
 
 ## Commands
 
-`upload <file>` sends one HTML file and creates a new artifact. Plain success prints only the new id and a newline. `--json` prints the `{ artifact }` envelope on one line. `--access private|org_shared` chooses who can see a new artifact. The default is `private`. `org_shared` requires a current organization membership. Signup does not create one. See [Organization membership](/concepts#organization-membership).
+`upload <file>` sends one HTML file and creates a new artifact. Plain success prints only the new id and a newline. `--json` prints the `{ artifact }` envelope on one line. `--access private|org_shared` chooses who can see a new artifact. The default is `private`. `org_shared` requires a current organization membership. Signup does not create one. Name it in the web app after you sign in. See [Organization membership](/concepts#organization-membership).
 
 `--name <name>` sets the name shown in the library, the viewer, and a public share. The name is one line of 1 to 120 characters. Omit `--name` and the stored name is the file name without `.html` or `.htm`. A stem that is empty, longer than 120 characters, or not one line stores null, and the upload still succeeds. Those screens then show `{artifactId}.html`. There is no flag to clear a name.
 
@@ -79,7 +79,7 @@ From this repository the same commands run as `pnpm factrove`. After `npm i -g f
 
 `delete <id>` removes the artifact, its current HTML object, and any public link. A terminal asks for confirmation and continues only for `y` or `yes`. `--yes` and `--force` skip that prompt. They are the same flag. Use one of them when stdin is not a terminal, which is the usual case for an agent. Plain success prints `Deleted {id}.` `--json` prints `{"deleted":true,"id":"…"}`. The HTTP response is empty. Only the owner can delete. Anyone else, including an organization admin, gets `404 ARTIFACT_NOT_FOUND`. A storage failure keeps the artifact row. The stored HTML may already be gone, so retry the delete. If concurrent replaces prevent deletion after eight attempts, the API returns `409 CONTENT_CONFLICT`. Retry the delete. The CLI does not keep a local index such as `factrove.md`, so delete and rename change only the artifact on the server.
 
-`configure` saves an API key and API URL for a profile. `--api-key` prompts when omitted, so the key stays out of shell history. `--api-url` sets the origin, and `--endpoint-url` is the same option. `--profile` selects the profile. The default profile name is `default`. Create the key in the web app, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). If configure cannot reach the API, see [Troubleshooting](/guides/troubleshooting).
+`configure` saves an API key and API URL for a profile. `--api-key` prompts when omitted, so the key stays out of shell history. `--api-url` sets the origin, and `--endpoint-url` is the same option. `--profile` selects the profile. The default profile name is `default`. The key belongs to the organization it was created for. There is no organization flag. Keys created before that ownership change stopped working and must be created again. Create the key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). If configure cannot reach the API, see [Troubleshooting](/guides/troubleshooting).
 
 ## Flags
 

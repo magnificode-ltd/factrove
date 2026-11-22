@@ -7,6 +7,7 @@ const input = {
   creatorUserId: "user-1",
   organizationId: "org-1",
   sessionId: "session-1",
+  apiKeyOrganizationId: null,
 };
 
 // organization-changed is the repository outcome ArtifactsService maps to 409 ORGANIZATION_CHANGED.

@@ -19,6 +19,9 @@ export function ViewerScreen({ state }: { state: ViewerModel }) {
   const [organization, setOrganization] = useState<ContextEnvelope["organization"]>(
     state.status === "ready" ? state.organization ?? null : null
   );
+  if (state.status === "setup-required") {
+    return null;
+  }
   if (state.status === "signed-out") {
     return <SignInGate message={state.message} returnTo={state.returnTo} />;
   }
@@ -106,7 +109,7 @@ function ViewerTools({
   const share = state.share ?? null;
   const showOrgShare = state.owner === true && accessType === "private" && organization !== null;
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
       {showOrgShare ? (
         <OrgShareControl
           artifactId={artifact.id}
@@ -150,10 +153,10 @@ function ReadyArtifact({ state }: { state: Extract<ViewerModel, { status: "ready
   return <ArtifactFrame key={artifact.contentUrl} contentUrl={artifact.contentUrl} />;
 }
 
-function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" }> }) {
+function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" | "setup-required" }> }) {
   const calm = state.status === "missing";
   return (
-    <div className="ft-enter flex h-full items-center px-6 sm:px-10">
+    <div className="flex h-full items-center px-6 sm:px-10">
       <div className="max-w-xl">
         <p role={calm ? "status" : "alert"} className={calm ? "text-lg" : "text-lg text-destructive"}>
           {state.message}

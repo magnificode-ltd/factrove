@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 
 export const uploadCommand = "factrove upload plan.html";
@@ -16,17 +15,7 @@ export function CliTerminal({ command = uploadCommand, className }: { command?: 
       </div>
       <p className="px-4 pt-1 pb-4 font-mono text-sm leading-none">
         <span className="text-peri">$ </span>
-        <span
-          className="ft-type"
-          style={
-            {
-              "--ft-chars": String(command.length),
-              animationTimingFunction: `steps(${command.length}, end), step-end`,
-            } as CSSProperties
-          }
-        >
-          {command}
-        </span>
+        <span>{command}</span>
       </p>
     </div>
   );

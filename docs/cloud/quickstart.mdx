@@ -12,7 +12,7 @@ keywords:
 Factrove Cloud is the hosted service. You sign up, create an API key, and use the published CLI against the hosted API. A server you run is the [self-host quickstart](/self-host/quickstart).
 
 <Warning>
-The hosted web app origin is not set in this repository. This page writes it as `https://cloud.factrove.example`. That host is a placeholder until a hosted web origin is published here. Use the origin of the Factrove Cloud site where you sign in, and keep the `/signup` and `/account/api-keys` paths. The API origin `https://api.factrove.app` is the CLI default in code (`DEFAULT_API_URL` in `apps/cli/src/parse-args.ts`).
+The hosted web app origin is not set in this repository. This page writes it as `https://cloud.factrove.example`. That host is a placeholder. Use the origin of the Factrove Cloud site where you sign in, and keep the `/signup` and `/account/api-keys` paths. The API origin `https://api.factrove.app` is the CLI default in code (`DEFAULT_API_URL` in `apps/cli/src/parse-args.ts`).
 </Warning>
 
 Node.js must be at least 24.7 and below 25.
@@ -25,7 +25,7 @@ Open the hosted web app and create an account:
 https://cloud.factrove.example/signup
 ```
 
-Replace `https://cloud.factrove.example` with the hosted web origin. The form asks for a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in. The same account signs in at `/login` on that origin.
+Replace `https://cloud.factrove.example` with the hosted web origin. The form asks for a name, an email, and a password of 8 to 128 characters. Sign-up also signs you in. The same account signs in at `/login` on that origin. After sign-in, name the organization at `/onboarding` on that origin.
 
 ## Create an API key
 
@@ -35,7 +35,7 @@ Open the API keys page on that same origin:
 https://cloud.factrove.example/account/api-keys
 ```
 
-Create a key. The secret is shown once. Copy it somewhere you can paste into the CLI prompt. The CLI does not create the key, and `factrove configure` does not print it back.
+Create a key. It belongs to the organization you named after sign-in. The secret is shown once. Copy it somewhere you can paste into the CLI prompt. The CLI does not create the key, and `factrove configure` does not print it back. Keys created before they belonged to an organization were removed by that upgrade. Create a new one on this page.
 
 ## Install the CLI
 

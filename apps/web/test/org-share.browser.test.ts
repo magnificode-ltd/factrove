@@ -1,10 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const screenshotDir = process.env.FACTROVE_SCREENSHOT_DIR;
+const libraryId = "123e4567-e89b-42d3-a456-426614174011";
 
 describe("organization share control", () => {
   let browser: Browser;
@@ -131,6 +132,41 @@ describe("organization share control", () => {
     }
   }, 45_000);
 
+  it("shows the artifact name in the row and updates it after rename", async () => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await page.goto(`${pageOrigin}/org-share.html`);
+      const library = page.getByTestId("library-row");
+      const link = library.getByRole("link", { name: "Library notes" }).first();
+      await link.waitFor();
+      await expectVisibleLabel(link, 80);
+      await expectVisibleLabel(page.getByRole("heading", { name: "Launch notes" }), 100);
+
+      await library.getByRole("button", { name: "Rename" }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await dialog.getByLabel("Name").fill("Renamed notes");
+      await dialog.getByRole("button", { name: "Save name" }).click();
+      await dialog.waitFor({ state: "hidden" });
+      const renamed = library.getByRole("link", { name: "Renamed notes" });
+      await renamed.waitFor();
+      await expectVisibleLabel(renamed, 80);
+      expect(await library.locator("code").first().innerText()).toBe(libraryId);
+      expect(await library.getByRole("button", { name: "Copy ID" }).first().innerText()).toContain("Copy ID");
+
+      await page.getByRole("button", { name: "Rename" }).first().click();
+      const headerDialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await headerDialog.getByLabel("Name").fill("Renamed header");
+      await headerDialog.getByRole("button", { name: "Save name" }).click();
+      await headerDialog.waitFor({ state: "hidden" });
+      const renamedHeading = page.getByRole("heading", { name: "Renamed header" });
+      await renamedHeading.waitFor();
+      await expectVisibleLabel(renamedHeading, 100);
+    } finally {
+      await page.close();
+    }
+  }, 45_000);
+
   it("keeps a long organization name inside a 390px viewport", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -163,6 +199,12 @@ describe("organization share control", () => {
     }
   }, 45_000);
 });
+
+async function expectVisibleLabel(locator: Locator, minWidth: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(minWidth);
+  expect(await locator.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+}
 
 async function focusedText(page: Page): Promise<string> {
   return page.evaluate(() => document.activeElement?.textContent ?? "");

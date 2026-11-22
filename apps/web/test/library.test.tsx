@@ -25,14 +25,19 @@ const noOrganization: ContextEnvelope = {
   organization: null
 };
 
-function artifact(id: string, accessType: ArtifactDto["accessType"], creatorUserId = "local-user"): ArtifactDto {
+function artifact(
+  id: string,
+  accessType: ArtifactDto["accessType"],
+  creatorUserId = "local-user",
+  name: string | null = null
+): ArtifactDto {
   return {
     id,
     creatorUserId,
     organizationId: "local-org",
     accessType,
     filename: `${id}.html`,
-    name: null,
+    name,
     mimeType: "text/html",
     sizeBytes: id === mineId ? 13 : 2048,
     createdAt: "2026-10-11T10:00:00.000Z",
@@ -63,7 +68,9 @@ describe("library requests", () => {
       urls.push(url);
       if (url.endsWith("/context")) return jsonResponse(context);
       if (url.endsWith("view=org")) return jsonResponse({ items: [artifact(sharedId, "org_shared"), artifact(otherId, "org_shared", "other-user")] });
-      return jsonResponse({ items: [artifact(mineId, "private"), artifact(sharedId, "org_shared")] });
+      return jsonResponse({
+        items: [artifact(mineId, "private", "local-user", "Quarterly plan"), artifact(sharedId, "org_shared")]
+      });
     });
     const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
 
@@ -81,9 +88,12 @@ describe("library requests", () => {
 
     const mineHtml = renderToStaticMarkup(<LibraryScreen state={mine} />);
     const orgHtml = renderToStaticMarkup(<LibraryScreen state={org} />);
-    expect(mineHtml).toContain(`${mineId}.html`);
-    expect(mineHtml).toContain(`${sharedId}.html`);
-    expect(mineHtml).not.toContain(`${otherId}.html`);
+    expect(mineHtml).toContain(">Quarterly plan</a>");
+    expect(mineHtml).not.toContain(`>${mineId}</a>`);
+    expect(mineHtml).toContain(mineId);
+    expect(mineHtml).toContain(`>${sharedId}</a>`);
+    expect(mineHtml).not.toContain(otherId);
+    expect(mineHtml).not.toContain(`${mineId}.html`);
     expect(mineHtml).toContain("Private");
     expect(mineHtml).toContain("Organization shared");
     expect(mineHtml).toContain("Share with Local Organization");
@@ -92,9 +102,9 @@ describe("library requests", () => {
     expect(mineHtml).toContain("Private artifacts are visible only to you.");
     expect(mineHtml).not.toContain("Have your agent set it up");
     expect(mineHtml).not.toContain("npm i -g factrove");
-    expect(orgHtml).toContain(`${otherId}.html`);
-    expect(orgHtml).not.toContain(`${mineId}.html`);
-    expect(mineHtml.indexOf(`${mineId}.html`)).toBeLessThan(mineHtml.indexOf(`${sharedId}.html`));
+    expect(orgHtml).toContain(`>${otherId}</a>`);
+    expect(orgHtml).not.toContain(mineId);
+    expect(mineHtml.indexOf(">Quarterly plan</a>")).toBeLessThan(mineHtml.indexOf(`>${sharedId}</a>`));
   });
 
   it("shows an empty organization list for a configured organization", () => {
@@ -143,7 +153,7 @@ describe("library requests", () => {
     expect(mineHtml).toContain("Local User · No organization");
     expect(mineHtml).not.toContain("<ul");
     expect(orgHtml).toContain("has no configured organization");
-    expect(orgHtml).not.toContain(`${otherId}.html`);
+    expect(orgHtml).not.toContain(otherId);
     expect(orgHtml).toContain('href="/?view=org"');
     expect(orgHtml).toContain('aria-current="page"');
   });
@@ -165,6 +175,17 @@ describe("library requests", () => {
     expect(html).toContain('href="/?view=org"');
     expect(html).not.toContain("<ul");
     expect(html).not.toContain("list only");
+  });
+
+  it("sends a signed-in user with no organization to onboarding", async () => {
+    const fetchImpl = stubFetch(async () =>
+      jsonResponse({ error: { code: "ORGANIZATION_SETUP_REQUIRED", message: "Create an organization to continue." } }, 403)
+    );
+    const client = createWebClient({ baseUrl: "http://localhost:3001", fetch: fetchImpl });
+    const library = await loadLibrary(client, "mine");
+    const viewer = await loadArtifact(client, mineId);
+    expect(library).toEqual({ status: "setup-required", view: "mine" });
+    expect(viewer).toEqual({ status: "setup-required" });
   });
 
   it("treats an unauthenticated library as signed out", async () => {
@@ -215,7 +236,8 @@ describe("viewer", () => {
     expect(html).toContain("Checking artifact content…");
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("allow-same-origin");
-    expect(html).toContain(`${mineId}.html`);
+    expect(html).toContain(`>${mineId}</h1>`);
+    expect(html).not.toContain(`${mineId}.html`);
     expect(html).toContain("Back to library");
     expect(html).toContain("13 B");
     expect(html).toContain(formatUploadedAt(item.uploadedAt));

@@ -542,7 +542,9 @@ Options:
 `,
   configure: `Usage: factrove configure [--api-key <key>] [--api-url <origin>] [--profile <name>]
 
-Saves an API key and API URL for a profile.
+Saves an API key and API URL for a profile. The key belongs to the
+organization it was created for. Keys created before that change stopped
+working and must be created again at /account/api-keys.
 
 Options:
   --api-key <key>     API key. A prompt keeps it out of shell history.

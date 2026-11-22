@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { DocsUrlProvider } from "@/components/docs-link";
 import { SourceCodeUrlProvider } from "@/components/source-code-link";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
-import { publicConfigScript, sourceCodeUrl } from "@/public-config";
+import { docsBaseUrl, publicConfigScript, sourceCodeUrl } from "@/public-config";
 import "./globals.css";
 
 const sans = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en" className={cn(sans.variable, mono.variable, "font-sans")}>
       <body>
         <script dangerouslySetInnerHTML={{ __html: publicConfigScript() }} />
-        <SourceCodeUrlProvider url={sourceCodeUrl()}>{children}</SourceCodeUrlProvider>
+        <DocsUrlProvider url={docsBaseUrl()}>
+          <SourceCodeUrlProvider url={sourceCodeUrl()}>{children}</SourceCodeUrlProvider>
+        </DocsUrlProvider>
         <Toaster />
       </body>
     </html>

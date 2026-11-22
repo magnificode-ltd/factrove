@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { authPageHref } from "@/auth/return-path";
+import { DocsLink } from "@/components/docs-link";
 import { SourceCodeLink } from "@/components/source-code-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,13 +20,14 @@ export function SignInGate({ message, returnTo }: { message: string; returnTo: s
   return (
     <div className="ft-canvas min-h-dvh">
       <div className="ft-hero flex min-h-dvh flex-col">
-        <header className="flex items-center justify-end px-4 py-3 sm:px-6">
+        <header className="flex items-center justify-end gap-4 px-4 py-3 sm:px-6">
+          <DocsLink className={sourceLinkClass} />
           <SourceCodeLink className={sourceLinkClass} />
         </header>
         <main className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8 sm:py-12">
           <Card
             data-testid="sign-in-gate"
-            className="ft-vault-card ft-enter w-full max-w-md overflow-visible bg-white"
+            className="ft-vault-card w-full max-w-md overflow-visible bg-white"
             style={cardSpacing}
           >
             <CardContent className="flex flex-col items-center text-center">
