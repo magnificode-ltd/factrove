@@ -1,8 +1,11 @@
 # Self-host stack: PostgreSQL, Garage, migrations, the API, and the web app.
+# This file builds the API and web images from this checkout.
+# Published images: add -f docker-compose.published.yml. That override drops the build.
 # compose.yaml is only the local infrastructure for pnpm dev. This file does not replace it.
 # docker compose up without -f still selects compose.yaml.
 #
 #   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up
 #   docker compose --env-file .env.docker -f docker-compose.yml up --build
 #
 # The migrate service runs prisma migrate deploy and exits. The API does not migrate

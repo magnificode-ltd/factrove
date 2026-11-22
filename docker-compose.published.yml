@@ -1,0 +1,21 @@
+# Run the self-host stack from published images instead of building this checkout.
+# Use it with docker-compose.yml. That file stays the build-from-source stack.
+# This override sets the image and drops the build for migrate, api, and web.
+# migrate uses the API image, so the migration matches the server you start.
+#
+#   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up
+#
+# FACTROVE_IMAGE_TAG defaults to latest. Pin a publish with a full commit SHA,
+# a 7-character short SHA, sha- plus either SHA, or latest.
+
+services:
+  migrate:
+    image: ghcr.io/magnificode-ltd/factrove-api:${FACTROVE_IMAGE_TAG:-latest}
+    build: !reset null
+  api:
+    image: ghcr.io/magnificode-ltd/factrove-api:${FACTROVE_IMAGE_TAG:-latest}
+    build: !reset null
+  web:
+    image: ghcr.io/magnificode-ltd/factrove-web:${FACTROVE_IMAGE_TAG:-latest}
+    build: !reset null

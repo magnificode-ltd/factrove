@@ -12,14 +12,16 @@ Coding agents produce HTML reports, plans, and previews. The people who need the
 
 ### Self-host with Docker
 
-From a clone of this repository, copy the example env file, replace the placeholders, and start the stack. Secrets, HTTPS, upgrades, and backups are in the [self-hosting guide](https://docs.factrove.app/self-host/deploy). The [self-host quickstart](https://docs.factrove.app/self-host/quickstart) creates the first user and an API key.
+From a clone of this repository, copy the example env file, replace the placeholders, and start the published images. Secrets, HTTPS, upgrades, and backups are in the [self-hosting guide](https://docs.factrove.app/self-host/deploy). The [self-host quickstart](https://docs.factrove.app/self-host/quickstart) creates the first user and an API key.
 
 ```sh
 git clone https://github.com/magnificode-ltd/factrove.git
 cd factrove
 cp .env.docker.example .env.docker
-docker compose --env-file .env.docker -f docker-compose.yml up --build
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up
 ```
+
+`FACTROVE_IMAGE_TAG` pins those images and defaults to `latest`. To build the API and web images from this checkout instead, run `docker compose --env-file .env.docker -f docker-compose.yml up --build`.
 
 ### CLI
 

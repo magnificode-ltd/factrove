@@ -432,6 +432,34 @@ describe("local runtime", () => {
     assert.equal(apiExample.includes("https://factrove.app"), false);
   });
 
+  it("keeps a from-source Compose stack and a published-image override", () => {
+    const source = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
+    const published = readFileSync(join(repoRoot, "docker-compose.published.yml"), "utf8");
+    assert.match(source, /image: factrove-api:local/);
+    assert.match(source, /image: factrove-web:local/);
+    assert.match(source, /dockerfile: Dockerfile/);
+    assert.match(source, /target: api/);
+    assert.match(source, /target: web/);
+    assert.match(source, /command: \["migrate"\]/);
+    assert.match(
+      published,
+      /image: ghcr\.io\/magnificode-ltd\/factrove-api:\$\{FACTROVE_IMAGE_TAG:-latest\}/,
+    );
+    assert.match(
+      published,
+      /image: ghcr\.io\/magnificode-ltd\/factrove-web:\$\{FACTROVE_IMAGE_TAG:-latest\}/,
+    );
+    assert.equal(published.match(/build: !reset null/g)?.length, 3);
+    assert.equal(published.includes("factrove.app"), false);
+    assert.equal(published.includes("factrove-cloud"), false);
+    const readme = readFileSync(join(repoRoot, "README.md"), "utf8");
+    assert.match(
+      readme,
+      /docker compose --env-file \.env\.docker -f docker-compose\.yml -f docker-compose\.published\.yml up/,
+    );
+    assert.match(readme, /docker compose --env-file \.env\.docker -f docker-compose\.yml up --build/);
+  });
+
   it("ships the shadcn/ui MIT notice with the web image and keeps the skill license", () => {
     const uiLicense = readFileSync(join(repoRoot, "apps/web/src/components/ui/LICENSE"), "utf8");
     const thirdParty = readFileSync(join(repoRoot, "THIRD_PARTY_NOTICES.md"), "utf8");
