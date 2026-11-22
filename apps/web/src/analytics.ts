@@ -21,7 +21,11 @@ const BLOCKED_EVENTS = new Set([
   "$$heatmap",
 ]);
 
+// `token` is PostHog's project key. Removing it makes before_send drop the event.
+const TRANSPORT_CREDENTIAL = "token";
+
 const DROPPED_PROPERTIES = new Set([
+  "title",
   "$title",
   "$el_text",
   "$el_value",
@@ -31,7 +35,6 @@ const DROPPED_PROPERTIES = new Set([
   "name",
   "filename",
   "password",
-  "token",
   "content",
 ]);
 
@@ -104,6 +107,9 @@ export function sanitizePosthogCapture<T extends AnalyticsCapture>(event: T | nu
   const properties: Record<string, unknown> = { ...(event.properties ?? {}) };
   for (const key of Object.keys(properties)) {
     const value = properties[key];
+    if (key === TRANSPORT_CREDENTIAL) {
+      continue;
+    }
     if (DROPPED_PROPERTIES.has(key) || /email|password|secret|token|filename|artifact/i.test(key)) {
       delete properties[key];
       continue;
@@ -140,7 +146,9 @@ export function posthogInitOptions(host: string) {
     mask_all_text: true,
     respect_dnt: true,
     person_profiles: "never" as const,
-    property_denylist: ["email", "name", "password", "token", "filename", "$el_text", "$el_value", "$title"],
+    // /flags and /decide skip before_send and attach the raw page URL.
+    advanced_disable_flags: true,
+    property_denylist: ["email", "name", "password", "filename", "title", "$title", "$el_text", "$el_value"],
     get_current_url: (defaultUrl: string) => sanitizeAnalyticsUrl(defaultUrl),
     before_send: sanitizePosthogCapture,
   };

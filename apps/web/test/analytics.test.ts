@@ -52,11 +52,13 @@ describe("analytics privacy", () => {
         $current_url: `https://library.example.com/share/${ARTIFACT_ID}/${SHARE_TOKEN}?password=secret`,
         $pathname: `/share/${ARTIFACT_ID}/${SHARE_TOKEN}`,
         $referrer: "https://mail.example.com/reset-password?token=abc&email=person@example.com",
+        title: "Quarterly plan",
         $title: "Quarterly plan",
         email: "person@example.com",
         name: "Ada Lovelace",
         filename: "plan.html",
-        token: SHARE_TOKEN,
+        token: PROJECT_KEY,
+        share_token: SHARE_TOKEN,
       },
       $set: { email: "person@example.com" },
     });
@@ -64,6 +66,7 @@ describe("analytics privacy", () => {
       $current_url: "https://library.example.com/share/:id/:id",
       $pathname: "/share/:id/:id",
       $referrer: "https://mail.example.com/reset-password",
+      token: PROJECT_KEY,
     });
     expect(page).not.toHaveProperty("$set");
     expect(JSON.stringify(page)).not.toContain(ARTIFACT_ID);
@@ -88,7 +91,10 @@ describe("analytics privacy", () => {
       disable_session_recording: true,
       respect_dnt: true,
       person_profiles: "never",
+      advanced_disable_flags: true,
     });
+    expect(options.property_denylist).toEqual(expect.arrayContaining(["title", "$title"]));
+    expect(options.property_denylist).not.toContain("token");
     expect(options.get_current_url(`https://library.example.com/artifacts/${ARTIFACT_ID}?access=grant`)).toBe(
       "https://library.example.com/artifacts/:id",
     );
@@ -138,7 +144,9 @@ describe("analytics loading", () => {
       disable_session_recording: true,
       respect_dnt: true,
       person_profiles: "never",
+      advanced_disable_flags: true,
     });
+    expect(options?.property_denylist).not.toContain("token");
     expect(options?.get_current_url(`https://library.example.com/artifacts/${ARTIFACT_ID}?access=grant`)).toBe(
       "https://library.example.com/artifacts/:id",
     );

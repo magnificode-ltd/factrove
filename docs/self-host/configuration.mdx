@@ -87,9 +87,9 @@ Analytics is off unless you set it. Leave `POSTHOG_KEY` unset and the web app do
 
 The web process reads both when it renders a page. `pnpm dev` does not copy them from `apps/api/.env`. Set them on the web process, or in `.env.docker` for Compose. An invalid host with a valid key uses `https://us.i.posthog.com`.
 
-With a key set, the app stores analytics state in memory for the page. It does not set a cookie and it does not show a banner. It records the page and later route changes. It does not record clicks, typed values, session replays, or exception text. A browser Do Not Track setting skips PostHog entirely.
+With a key set, the app stores analytics state in memory for the page. It does not set a cookie and it does not show a banner. It records the page and later route changes. It does not record clicks, typed values, session replays, or exception text. It does not request feature flags and it does not call the decide endpoint. A browser Do Not Track setting skips PostHog entirely.
 
-Captured URLs drop the query string and the hash. An artifact id, a share token, a file name, or another long or secret path segment is replaced with `:id`. Page titles, artifact content, artifact names, file names, share passwords, API keys, email addresses, and account names are not sent. The app does not identify a person.
+Captured URLs drop the query string and the hash. An artifact id, a share token, a file name, or another long or secret path segment is replaced with `:id`. Page titles, artifact content, artifact names, file names, share passwords, Factrove API keys, email addresses, and account names are not sent. Each event still carries the public PostHog project key, which PostHog requires. The app does not identify a person.
 
 PostHog ignores these events unless that project has cookieless mode turned on. Turn that on in the PostHog project before expecting data.
 
