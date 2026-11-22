@@ -51,6 +51,6 @@ Factrove is not accepting outside pull requests yet. Issues, bug reports, and id
 
 ## License
 
-Copyright (C) 2026 Magnificode LTD. Released under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Copyright (C) 2026 Magnificode LTD. Released under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE). The copyright line is in the How to Apply These Terms appendix.
 
 The bundled common-password list is MIT, from SecLists. The published package includes `common-passwords.NOTICE.md` beside this file. The same notice is in the repository at [packages/contracts/src/common-passwords.NOTICE.md](https://github.com/magnificode-ltd/factrove/blob/main/packages/contracts/src/common-passwords.NOTICE.md).

@@ -36,7 +36,7 @@ test("publish manifest is the public factrove package", () => {
   assert.equal(manifest.license, "AGPL-3.0-or-later");
   assert.equal(manifest.private, undefined);
   assert.deepEqual(manifest.bin, { factrove: BUNDLED_ENTRY, ftrv: BUNDLED_ENTRY });
-  assert.deepEqual(manifest.files, ["dist", "README.md", "LICENSE", "NOTICE", "common-passwords.NOTICE.md"]);
+  assert.deepEqual(manifest.files, ["dist", "README.md", "LICENSE", "common-passwords.NOTICE.md"]);
   assert.deepEqual(manifest.engines, { node: ">=24.7.0 <25" });
   assert.equal(manifest.publishConfig.access, "public");
   assert.deepEqual(manifest.dependencies, {
@@ -86,7 +86,6 @@ test("packed CLI bundles workspace packages and runs --help", async () => {
   const paths = listing[0].files.map((file) => file.path).sort();
   assert.deepEqual(paths, [
     "LICENSE",
-    "NOTICE",
     "README.md",
     "common-passwords.NOTICE.md",
     "dist/cli.js",

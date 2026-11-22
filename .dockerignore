@@ -29,6 +29,7 @@ test-results
 agent-transcripts
 .cursor
 
-# The web image copies these notices out of the build context. Keep them included.
+# The images copy the AGPL license and these notices out of the build context. Keep them included.
+!LICENSE
 !THIRD_PARTY_NOTICES.md
 !apps/web/src/components/ui/LICENSE
