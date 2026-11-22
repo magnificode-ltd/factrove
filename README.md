@@ -31,12 +31,11 @@ From this repository, `pnpm factrove` runs the CLI in the checkout. That is the 
 | `fixtures` | Sample files for development and verification |
 | `scripts` | Repository tooling |
 | `docs` | Product and architecture documentation |
-| `prd` | Implementation briefs, contracts, task ownership, and progress |
-| `prd/mvp/done` | Completed MVP task briefs and verification records |
+| `prd` | Feature requirements, one document per feature |
 
 ### Backend directory structure
 
-This is the canonical backend layout for implementation PRDs. The directory boundaries and the locations of the database module, repositories, Prisma schema, and migrations are intentional. Feature filenames illustrate the convention; add files in the corresponding responsibility directory as features grow. This describes the target structure, not a claim that every file is already implemented.
+This is the canonical backend layout. The directory boundaries and the locations of the database module, repositories, Prisma schema, and migrations are intentional. Feature filenames illustrate the convention; add files in the corresponding responsibility directory as features grow. This describes the target structure, not a claim that every file is already implemented.
 
 ```text
 apps/api/
@@ -265,7 +264,7 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+Pushes to `main` also publish images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` that run on amd64 and arm64. Build from source with the Compose command above to use this checkout. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
 
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 
@@ -336,15 +335,13 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Release the CLI](RELEASING.md): manual npm publish of the `factrove` package. It does not run on push. Maintainers only; this file is not on the docs site.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
-- [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
-- [Implementation task index](prd/README.md): task status, dependencies, and ownership.
-- [Shared MVP contract](prd/mvp_contract.md): API, package interfaces, and local configuration.
+- [Feature requirements](prd/README.md): current behavior and constraints, one document per feature. CLI flags, config precedence, and the differences from `aws s3` are in [prd/cli.md](prd/cli.md).
 - [Docs site maintenance](DOCUMENTATION.md): regenerate Mintlify references and preview locally. The pages themselves are the user documentation above.
 - [Agent orientation](AGENTS.md): a concise guide to the codebase and its documentation.
 
 ## License
 
-Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository. The web UI components derived from shadcn/ui are MIT. That copyright and permission notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [apps/web/src/components/ui/LICENSE](apps/web/src/components/ui/LICENSE).
+Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). That copyright line is in the How to Apply These Terms appendix of the license. If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository. The web UI components derived from shadcn/ui are MIT. That copyright and permission notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [apps/web/src/components/ui/LICENSE](apps/web/src/components/ui/LICENSE).
 
 ## Contributing
 

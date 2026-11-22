@@ -2,7 +2,7 @@
 
 Factrove is not accepting outside pull requests yet. Issues, bug reports, and ideas are welcome.
 
-Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright notice is in [NOTICE](NOTICE). The [contributor license agreement](CLA.md) will apply once contributions open. You keep the copyright in your work. The agreement gives Magnificode LTD a license to use and relicense contributions, including under proprietary terms.
+Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright line is in the How to Apply These Terms appendix. The [contributor license agreement](CLA.md) will apply once contributions open. You keep the copyright in your work. The agreement gives Magnificode LTD a license to use and relicense contributions, including under proprietary terms.
 
 ## Sign the agreement
 

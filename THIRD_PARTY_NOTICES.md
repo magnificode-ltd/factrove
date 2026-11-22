@@ -1,6 +1,6 @@
 # Third-party notices
 
-Factrove is AGPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The pieces below are under other licenses. Each notice is included here so a copy of the program still carries it.
+Factrove is AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright line is in the How to Apply These Terms appendix. The pieces below are under other licenses. Each notice is included here so a copy of the program still carries it.
 
 ## shadcn/ui
 

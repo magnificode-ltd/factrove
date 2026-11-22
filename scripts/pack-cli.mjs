@@ -46,7 +46,7 @@ export function publishManifest(cliPackage, contractsPackage, version = cliPacka
       factrove: BUNDLED_ENTRY,
       ftrv: BUNDLED_ENTRY,
     },
-    files: ["dist", "README.md", "LICENSE", "NOTICE", "common-passwords.NOTICE.md"],
+    files: ["dist", "README.md", "LICENSE", "common-passwords.NOTICE.md"],
     engines: { node: cliPackage.engines.node },
     repository: {
       type: "git",
@@ -107,7 +107,6 @@ export async function prepareCliPackage(options = {}) {
   await writeFile(join(PUBLISH_DIRECTORY, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   await cp(join(repoRoot, "apps/cli/README.md"), join(PUBLISH_DIRECTORY, "README.md"));
   await cp(join(repoRoot, "apps/cli/LICENSE"), join(PUBLISH_DIRECTORY, "LICENSE"));
-  await cp(join(repoRoot, "apps/cli/NOTICE"), join(PUBLISH_DIRECTORY, "NOTICE"));
   await cp(
     join(repoRoot, "packages/contracts/src/common-passwords.NOTICE.md"),
     join(PUBLISH_DIRECTORY, "common-passwords.NOTICE.md"),
