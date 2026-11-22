@@ -4,7 +4,7 @@ This document is the north star for the agreed MVP. It describes the desired com
 
 ## The outcome
 
-The owner runs Factrove's frontend and backend locally on a Mac, asks a coding agent to upload an HTML file using the CLI, refreshes the web library, sees the file, and clicks it to view the HTML.
+You run Factrove's frontend and backend locally on a Mac, ask a coding agent to upload an HTML file using the CLI, refresh the web library, see the file, and click it to view the HTML.
 
 That complete loop, backed by persistent PostgreSQL metadata and object storage, is the MVP. It works without authentication, API keys, or a Factrove cloud service.
 
@@ -158,7 +158,7 @@ Database and storage access remain in the backend. CLI/web communicate through t
 
 ## Self-hosted end state
 
-A documented fresh-checkout setup works on the owner's Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in the configured S3 bucket. Local setup starts Garage beside PostgreSQL and creates that bucket. Real AWS S3 remains available when `S3_ENDPOINT` is unset.
+A documented fresh-checkout setup works on a Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in the configured S3 bucket. Local setup starts Garage beside PostgreSQL and creates that bucket. Real AWS S3 remains available when `S3_ENDPOINT` is unset.
 
 Before `pnpm dev`, the API process needs `S3_BUCKET` and `S3_REGION`. The local defaults also set `S3_ENDPOINT`, path-style addressing, and the Garage credentials. An AWS configuration supplies credentials for an existing bucket and leaves `S3_ENDPOINT` unset.
 

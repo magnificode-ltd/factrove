@@ -7,7 +7,7 @@ name: Publish images
 # This workflow does not run for pull requests, including forks.
 # Each image is tagged with the bare commit SHA (long and short), sha-<long>,
 # sha-<short>, and latest on the default branch. Bare SHA tags stay so an
-# existing reference keeps resolving. factrove-cloud accepts sha- tags.
+# existing reference keeps resolving.
 
 on:
   push:

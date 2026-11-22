@@ -1,8 +1,8 @@
 # Organizations before billing
 
-Status: Tom decided on November 15, 2026 ([FCT-81](https://linear.app/magnificode/issue/FCT-81/organizations-every-signed-in-user-belongs-to-an-org-before-billing)). This document is the build plan. It blocks [FCT-79](https://linear.app/magnificode/issue/FCT-79/paddle-billing-integration-for-factrove-cloud-in-ee-folder). Billing stays deferred until this ships.
+Status: build plan. Billing is planned and stays deferred until this work ships.
 
-This work is in the AGPL core (`apps/api`, `apps/web`, `apps/cli`, `packages/contracts`, `docs/`). It does not add `ee/`, Paddle, or a feature flag. A self-host install gets the same organization requirement as Factrove Cloud. Cloud billing will later attach to the organization this work creates.
+This work is in the AGPL core (`apps/api`, `apps/web`, `apps/cli`, `packages/contracts`, `docs/`). It does not add billing or a feature flag. A self-host install gets the same organization requirement as Factrove Cloud.
 
 ## Decisions
 
@@ -237,7 +237,7 @@ With the pull request that changes the behavior:
 - Keys: `docs/guides/cli.mdx`, `apps/cli/src/command-spec.ts`, quickstart, self-host, and README. Say that keys from before this change stop working and must be created again. No new command and no new flag. Regenerate with `pnpm docs:cli`.
 - Claim: README and the concepts paragraph for `db:claim-local-artifacts`.
 
-Do not document Paddle, seats, or prices.
+Do not document billing, seats, or prices.
 
 ## 12. Pull requests
 
