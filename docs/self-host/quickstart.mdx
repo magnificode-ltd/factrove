@@ -11,7 +11,7 @@ keywords:
 
 This page runs Factrove on a machine you control. The published CLI talks to your API. [Factrove Cloud](/cloud/quickstart) is the hosted service and does not use these steps.
 
-You need Docker Engine with Compose v2, and Node.js at least 24.7 and below 25 for the CLI. You do not need Node on the host to build the Compose images. The API image already pins Node.js 24.16.0.
+You need Docker Engine with Compose v2, and Node.js at least 24.7 and below 25 for the CLI. You do not need Node on the host to start the published images. The API image already pins Node.js 24.16.0.
 
 ## Install the CLI
 
@@ -38,7 +38,7 @@ With no profile and no API URL, the CLI calls `https://api.factrove.app`, which 
 
 ## Start the server
 
-Clone the repository and start the Compose stack. That stack is PostgreSQL, Garage, a one-shot migration, the API, and the web app. [Deploy the server](/self-host/deploy) is the full install, including published images, HTTPS, external storage, upgrades, and backups. [Configuration](/self-host/configuration) lists the env files and origins.
+Clone the repository and start the Compose stack from the published images. That stack is PostgreSQL, Garage, a one-shot migration, the API, and the web app. [Deploy the server](/self-host/deploy) is the full install, including image tags, HTTPS, external storage, upgrades, and backups. [Configuration](/self-host/configuration) lists the env files and origins.
 
 ```bash
 git clone https://github.com/magnificode-ltd/factrove.git
@@ -68,11 +68,13 @@ BROWSER_API_URL=http://localhost:3001
 On this stack an empty `PUBLIC_BASE_URL` becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN`. If you change the public origin, set `PUBLIC_BASE_URL` to that same origin. [Configuration](/self-host/configuration) covers that case and HTTPS.
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml up --build -d
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d
 curl -fsS http://127.0.0.1:3001/api/v1/health
 ```
 
-A ready API returns `{"status":"ok"}`. `compose.yaml` is a different file. `docker compose up` without `-f docker-compose.yml` starts PostgreSQL and Garage for a checkout and leaves the API and the web app on the host. The self-host stack is the command above.
+A ready API returns `{"status":"ok"}`. That command pulls `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. `FACTROVE_IMAGE_TAG` pins the tag and defaults to `latest`. `compose.yaml` is a different file. `docker compose up` without `-f docker-compose.yml` starts PostgreSQL and Garage for a checkout and leaves the API and the web app on the host.
+
+Build the API and web images from this checkout instead with `docker compose --env-file .env.docker -f docker-compose.yml up --build -d`.
 
 `pnpm dev` from a checkout is the other way to run the apps. It is documented in [Run from source](/self-host/deploy#run-from-source).
 

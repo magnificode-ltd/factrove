@@ -16,7 +16,7 @@ The published `factrove` and `ftrv` commands do not read the server's env file. 
 
 | How you start the server | File the process reads |
 | --- | --- |
-| Docker Compose stack (`docker-compose.yml`) | `.env.docker`, and only when you pass `--env-file .env.docker` |
+| Docker Compose stack (`docker-compose.yml`, plus `docker-compose.published.yml` for published images) | `.env.docker`, and only when you pass `--env-file .env.docker` |
 | Node processes from a checkout | `apps/api/.env` |
 
 Copy the matching example, then replace the placeholders:
@@ -29,7 +29,7 @@ cp .env.docker.example .env.docker
 cp apps/api/.env.example apps/api/.env
 ```
 
-`.env.docker` is gitignored. `DATABASE_URL`, `S3_ENDPOINT`, and `INTERNAL_API_URL` are set in `docker-compose.yml`, so a line with one of those names in `.env.docker` does not change the container. On the from-source process, `apps/api/.env` is where `DATABASE_URL` is set.
+`.env.docker` is gitignored. `DATABASE_URL`, `S3_ENDPOINT`, and `INTERNAL_API_URL` are set in `docker-compose.yml`, so a line with one of those names in `.env.docker` does not change the container. On the from-source process, `apps/api/.env` is where `DATABASE_URL` is set. `FACTROVE_IMAGE_TAG` in `.env.docker` selects the published image tag when you also pass `-f docker-compose.published.yml`. Unset, that tag is `latest`. `docker-compose.yml` alone ignores it and builds from this checkout.
 
 Every variable, the storage choices, and invite email are in [Deploy the server](/self-host/deploy#configure) and [Run from source](/self-host/deploy#run-from-source).
 

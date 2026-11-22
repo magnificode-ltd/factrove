@@ -266,7 +266,7 @@ Creating an upload assigns a new id. `--name` sets the library name, one line of
 
 ### Self-host with Docker Compose
 
-`compose.yaml` is PostgreSQL and Garage for `pnpm dev`. [`docker-compose.yml`](docker-compose.yml) is the self-host stack: PostgreSQL, Garage, a one-shot migration, the API, and the web app. [`Dockerfile`](Dockerfile) has two targets, `api` and `web`, so both images share one workspace install. Node 24.16.0 and pnpm 11.25.0 match the pins in this repository.
+`compose.yaml` is PostgreSQL and Garage for `pnpm dev`. [`docker-compose.yml`](docker-compose.yml) is the self-host stack: PostgreSQL, Garage, a one-shot migration, the API, and the web app. [`docker-compose.published.yml`](docker-compose.published.yml) runs that same stack from the published images. [`Dockerfile`](Dockerfile) has two targets, `api` and `web`, so a from-source build shares one workspace install. Node 24.16.0 and pnpm 11.25.0 match the pins in this repository.
 
 ```sh
 cp .env.docker.example .env.docker
@@ -275,18 +275,26 @@ cp .env.docker.example .env.docker
 Replace every placeholder in `.env.docker`. `openssl rand -hex 32` generates a secret. Use that hex output as-is, because `@`, `:`, `/`, or `#` in the database password breaks `DATABASE_URL`. `GARAGE_RPC_SECRET` must be 64 hex characters. `BETTER_AUTH_SECRET` must be at least 32 characters. Do not commit `.env.docker`.
 
 ```sh
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up
+```
+
+That command pulls `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. `FACTROVE_IMAGE_TAG` selects the tag for the API, the web app, and `migrate`, and it defaults to `latest`. A full commit SHA, a 7-character short SHA, `sha-` plus either SHA, and `latest` are the tags published from `main`. Image names and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+
+Build the API and web images from this checkout instead:
+
+```sh
 docker compose --env-file .env.docker -f docker-compose.yml up --build
 ```
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` that run on amd64 and arm64. Build from source with the Compose command above to use this checkout. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
-
-The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
+The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with the same compose files you used to start. For the published images:
 
 ```sh
-docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml run --rm migrate
 ```
+
+For a from-source stack, omit `-f docker-compose.published.yml`.
 
 Set `FACTROVE_MIGRATE=1` on the API container only when that container should migrate before it listens. Any other value leaves startup as it is.
 
@@ -375,7 +383,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Introduction](docs/introduction.mdx): self-host and Factrove Cloud, and when to use each.
 - [Self-host quickstart](docs/self-host/quickstart.mdx): install the published CLI, start the Compose stack, create the first user and an API key, and point a profile at your API.
 - [Configuration](docs/self-host/configuration.mdx): env files and origins for a server you run.
-- [Deploy](docs/self-host/deploy.mdx): Docker Compose install, published GHCR images, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
+- [Deploy](docs/self-host/deploy.mdx): Docker Compose install from published GHCR images, HTTPS, external storage, upgrades, and backups. Building from this checkout is the alternative in that guide.
 - [Factrove Cloud quickstart](docs/cloud/quickstart.mdx): sign up, create an API key, and point the same CLI at `https://api.factrove.app`. The hosted web origin on that page is a placeholder.
 - [CLI](docs/guides/cli.mdx): commands, precedence, and a copyable agent workflow.
 - [Release the CLI](RELEASING.md): manual npm publish of the `factrove` package. It does not run on push. Maintainers only; this file is not on the docs site.

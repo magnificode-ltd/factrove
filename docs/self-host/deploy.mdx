@@ -14,7 +14,7 @@ keywords:
 
 Use this page to deploy a Factrove server you run. The short path is the [self-host quickstart](/self-host/quickstart). Origins and env files are in [Configuration](/self-host/configuration). Factrove Cloud setup is the [Factrove Cloud quickstart](/cloud/quickstart).
 
-Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/amd64` and `linux/arm64` images for the API and the web app. See [Published images](#published-images).
+Factrove runs as your own install. The primary path is Docker Compose: PostgreSQL, Garage, a one-shot migration, the API, and the web app, from the published images. `docker-compose.yml` is that stack. `docker-compose.published.yml` selects `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` instead of a local build. See [Published images](#published-images). Building from this checkout is [Build from this checkout](#build-from-this-checkout).
 
 Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
 
@@ -24,20 +24,20 @@ Factrove is licensed under the GNU Affero General Public License v3.0 or later. 
 
 For the Compose stack:
 
-- Docker Engine and the Compose plugin. The command is `docker compose` (Compose v2). The file uses health checks, `service_completed_successfully`, and required `${VAR:?}` substitution.
-- A clone of this repository, so Compose can build the images.
-- Enough disk for the build and for the PostgreSQL and Garage volumes.
+- Docker Engine and the Compose plugin. The command is `docker compose` (Compose v2). The files use health checks, `service_completed_successfully`, and required `${VAR:?}` substitution.
+- A clone of this repository, for the Compose files and `infra/garage.toml`. Starting the published images does not build them.
+- Enough disk for the PostgreSQL and Garage volumes. A from-source build needs more.
 
-The stack pulls two pinned images and builds the other two:
+The published-image stack pulls these images:
 
 | Image | Role |
 | --- | --- |
 | `postgres:17.11` | Metadata. Official multi-arch index |
 | `dxflrs/garage:v2.3.0` | S3-compatible bytes for the bundled bucket. Official multi-arch index |
-| `factrove-api:local` | API, built here with `docker build --target api` |
-| `factrove-web:local` | Web app, built here with `docker build --target web` |
+| `ghcr.io/magnificode-ltd/factrove-api` | API, and `prisma migrate deploy` for the migrate service. Tag `FACTROVE_IMAGE_TAG`, default `latest`. amd64 and arm64 |
+| `ghcr.io/magnificode-ltd/factrove-web` | Web app. The same tag. amd64 and arm64 |
 
-The API image uses Node.js 24.16.0 and pnpm 11.25.0, the same pins as `.nvmrc` and `packageManager` in `package.json`. You do not install Node on the host unless you also run the CLI or the [from-source](#run-from-source) path.
+Building from this checkout produces `factrove-api:local` and `factrove-web:local` instead of the two GHCR images. The API image uses Node.js 24.16.0 and pnpm 11.25.0, the same pins as `.nvmrc` and `packageManager` in `package.json`. You do not install Node on the host unless you also run the CLI or the [from-source](#run-from-source) path.
 
 Garage creates the bucket named by `S3_BUCKET` because its command includes `--default-bucket`. The API does not create a bucket.
 
@@ -48,7 +48,7 @@ git clone https://github.com/magnificode-ltd/factrove.git
 cd factrove
 ```
 
-`docker compose up --build` builds `factrove-api:local` and `factrove-web:local` from the `Dockerfile`. Pull requests build those same targets as `factrove-api:ci` and `factrove-web:ci` for that check. The images you can pull are in [Published images](#published-images).
+The next sections configure `.env.docker` and start the published images. [Build from this checkout](#build-from-this-checkout) is how `docker compose up --build` builds `factrove-api:local` and `factrove-web:local` from the `Dockerfile`. Pull requests build those same targets as `factrove-api:ci` and `factrove-web:ci` for that check.
 
 ## Published images
 
@@ -80,7 +80,13 @@ docker pull ghcr.io/magnificode-ltd/factrove-web:latest
 
 Replace `latest` with a full or short commit SHA, or with `sha-` and that SHA, to pin a build. The `sha-` tags and the bare commit SHA tags name the same commit.
 
-`docker-compose.yml` builds `factrove-api:local` and `factrove-web:local` from this checkout on the machine running Compose. That build-from-source path and the published GHCR images both run on amd64 and arm64.
+`docker-compose.published.yml` points `migrate`, `api`, and `web` at those images. `FACTROVE_IMAGE_TAG` selects the tag for both. Unset, the tag is `latest`. Set it in `.env.docker` or the shell to a full commit SHA, a 7-character short SHA, `sha-` plus either SHA, or `latest`. The migrate service uses the API image at that same tag.
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d
+```
+
+`docker-compose.yml` alone still builds `factrove-api:local` and `factrove-web:local` from this checkout. See [Build from this checkout](#build-from-this-checkout). Both paths run on amd64 and arm64.
 
 ## Configure
 
@@ -126,6 +132,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `POSTHOG_HOST` | no | PostHog API host. Default `https://us.i.posthog.com`. An absolute `http` or `https` origin. Read when a page is rendered. Used only when `POSTHOG_KEY` is a public project key |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
+| `FACTROVE_IMAGE_TAG` | no | Tag for the published API and web images when you pass `-f docker-compose.published.yml`. Default `latest`. A full SHA, a 7-character SHA, `sha-` plus either SHA, or `latest`. `docker-compose.yml` alone ignores it |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
 | `AUTH_COOKIE_DOMAIN` | no | Parent domain for the session cookie when the web app and API use different hosts. Leave empty on localhost |
 | `TRUSTED_PROXIES` | no | Comma-separated proxy IPs or CIDRs that may set `X-Forwarded-For`. Empty keeps the socket peer |
@@ -185,20 +192,30 @@ The web image reads `BROWSER_API_URL` when it renders a page, so changing that o
 
 ## Build and run
 
-From the repository root:
+From the repository root, after `.env.docker` is filled in:
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d
+```
+
+Compose pulls `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` for `FACTROVE_IMAGE_TAG` when those images are not already present. The default tag is `latest`. `-d` leaves the stack in the background. Omit `-d` to attach the terminal to the logs. Commands later on this page pass the same `-f` files. Omit `-f docker-compose.published.yml` when you built from this checkout.
+
+Compose will not start until `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `GARAGE_RPC_SECRET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are set. The `:?` markers in `docker-compose.yml` are what print that requirement.
+
+### Build from this checkout
+
+`docker-compose.yml` without the published override builds the API and web images from this checkout:
 
 ```bash
 docker compose --env-file .env.docker -f docker-compose.yml up --build -d
 ```
 
-`--build` builds `factrove-api:local` and `factrove-web:local`. `-d` leaves the stack in the background. Omit `-d` to attach the terminal to the logs. The same images, built without Compose:
+`--build` builds `factrove-api:local` and `factrove-web:local`. The same images, built without Compose:
 
 ```bash
 docker build --target api --tag factrove-api:local .
 docker build --target web --tag factrove-web:local .
 ```
-
-Compose will not start until `POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`, `GARAGE_RPC_SECRET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are set. The `:?` markers in `docker-compose.yml` are what print that requirement.
 
 | Service | Listens | Published on the host |
 | --- | --- | --- |
@@ -219,25 +236,25 @@ curl -fsS http://127.0.0.1:3001/api/v1/health
 A ready API returns `{"status":"ok"}`. The API image and the `api` service use that URL as their health check. The web service requests `http://127.0.0.1:3000/`.
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml ps
-docker compose --env-file .env.docker -f docker-compose.yml logs migrate api web
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml ps
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml logs migrate api web
 ```
 
 `api` waits until `migrate` has exited successfully and until PostgreSQL and Garage are healthy. Garage creates the bucket during its start.
 
 ## Migrations
 
-Startup of the API process does not migrate. The `migrate` service runs `prisma migrate deploy` from the migrations baked into `factrove-api:local`, then exits.
+Startup of the API process does not migrate. The `migrate` service runs `prisma migrate deploy` from the migrations baked into the API image, then exits. That image is `ghcr.io/magnificode-ltd/factrove-api` at `FACTROVE_IMAGE_TAG` when you use the published override, and `factrove-api:local` when you build.
 
 `docker compose up` creates that container and runs `prisma migrate deploy`. A later `up` or `up -d` starts the service again and runs the deploy again. The process exits when it finishes. `restart: "no"` stops Compose from bringing that exited container back by itself. The next `up` still starts the service. Repeating the deploy is safe: a database that already has the migrations reports that none are pending.
 
 After you pull new migrations, apply them with the upgrade command before the new API serves:
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml run --rm migrate
 ```
 
-`up -d` runs that same deploy again. The explicit `run --rm migrate` remains the upgrade step. It applies the migrations before you treat the new API as ready.
+Omit `-f docker-compose.published.yml` on a from-source stack. `up -d` runs that same deploy again. The explicit `run --rm migrate` remains the upgrade step. It applies the migrations before you treat the new API as ready.
 
 `FACTROVE_MIGRATE=1` is an opt-in on the API container: the entrypoint migrates, then serves. Any other value, including empty, serves without migrating. The committed compose file does not set it. Adding the name to `.env.docker` has no effect until the `api` service environment contains `FACTROVE_MIGRATE`. The `migrate` service is the path this file already runs.
 
@@ -283,7 +300,7 @@ Do not log the `access` or `ticket` query on content URLs. `access` is the signe
 Recreate the containers after origin changes. `up -d` also starts `migrate` and runs `prisma migrate deploy` again, which exits once the database is already current:
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml up -d
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d
 ```
 
 ## Object storage
@@ -398,7 +415,17 @@ Upload failures are in [Troubleshooting](/guides/troubleshooting). A wrong API o
 
 ## Upgrade
 
-From the repository root, with the same `.env.docker`:
+From the repository root, with the same `.env.docker`. For the published images, pull the tag you run, migrate, then start:
+
+```bash
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml pull
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml run --rm migrate
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d
+```
+
+`pull` refreshes the API and web images at `FACTROVE_IMAGE_TAG` (default `latest`), and the pinned PostgreSQL and Garage images. To move to a different publish, set `FACTROVE_IMAGE_TAG` to that tag and run the same three commands. `run --rm migrate` applies the migrations in that API image before the new API serves. `up -d` recreates the API and the web app and starts `migrate` again, which runs the same deploy. Both runs are safe to repeat. Keep `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` stable across the upgrade, or existing sessions and share links stop resolving.
+
+A stack built from this checkout upgrades by pulling this repository and rebuilding:
 
 ```bash
 git pull
@@ -407,7 +434,7 @@ docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
 docker compose --env-file .env.docker -f docker-compose.yml up -d
 ```
 
-`build` refreshes `factrove-api:local` and `factrove-web:local`. `run --rm migrate` is the deliberate migration step. It applies committed migrations before the new API serves. `up -d` recreates the API and the web app and starts `migrate` again, which runs the same deploy. Both runs are safe to repeat. Keep `BETTER_AUTH_SECRET` and any `SHARE_TOKEN_KEY` stable across the upgrade, or existing sessions and share links stop resolving.
+`build` refreshes `factrove-api:local` and `factrove-web:local`. Omit `-f docker-compose.published.yml` on the later commands on this page when this is the stack you started.
 
 Stop writers before a migration that rewrites `artifact` if you are crossing `20261021170000_add_artifact_object_key` from an older build. That migration locks `artifact`. An API process from before it cannot insert or replace content once `object_key` is required. There is no down migration. Rolling back that cutover means stopping the API, copying each current object to `{artifactId}.html` in the same bucket, and restoring the previous schema and application. The previous application reads `{artifactId}.html`.
 
@@ -418,13 +445,13 @@ Take the database, the object bytes, and the key material together. A successful
 Stop the API and the web app so a replacement cannot delete an object during the copy:
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml stop api web
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml stop api web
 ```
 
 Dump PostgreSQL from the bundled service. Inside that container, local connections use trust authentication, so `pg_dump` accepts user `factrove` without a password:
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml exec -T postgres \
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml exec -T postgres \
   pg_dump -U factrove --no-owner --no-acl factrove > factrove.sql
 ```
 
@@ -433,7 +460,7 @@ The named volume for that data is `factrove-postgres` on project `factrove-selfh
 For the bundled bucket, stop Garage and archive both of its volumes. Metadata is SQLite, so a copy taken while Garage is running can tear.
 
 ```bash
-docker compose --env-file .env.docker -f docker-compose.yml stop garage
+docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml stop garage
 ```
 
 The volume names in the compose file are `factrove-garage-meta` and `factrove-garage-data`. Docker stores them as `factrove-selfhost_factrove-garage-meta` and `factrove-selfhost_factrove-garage-data`. List them with:
@@ -452,7 +479,7 @@ Store `BETTER_AUTH_SECRET`, any `SHARE_TOKEN_KEY`, `GARAGE_RPC_SECRET`, and the 
 
 Restore by loading that dump and those object bytes, then starting the stack with the same secrets. The dump does not include rows written after it, and it does not recreate objects a later replacement deleted.
 
-Start the stack again with `docker compose --env-file .env.docker -f docker-compose.yml up -d`. That starts `migrate` again. `prisma migrate deploy` leaves a database that already contains those migrations unchanged.
+Start the stack again with `docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml up -d`. That starts `migrate` again. `prisma migrate deploy` leaves a database that already contains those migrations unchanged. Omit `-f docker-compose.published.yml` on a from-source stack.
 
 ## Run from source
 
@@ -641,7 +668,7 @@ Point the CLI at `http://localhost:3001` as in [Point the CLI at this install](#
 
 ## Removing an install
 
-`docker compose --env-file .env.docker -f docker-compose.yml down` stops the self-host containers and keeps the volumes. `down -v` also deletes `factrove-postgres`, `factrove-garage-meta`, and `factrove-garage-data` for this project. Objects in a remote bucket stay.
+`docker compose --env-file .env.docker -f docker-compose.yml -f docker-compose.published.yml down` stops the self-host containers and keeps the volumes. `down -v` also deletes `factrove-postgres`, `factrove-garage-meta`, and `factrove-garage-data` for this project. Objects in a remote bucket stay. Omit `-f docker-compose.published.yml` on a from-source stack.
 
 `pnpm infra:down` stops the dev PostgreSQL and Garage from `compose.yaml` and keeps their volumes. `pnpm infra:reset` deletes those dev volumes after you confirm. Neither command touches project `factrove-selfhost`.
 
