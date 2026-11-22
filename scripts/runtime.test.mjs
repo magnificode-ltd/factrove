@@ -433,7 +433,7 @@ describe("local runtime", () => {
     assert.match(dockerfile, /\/src\/THIRD_PARTY_NOTICES\.md/);
     const ignore = readFileSync(join(repoRoot, ".dockerignore"), "utf8");
     assert.equal(dockerignoreExcludes(ignore, "docs/self-host/deploy.mdx"), true);
-    assert.equal(dockerignoreExcludes(ignore, "prd/org-first-plan.md"), true);
+    assert.equal(dockerignoreExcludes(ignore, "prd/README.md"), true);
     assert.equal(dockerignoreExcludes(ignore, "apps/web/test/ui.test.tsx"), true);
     assert.equal(dockerignoreExcludes(ignore, "THIRD_PARTY_NOTICES.md"), false);
     assert.equal(dockerignoreExcludes(ignore, "apps/web/src/components/ui/LICENSE"), false);

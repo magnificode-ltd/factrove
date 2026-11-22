@@ -12,22 +12,19 @@ Factrove is a TypeScript pnpm monorepo for a self-hostable artifact library.
 
 The backend owns database and storage access. Its database module is global within NestJS. Shared packages are linked through pnpm workspaces and expose compiled exports.
 
-User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities. Runtime sign-in uses email and password sessions. API keys use the `@better-auth/api-key` plugin at the same Better Auth version, and the plugin stores only a hash. Organization HTTP routes are mounted. Creating or deleting an organization, inviting or removing members, changing roles, leaving, renaming, and switching or clearing the active organization are rejected. `GET /organization/get-organization` and `GET /organization/get-full-organization` are rejected too, because a non-member id clears the active organization. Signup still creates no membership. API keys belong to the caller's active organization. `apikey.referenceId` is that organization, metadata records the creating user, and a key-authenticated request acts in the key's organization. The upgrade migration deletes every existing key. A signed-in user names their first organization with `POST /api/v1/onboarding/organization`. Until then, product routes return `403 ORGANIZATION_SETUP_REQUIRED` and the web app sends the user to `/onboarding`. A user who already has an organization is unaffected, and `/onboarding` sends them home. Membership is read from the `member` table. The build plan is [prd/org-first-plan.md](prd/org-first-plan.md).
+User and Organization are Better Auth identity models (core and organization plugin). Artifact is Factrove's custom domain model and references those identities. Runtime sign-in uses email and password sessions. API keys use the `@better-auth/api-key` plugin at the same Better Auth version, and the plugin stores only a hash. Organization HTTP routes are mounted. Creating or deleting an organization, inviting or removing members, changing roles, leaving, renaming, and switching or clearing the active organization are rejected. `GET /organization/get-organization` and `GET /organization/get-full-organization` are rejected too, because a non-member id clears the active organization. Signup still creates no membership. API keys belong to the caller's active organization. `apikey.referenceId` is that organization, metadata records the creating user, and a key-authenticated request acts in the key's organization. The upgrade migration deletes every existing key. A signed-in user names their first organization with `POST /api/v1/onboarding/organization`. Until then, product routes return `403 ORGANIZATION_SETUP_REQUIRED` and the web app sends the user to `/onboarding`. A user who already has an organization is unaffected, and `/onboarding` sends them home. Membership is read from the `member` table. Requirements are in [prd/organizations.md](prd/organizations.md) and [prd/api-keys.md](prd/api-keys.md).
 
 ## Documentation map
 
-Documentation follows these roles: README.md provides long-term codebase documentation; PRDs capture MVP scope, implementation tasks, and progress. AGENTS.md provides general orientation about the codebase, using descriptive guidance. Task-specific constraints and exclusions belong in the relevant PRD, keeping this file focused on helping agents understand the project.
+Documentation follows these roles: README.md provides long-term codebase documentation. `prd/` holds one document per feature, covering current behavior and the constraints a change has to keep. AGENTS.md provides general orientation. Feature-specific constraints belong in the relevant PRD.
 
-- [README.md](README.md) explains the repository, architecture, and development commands. Its [backend directory structure](README.md#backend-directory-structure) is the canonical layout referenced by implementation PRDs.
+- [README.md](README.md) explains the repository, architecture, and development commands. Its [backend directory structure](README.md#backend-directory-structure) is the canonical layout.
 - [docs/](docs/introduction.mdx) is the user-facing documentation: an overview that separates self-hosting from Factrove Cloud, a quickstart for each, shared guides, and the generated CLI and API references.
-- [prd/MVP_END_STATE.md](prd/MVP_END_STATE.md) is the agreed MVP north star, including the data model and observable completion criteria.
-- [prd/README.md](prd/README.md) tracks implementation tasks, dependencies, and ownership.
-- [prd/mvp_contract.md](prd/mvp_contract.md) defines the shared HTTP and package contracts.
-- [prd/mvp/done/](prd/mvp/done/) contains completed task briefs and handoff notes.
+- [prd/README.md](prd/README.md) indexes the feature documents.
 
 ## CLI
 
-Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [README.md](README.md), [docs/guides/cli.mdx](docs/guides/cli.mdx), and [prd/mvp_contract.md](prd/mvp_contract.md).
+Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [prd/cli.md](prd/cli.md), [docs/guides/cli.mdx](docs/guides/cli.mdx), and [README.md](README.md).
 
 ## Tooling
 

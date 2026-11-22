@@ -6,7 +6,7 @@ User-facing guides and references live in `docs/`. This file is the maintainer g
 
 Navigation is tabs: Overview, Self-host, Factrove Cloud, CLI reference, and API reference. Overview holds the introduction, concepts, and the shared guides. Self-host holds the quickstart, the deploy guide, and configuration. Factrove Cloud holds its quickstart. `docs.json` redirects `/quickstart` to `/self-host/quickstart` and `/guides/self-hosting` to `/self-host/deploy`. There is no `docs/.mintignore` in this repository. The CLI reference tab must stay named `CLI reference`, because `pnpm docs:cli` rewrites that tab's groups.
 
-Product planning lives in [prd/MVP_END_STATE.md](prd/MVP_END_STATE.md), not in `docs/`.
+Product requirements live in [prd/README.md](prd/README.md), not in `docs/`.
 
 ## Regenerate references
 
