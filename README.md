@@ -15,7 +15,7 @@ ftrv --help
 npx factrove --help
 ```
 
-With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is the hosted Factrove API. `factrove configure`, `--api-url`, and `FACTROVE_API_URL` override it for a server you run. User setup for that hosted API is [docs/cloud/quickstart.mdx](docs/cloud/quickstart.mdx). User setup for a server you run is [docs/self-host/quickstart.mdx](docs/self-host/quickstart.mdx). The hosted web origin is not set in this repository. Publishing is a manual GitHub Actions dispatch, described in [docs/guides/releasing-the-cli.mdx](docs/guides/releasing-the-cli.mdx). It does not run on push.
+With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is the hosted Factrove API. `factrove configure`, `--api-url`, and `FACTROVE_API_URL` override it for a server you run. User setup for that hosted API is [docs/cloud/quickstart.mdx](docs/cloud/quickstart.mdx). User setup for a server you run is [docs/self-host/quickstart.mdx](docs/self-host/quickstart.mdx). The hosted web origin is not set in this repository. Publishing is a manual GitHub Actions dispatch, described in [RELEASING.md](RELEASING.md). It does not run on push.
 
 From this repository, `pnpm factrove` runs the CLI in the checkout. That is the command the local setup below uses. It is not a substitute for the published package.
 
@@ -265,7 +265,7 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+Pushes to `main` also publish images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` that run on amd64 and arm64. Build from source with the Compose command above to use this checkout. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
 
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 
@@ -333,7 +333,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Deploy](docs/self-host/deploy.mdx): Docker Compose install, published GHCR images, HTTPS, external storage, upgrades, and backups. The from-source process is the alternative in that guide.
 - [Factrove Cloud quickstart](docs/cloud/quickstart.mdx): sign up, create an API key, and point the same CLI at `https://api.factrove.app`. The hosted web origin on that page is a placeholder.
 - [CLI](docs/guides/cli.mdx): commands, precedence, and a copyable agent workflow.
-- [Release the CLI](docs/guides/releasing-the-cli.mdx): manual npm publish of the `factrove` package. It does not run on push.
+- [Release the CLI](RELEASING.md): manual npm publish of the `factrove` package. It does not run on push. Maintainers only; this file is not on the docs site.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
 - [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.

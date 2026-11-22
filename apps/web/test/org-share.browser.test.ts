@@ -1,10 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const screenshotDir = process.env.FACTROVE_SCREENSHOT_DIR;
+const libraryId = "123e4567-e89b-42d3-a456-426614174011";
 
 describe("organization share control", () => {
   let browser: Browser;
@@ -54,9 +55,12 @@ describe("organization share control", () => {
       await page.frameLocator("iframe").locator("p").waitFor({ timeout: 8_000 });
 
       const library = page.getByTestId("library-row");
-      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(1);
+      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
       expect(await library.getByText("Organization shared").count()).toBe(1);
-      expect(await page.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(2);
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      expect(await page.getByRole("menuitem", { name: "Share with Local Organization" }).count()).toBe(1);
+      await page.keyboard.press("Escape");
+      expect(await page.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(1);
 
       await saveShot(page, "org-share-owner-private.png");
       await trigger.click();
@@ -80,18 +84,22 @@ describe("organization share control", () => {
       await page.keyboard.press("Enter");
       await dialog.waitFor({ state: "hidden", timeout: 5_000 });
       expect(await header.getByTestId("artifact-access").innerText()).toBe("Organization shared");
-      expect(await header.getByTestId("artifact-access").evaluate((element) => element === document.activeElement)).toBe(true);
+      await page.waitForFunction(() => {
+        const access = document.querySelector("header [data-testid='artifact-access']");
+        return access !== null && access === document.activeElement;
+      }, undefined, { timeout: 5_000 });
       expect(await header.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
       await page.waitForFunction(
         () => document.body.textContent?.includes("Shared with \u2068Local Organization\u2069") ?? false
       );
       await saveShot(page, "org-share-after.png");
 
-      const rowTrigger = library.getByRole("button", { name: "Share with Local Organization" });
-      await rowTrigger.click();
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      await page.getByRole("menuitem", { name: "Share with Local Organization" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Share with Local Organization" }).click();
       await page.getByRole("dialog").waitFor({ state: "hidden" });
-      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      expect(await page.getByRole("menuitem", { name: "Share with Local Organization" }).count()).toBe(0);
       expect(await library.getByTestId("artifact-access").first().innerText()).toBe("Organization shared");
     } finally {
       await page.close();
@@ -131,6 +139,43 @@ describe("organization share control", () => {
     }
   }, 45_000);
 
+  it("shows the artifact name in the row and updates it after rename", async () => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await page.goto(`${pageOrigin}/org-share.html`);
+      const library = page.getByTestId("library-row");
+      const link = library.getByRole("link", { name: "Library notes" }).first();
+      await link.waitFor();
+      await expectVisibleLabel(link, 80);
+      await expectVisibleLabel(page.getByRole("heading", { name: "Launch notes" }), 100);
+
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      await page.getByRole("menuitem", { name: "Rename" }).click();
+      const dialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await dialog.getByLabel("Name").fill("Renamed notes");
+      await dialog.getByRole("button", { name: "Save name" }).click();
+      await dialog.waitFor({ state: "hidden" });
+      const renamed = library.getByRole("link", { name: "Renamed notes" });
+      await renamed.waitFor();
+      await expectVisibleLabel(renamed, 80);
+      expect(await library.locator("code").first().innerText()).toBe(libraryId.slice(0, 8));
+      expect(await library.locator("code").first().getAttribute("title")).toBe(libraryId);
+      expect(await library.getByRole("button", { name: "Copy ID" }).first().getAttribute("aria-label")).toBe("Copy ID");
+
+      await page.getByRole("button", { name: "Rename" }).first().click();
+      const headerDialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await headerDialog.getByLabel("Name").fill("Renamed header");
+      await headerDialog.getByRole("button", { name: "Save name" }).click();
+      await headerDialog.waitFor({ state: "hidden" });
+      const renamedHeading = page.getByRole("heading", { name: "Renamed header" });
+      await renamedHeading.waitFor();
+      await expectVisibleLabel(renamedHeading, 100);
+    } finally {
+      await page.close();
+    }
+  }, 45_000);
+
   it("keeps a long organization name inside a 390px viewport", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -163,6 +208,12 @@ describe("organization share control", () => {
     }
   }, 45_000);
 });
+
+async function expectVisibleLabel(locator: Locator, minWidth: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(minWidth);
+  expect(await locator.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+}
 
 async function focusedText(page: Page): Promise<string> {
   return page.evaluate(() => document.activeElement?.textContent ?? "");

@@ -20,13 +20,15 @@ export function ShareControl({
   initial,
   viewerUrl,
   showCopyLink = false,
-  compact = false
+  compact = false,
+  dense = false
 }: {
   artifactId: string;
   initial: ShareState;
   viewerUrl?: string;
   showCopyLink?: boolean;
   compact?: boolean;
+  dense?: boolean;
 }) {
   const [share, setShare] = useState(initial);
   const [expanded, setExpanded] = useState(compact && Boolean(initial.shareUrl));
@@ -37,7 +39,7 @@ export function ShareControl({
   const returnFocus = useRef(false);
   const panelId = `public-link-${artifactId}`;
   const link = share.shareUrl ?? viewerUrl ?? "";
-  const buttonClass = compact ? "h-8" : "h-10";
+  const buttonClass = compact || dense ? "h-8" : "h-10";
 
   useEffect(() => {
     if (compact || !expanded) {

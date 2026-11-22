@@ -21,8 +21,6 @@ ftrv --help
 With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is [Factrove Cloud](/cloud/quickstart). A server you run needs `--api-url`, `FACTROVE_API_URL`, or a profile `api_url` set to your API origin. [Self-host](/self-host/quickstart) saves that profile. Use a different `--profile` name for each origin. Configuring one profile again replaces its API URL.
 </Info>
 
-[Release the CLI](/guides/releasing-the-cli) publishes a version. It does not run on push.
-
 From a checkout of this repository, `pnpm factrove` runs the built CLI. pnpm prints the script line it runs to stderr. The program help uses the name `factrove`. `apps/cli/.env` can point that command at `http://localhost:3001`. The published commands do not read that file.
 
 Help text uses synopsis placeholders such as `<artifact-id>`. In a shell, `<` starts a redirection. Executable examples below use quoted variables.
