@@ -1,8 +1,8 @@
 # Organizations before billing
 
-Status: Tom decided on November 15, 2026 ([FCT-81](https://linear.app/magnificode/issue/FCT-81/organizations-every-signed-in-user-belongs-to-an-org-before-billing)). This document is the build plan. Billing stays deferred until this ships.
+Status: build plan. Billing is planned and stays deferred until this work ships.
 
-This work is in the AGPL core (`apps/api`, `apps/web`, `apps/cli`, `packages/contracts`, `docs/`). A self-host install gets the same organization requirement as Factrove Cloud.
+This work is in the AGPL core (`apps/api`, `apps/web`, `apps/cli`, `packages/contracts`, `docs/`). It does not add billing or a feature flag. A self-host install gets the same organization requirement as Factrove Cloud.
 
 ## Decisions
 

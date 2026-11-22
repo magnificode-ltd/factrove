@@ -2,7 +2,7 @@
 
 Factrove is a self-hostable home for artifacts created by people and agents. Its web application organizes artifacts. Its command-line client publishes HTML files and prints the new artifact id. The share command prints a public link.
 
-This repository contains the product: frontend, backend, CLI, and shared packages. It is private initially and intended for a future open-source release. A hosted version is available as Factrove Cloud.
+This repository contains the product: frontend, backend, CLI, and shared packages. Run it yourself, or use Factrove Cloud, the hosted service.
 
 ## Install the CLI
 
@@ -265,7 +265,7 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. The packages stay private while this repository is private. When the repository is open-sourced, each package is set to public in its package settings. Pulling them needs a token with `read:packages`. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
 
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 
@@ -346,6 +346,8 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 
 Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository.
 
-Factrove is not accepting outside pull requests yet; issues, bug reports, and feedback are welcome; outside pull requests will be closed without merging.
+## Contributing
 
-Contributors keep their copyright and license their contributions to Magnificode LTD under the [contributor license agreement](CLA.md), which includes the right to relicense those contributions. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Factrove is not accepting outside pull requests yet. Issues, bug reports, and ideas are welcome.
+
+The [contributor license agreement](CLA.md) will apply once contributions open. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).

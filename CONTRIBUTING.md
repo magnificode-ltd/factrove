@@ -1,12 +1,12 @@
 # Contributing
 
-Outside contributions are not accepted for now. Issues, bug reports, and feedback are welcome. Outside pull requests will be closed without merging.
+Factrove is not accepting outside pull requests yet. Issues, bug reports, and ideas are welcome.
 
-Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright notice is in [NOTICE](NOTICE). By contributing, you agree to the [contributor license agreement](CLA.md). You keep the copyright in your work. The agreement gives Magnificode LTD a license to use and relicense contributions, including under proprietary terms.
+Factrove is licensed under AGPL-3.0-or-later. See [LICENSE](LICENSE). The copyright notice is in [NOTICE](NOTICE). The [contributor license agreement](CLA.md) will apply once contributions open. You keep the copyright in your work. The agreement gives Magnificode LTD a license to use and relicense contributions, including under proprietary terms.
 
 ## Sign the agreement
 
-These steps apply once outside pull requests are accepted again.
+These steps apply once contributions open.
 
 Pull requests opened by the GitHub accounts `tommagni`, `dependabot[bot]`, `cursor[bot]`, and `cursoragent` skip the check. The workflow matches the account that opened the pull request. A git commit author name does not skip it. Every other pull request needs a signature. CLA Assistant Lite comments on the pull request and links to the agreement. To sign, comment this sentence on the pull request:
 
