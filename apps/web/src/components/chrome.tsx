@@ -53,12 +53,18 @@ export function ViewerBar({
             <span>Back to library</span>
           </Button>
         ) : null}
-        <h1 className="min-w-0 flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
+        <h1 className="min-w-0 max-w-full flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
           {title}
         </h1>
-        {meta}
-        {tools}
-        <SourceCodeLink className={sourceLinkClass} />
+        {meta || tools ? (
+          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2">
+            {meta}
+            {tools}
+            <SourceCodeLink className={sourceLinkClass} />
+          </div>
+        ) : (
+          <SourceCodeLink className={sourceLinkClass} />
+        )}
       </div>
     </header>
   );

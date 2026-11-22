@@ -27,7 +27,7 @@ const artifact: ArtifactDto = {
   organizationId: "local-org",
   accessType: "org_shared",
   filename: "123e4567-e89b-42d3-a456-426614174000.html",
-  name: null,
+  name: "Quarterly plan",
   mimeType: "text/html",
   sizeBytes: 42,
   createdAt: "2026-10-11T10:00:00.000Z",
@@ -59,7 +59,9 @@ describe("library page", () => {
     expect(api.listArtifacts).toHaveBeenCalledWith({ view: "org" });
     expect(api.getContext).toHaveBeenCalledOnce();
     expect(html).toContain("Organization artifacts");
-    expect(html).toContain(artifact.filename);
+    expect(html).toContain(">Quarterly plan</a>");
+    expect(html).toContain(artifact.id);
+    expect(html).not.toContain(artifact.filename);
     expect(html).toContain("Local Organization");
     expect(html).toContain("Refresh");
   });

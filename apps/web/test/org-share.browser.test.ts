@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const screenshotDir = process.env.FACTROVE_SCREENSHOT_DIR;
+const libraryId = "123e4567-e89b-42d3-a456-426614174011";
 
 describe("organization share control", () => {
   let browser: Browser;
@@ -126,6 +127,44 @@ describe("organization share control", () => {
       await page.evaluate(() => {
         (window as Window & { __releaseOrgShare?: () => void }).__releaseOrgShare?.();
       });
+    } finally {
+      await page.close();
+    }
+  }, 45_000);
+
+  it("shows the artifact name in the row and updates it after rename", async () => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await page.goto(`${pageOrigin}/org-share.html`);
+      const library = page.getByTestId("library-row");
+      const link = library.getByRole("link", { name: "Library notes" }).first();
+      await link.waitFor();
+      const linkBox = await link.boundingBox();
+      expect(linkBox?.width ?? 0).toBeGreaterThan(80);
+      const heading = page.getByRole("heading", { name: "Launch notes" });
+      const headingBox = await heading.boundingBox();
+      expect(headingBox?.width ?? 0).toBeGreaterThan(100);
+
+      await library.getByRole("button", { name: "Rename" }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await dialog.getByLabel("Name").fill("Renamed notes");
+      await dialog.getByRole("button", { name: "Save name" }).click();
+      await dialog.waitFor({ state: "hidden" });
+      const renamed = library.getByRole("link", { name: "Renamed notes" });
+      await renamed.waitFor();
+      expect((await renamed.boundingBox())?.width ?? 0).toBeGreaterThan(80);
+      expect(await library.locator("code").first().innerText()).toBe(libraryId);
+      expect(await library.getByRole("button", { name: "Copy ID" }).first().innerText()).toContain("Copy ID");
+
+      await page.getByRole("button", { name: "Rename" }).first().click();
+      const headerDialog = page.getByRole("dialog", { name: "Rename artifact" });
+      await headerDialog.getByLabel("Name").fill("Renamed header");
+      await headerDialog.getByRole("button", { name: "Save name" }).click();
+      await headerDialog.waitFor({ state: "hidden" });
+      const renamedHeading = page.getByRole("heading", { name: "Renamed header" });
+      await renamedHeading.waitFor();
+      expect((await renamedHeading.boundingBox())?.width ?? 0).toBeGreaterThan(100);
     } finally {
       await page.close();
     }
