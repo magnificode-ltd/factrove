@@ -96,7 +96,8 @@ describe("library requests", () => {
     expect(mineHtml).not.toContain(`${mineId}.html`);
     expect(mineHtml).toContain("Private");
     expect(mineHtml).toContain("Organization shared");
-    expect(mineHtml).toContain("Share with Local Organization");
+    expect(mineHtml).toContain('aria-label="More actions"');
+    expect(mineHtml).not.toContain("Share with Local Organization");
     expect(orgHtml).not.toContain("Share with Local Organization");
     expect(mineHtml).not.toContain("list only");
     expect(mineHtml).toContain("Private artifacts are visible only to you.");

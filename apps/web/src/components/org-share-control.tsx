@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { Users } from "lucide-react";
 import { toast } from "sonner";
@@ -13,22 +13,30 @@ import { cn } from "@/lib/utils";
 
 type Audience = NonNullable<ContextEnvelope["organization"]>;
 
+export type OrgShareHandle = {
+  open: (returnFocus?: HTMLButtonElement | null) => void;
+};
+
 export function OrgShareControl({
   artifactId,
   organizationId,
   organizationName,
   compact = false,
+  button = true,
   onShared,
   onAudienceChange,
-  client
+  client,
+  ref
 }: {
   artifactId: string;
   organizationId: string;
   organizationName: string;
   compact?: boolean;
+  button?: boolean;
   onShared: (artifact: ArtifactDto) => void;
   onAudienceChange?: (organization: ContextEnvelope["organization"]) => void;
   client?: FactroveClient;
+  ref?: Ref<OrgShareHandle>;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -41,6 +49,7 @@ export function OrgShareControl({
   const confirmRef = useRef<HTMLButtonElement>(null);
   const pendingRef = useRef(false);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const focusAccessOnCloseRef = useRef(false);
   const titleId = useId();
   const descriptionId = useId();
   const dialogId = `share-with-org-${artifactId}`;
@@ -102,8 +111,12 @@ export function OrgShareControl({
       }
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("focusin", onFocusIn);
+      if (focusAccessOnCloseRef.current) {
+        focusAccessOnCloseRef.current = false;
+        focusEnabled(document.getElementById(`artifact-access-${artifactId}`));
+      }
     };
-  }, [open]);
+  }, [open, artifactId]);
 
   function close() {
     returnFocusRef.current = triggerRef.current;
@@ -148,6 +161,7 @@ export function OrgShareControl({
     let succeeded = false;
     try {
       const envelope = await api.shareArtifactWithOrganization(artifactId, confirmed.id);
+      focusAccessOnCloseRef.current = true;
       onShared(envelope.artifact);
       toast.success(await shareResultMessage(api, envelope.artifact.organizationId, confirmed));
       succeeded = true;
@@ -172,7 +186,6 @@ export function OrgShareControl({
       const access = document.getElementById(`artifact-access-${artifactId}`);
       requestAnimationFrame(() => {
         if (succeeded) {
-          focusEnabled(access);
           return;
         }
         if (dialogRef.current?.isConnected) {
@@ -187,6 +200,21 @@ export function OrgShareControl({
       });
     }
   }
+
+  function openDialog(returnFocus?: HTMLButtonElement | null) {
+    if (returnFocus) {
+      triggerRef.current = returnFocus;
+    }
+    setError(null);
+    setAudience({ id: organizationId, name: organizationName });
+    setOpen(true);
+  }
+
+  useImperativeHandle(ref, () => ({
+    open(returnFocus) {
+      openDialog(returnFocus);
+    }
+  }));
 
   const label = `Share with ${audience.name}`;
   const dialog = open ? (
@@ -238,30 +266,28 @@ export function OrgShareControl({
 
   return (
     <>
-      <Button
-        ref={triggerRef}
-        type="button"
-        variant="outline"
-        className={cn(
-          "h-auto max-w-full min-w-0 shrink whitespace-normal bg-white px-3",
-          compact ? "min-h-8" : "min-h-10"
-        )}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={dialogId}
-        data-testid="org-share-trigger"
-        title={isolate(label)}
-        onClick={() => {
-          setError(null);
-          setAudience({ id: organizationId, name: organizationName });
-          setOpen(true);
-        }}
-      >
-        <Users aria-hidden="true" />
-        <span className="min-w-0 truncate">
-          Share with <bdi>{organizationName}</bdi>
-        </span>
-      </Button>
+      {button ? (
+        <Button
+          ref={triggerRef}
+          type="button"
+          variant="outline"
+          className={cn(
+            "h-auto max-w-full min-w-0 shrink whitespace-normal bg-white px-3",
+            compact ? "min-h-8" : "min-h-10"
+          )}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={dialogId}
+          data-testid="org-share-trigger"
+          title={isolate(label)}
+          onClick={() => openDialog()}
+        >
+          <Users aria-hidden="true" />
+          <span className="min-w-0 truncate">
+            Share with <bdi>{organizationName}</bdi>
+          </span>
+        </Button>
+      ) : null}
       {dialog && typeof document !== "undefined" ? createPortal(dialog, document.body) : null}
     </>
   );
