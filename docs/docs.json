@@ -31,8 +31,7 @@
             "pages": [
               "guides/cli",
               "guides/sharing-links",
-              "guides/troubleshooting",
-              "guides/releasing-the-cli"
+              "guides/troubleshooting"
             ]
           }
         ]

@@ -63,7 +63,9 @@ describe("ArtifactCard", () => {
     expect(html).toContain(`href="/artifacts/${artifact.id}"`);
     expect(html).toContain(`>${artifact.id}</a>`);
     expect(html).not.toContain(artifact.filename);
-    expect(html).toContain(artifact.id);
+    expect(html).toContain(`>${artifact.id.slice(0, 8)}</code>`);
+    expect(html).toContain(`aria-label="${artifact.id}"`);
+    expect(html).toContain("ft-artifact-meta");
     expect(html).toContain("Copy ID");
     expect(html).toContain("2 min ago");
     expect(html).toContain(`title="${formatUploadedAt(artifact.uploadedAt)}"`);
