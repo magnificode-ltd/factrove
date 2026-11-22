@@ -115,7 +115,7 @@ export default function ApiKeysPage() {
           <SignOutButton />
         </div>
       </AppBar>
-      <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+      <main className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
         <p className="text-sm font-semibold tracking-[0.16em] text-peri-d uppercase">Account</p>
         <h1 className="ft-title mt-2 text-4xl sm:text-5xl">API keys</h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
@@ -136,9 +136,9 @@ export default function ApiKeysPage() {
           </Card>
           <div className="grid gap-4">
             {secret ? (
-              <div role="status" className="ft-pop ft-key rounded-[14px] border border-line bg-lilac p-5">
+              <div role="status" className="rounded-[14px] border border-line bg-lilac p-5">
                 <p className="text-sm font-medium">Copy this key now. It will not be shown again.</p>
-                <code className="ft-reveal mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
+                <code className="mt-3 block font-mono text-sm break-all" data-testid="api-key-secret">
                   {secret}
                 </code>
                 <div className="mt-4">

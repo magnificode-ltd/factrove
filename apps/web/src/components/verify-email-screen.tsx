@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AuthScreen } from "@/components/auth-screen";
+import { AppBar } from "@/components/chrome";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/auth/client";
 
@@ -41,15 +42,18 @@ export function VerifyEmailScreen({ token }: { token: string | null }) {
 
   if (status === "success") {
     return (
-      <AuthScreen
-        title="Email confirmed"
-        lede="This address is verified. You can keep using Factrove."
-        footer={<a className={textLinkClass} href="/">Back to the library</a>}
-      >
-        <p role="status" data-testid="verify-email-success" className="text-sm leading-relaxed text-muted-foreground">
-          You can close this page. Sign-in was never waiting on this step.
-        </p>
-      </AuthScreen>
+      <div className="ft-canvas min-h-dvh">
+        <AppBar />
+        <main className="mx-auto flex w-full max-w-xl flex-col items-start gap-5 px-5 py-16 sm:px-8">
+          <h1 className="ft-title text-4xl text-balance">Email confirmed</h1>
+          <p role="status" data-testid="verify-email-success" className="text-lg leading-relaxed text-muted-foreground">
+            This address is verified. You can keep using Factrove.
+          </p>
+          <Button asChild className="h-11">
+            <a href="/">Back to the library</a>
+          </Button>
+        </main>
+      </div>
     );
   }
 

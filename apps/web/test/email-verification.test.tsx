@@ -1,6 +1,8 @@
 /**
  * @vitest-environment happy-dom
  */
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { act, type ReactNode } from "react";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -89,6 +91,14 @@ describe("verify email notice", () => {
 });
 
 describe("verify email page", () => {
+  it("keeps the confirmation page outside the browse notice", () => {
+    const appRoot = path.resolve(process.cwd(), "src/app");
+    expect(existsSync(path.join(appRoot, "verify-email/page.tsx"))).toBe(true);
+    expect(existsSync(path.join(appRoot, "(browse)/verify-email/page.tsx"))).toBe(false);
+    const layout = readFileSync(path.join(appRoot, "(browse)/layout.tsx"), "utf8");
+    expect(layout).toContain("VerifyEmailNotice");
+  });
+
   it("confirms a valid token and shows an expired link without one", async () => {
     verifyEmail.mockResolvedValueOnce({ error: null });
     const container = await render(<VerifyEmailScreen token="good-token" />);
@@ -96,7 +106,14 @@ describe("verify email page", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(verifyEmail).toHaveBeenCalledWith({ query: { token: "good-token" } });
-    expect(container.querySelector('[data-testid="verify-email-success"]')).not.toBeNull();
+    const success = container.querySelector('[data-testid="verify-email-success"]');
+    expect(success).not.toBeNull();
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.textContent).toContain("Email confirmed");
+    expect(container.textContent).toContain("This address is verified. You can keep using Factrove.");
+    expect(container.textContent).not.toContain("You can close this page");
+    expect(container.textContent).not.toContain("Verify your email");
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
 
     const expired = await render(<VerifyEmailScreen token={null} />);
     expect(expired.querySelector('[data-testid="verify-email-expired"]')).not.toBeNull();

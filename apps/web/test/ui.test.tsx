@@ -108,7 +108,7 @@ describe("not found", () => {
     expect(html).toContain("This page wandered off.");
     expect(html).toContain("That link does not lead to an artifact or a page in Factrove.");
     expect(html).toContain("Back to library");
-    expect(html.match(/class="wm /g)).toHaveLength(1);
+    expect(html.match(/class="wm"/g)).toHaveLength(1);
     expect(html).not.toContain('role="alert"');
     expect(html).not.toContain("wm-lg");
   });

@@ -52,7 +52,7 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
             ) : null}
           </div>
         </AppBar>
-        <main className="ft-enter mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+        <main className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
           <p className="text-sm font-semibold tracking-[0.16em] text-peri-d uppercase">Library</p>
           <h1 className="ft-title mt-2 text-4xl sm:text-5xl">{title}</h1>
           {signedIn ? <ModeNote /> : null}
@@ -110,7 +110,7 @@ function LibraryBody({ state, now }: { state: LibraryModel; now: number }) {
   }
 
   return (
-    <ul className="ft-list mt-10 grid list-none gap-3 p-0">
+    <ul className="mt-10 grid list-none gap-3 p-0">
       {state.items.map((artifact) => (
         <ArtifactCard
           key={artifact.id}

@@ -156,7 +156,7 @@ function ReadyArtifact({ state }: { state: Extract<ViewerModel, { status: "ready
 function ViewerNotice({ state }: { state: Exclude<ViewerModel, { status: "ready" | "signed-out" | "setup-required" }> }) {
   const calm = state.status === "missing";
   return (
-    <div className="ft-enter flex h-full items-center px-6 sm:px-10">
+    <div className="flex h-full items-center px-6 sm:px-10">
       <div className="max-w-xl">
         <p role={calm ? "status" : "alert"} className={calm ? "text-lg" : "text-lg text-destructive"}>
           {state.message}

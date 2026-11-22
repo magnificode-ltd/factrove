@@ -6,7 +6,7 @@ export default function NotFound() {
     <div className="ft-canvas min-h-dvh">
       <div className="ft-hero">
         <AppBar clear />
-        <main className="ft-enter mx-auto flex w-full max-w-3xl flex-col items-start gap-5 px-5 py-16 sm:px-8 sm:py-24">
+        <main className="mx-auto flex w-full max-w-3xl flex-col items-start gap-5 px-5 py-16 sm:px-8 sm:py-24">
           <p className="font-mono text-sm font-medium tracking-[0.18em] text-peri-d uppercase">404</p>
           <h1 className="ft-title text-5xl">This page wandered off.</h1>
           <div className="ft-term w-full max-w-md" aria-hidden="true">

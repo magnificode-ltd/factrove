@@ -66,7 +66,7 @@ describe("SignInGate", () => {
     expect(html).toContain('href="/"');
     expect(html).toContain("Source code");
     expect(html).toContain("fac<b>t</b>rove");
-    expect(html.match(/class="wm /g)).toHaveLength(1);
+    expect(html.match(/class="wm"/g)).toHaveLength(1);
     expect(html).toContain("focus-visible:outline-peri-d");
     expect(html).toContain('data-variant="default"');
     expect(html).toContain("h-12");
