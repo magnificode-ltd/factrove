@@ -21,7 +21,7 @@ apps/api/src/storage/** and storage tests. The operator supplies an existing AWS
 - Distinguish missing-object errors from storage outages/configuration failures. Deleting a missing object succeeds.
 - Keep private storage access through the backend; no public bucket policy, presigned upload flow, or direct browser S3 access.
 - Do not invent prefixes, extensions, or artifact IDs; object naming belongs to the API.
-- Document the real AWS bucket and region used for verification.
+- Verify put, get, and delete against the configured bucket. Do not record the bucket name, region, or IAM actions.
 
 ## Acceptance
 
@@ -39,10 +39,10 @@ No filesystem adapter, Azure/GCP stubs, multi-store registry, content rendering,
 
 ## Verification
 
-Real AWS on 11 Oct 2026, bucket `factrove-dev-uploads` in `eu-central-1`, using a role with `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket`:
+Real AWS on 11 Oct 2026, bucket `example-bucket` in `us-east-1`:
 
 - Put and get preserved the HTML fixture bytes and `text/html; charset=utf-8`.
 - Put and get preserved non-text bytes.
 - Delete succeeded, including a repeated delete of a missing key.
-- Get of a missing key is `BLOB_NOT_FOUND`. `s3:ListBucket` on the bucket is what makes S3 return `NoSuchKey` instead of `AccessDenied`.
+- Get of a missing key is `BLOB_NOT_FOUND`.
 - Bad credentials were `BLOB_STORE_UNAVAILABLE`. Those error messages did not include the bucket or secret.

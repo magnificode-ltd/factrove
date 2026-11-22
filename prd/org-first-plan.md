@@ -84,7 +84,7 @@ Then fill artifacts:
 - Where `organization_id` is null and the creator has exactly one membership, set it to that organization.
 - Where `organization_id` is null and the creator is `local-user`, set it to `local-org`. That does not give `local-user` a membership. It gives the column a value so the constraint below can land. `local-org` already exists from seed.
 - Do not change an `organization_id` that is already set.
-- If a creator has several memberships and a null artifact, the migration raises. Do not guess. That state should not exist on Cloud. Fix it by hand and run the migration again.
+- If a creator has several memberships and a null artifact, the migration raises. Do not guess.
 
 If no null `organization_id` remains, the same migration sets the column `NOT NULL` and the Prisma field becomes required. If any null remains, stop before the constraint and leave the follow-up migration for after those rows are assigned. Do not use a conditional `ALTER` that can differ between databases. New writes require the id in application code either way.
 

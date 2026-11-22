@@ -527,7 +527,7 @@ The signup wording lives in `apps/api/src/mail/verification-email.ts`. The share
 
 This install needs Node.js 24 (`>=24.7.0 <25`; 24.16.0 is pinned). A ready API answers `GET /api/v1/health`.
 
-Plus-addresses are valid. The stored address is lower case and the plus tag is kept, so `Magnificode+Factrove@Mail.Grokbot.com` is the same account as `magnificode+factrove@mail.grokbot.com`. Send the body as JSON. A form body would turn `+` into a space.
+Plus-addresses are valid. The stored address is lower case and the plus tag is kept, so `Ada+Factrove@Example.com` is the same account as `ada+factrove@example.com`. Send the body as JSON. A form body would turn `+` into a space.
 
 Copy `apps/api/.env.example` to `apps/api/.env` when that file is missing. Put one of these blocks in that file before you start the API. `BETTER_AUTH_SECRET` in the example is long enough for local use. Do not commit `BREVO_API_KEY` or `SMTP_PASSWORD`.
 
@@ -587,7 +587,7 @@ pnpm --filter @factrove/api start
 
 ```bash
 send_factrove_invite() {
-  invitee_email="${1:?Pass the invitee email. Example: magnificode+factrove@mail.grokbot.com}"
+  invitee_email="${1:?Pass the invitee email. Example: ada+factrove@example.com}"
   invitee_password="${2:-local-invite-check-1}"
   web_origin="${WEB_ORIGIN:-http://localhost:3000}"
   payload=$(node --input-type=module -e 'process.stdout.write(JSON.stringify({name:"Ada Lovelace",email:process.argv[1],password:process.argv[2]}))' -- "$invitee_email" "$invitee_password")
@@ -599,7 +599,7 @@ send_factrove_invite() {
   printf '\n'
 }
 
-send_factrove_invite 'magnificode+factrove@mail.grokbot.com'
+send_factrove_invite 'ada+factrove@example.com'
 ```
 
 A 200 response creates the account. The saved body is `/tmp/factrove-signup.json`. In the API log:
@@ -609,7 +609,7 @@ A 200 response creates the account. The saved body is `/tmp/factrove-signup.json
 - `EMAIL_TRANSPORT is log. Verification email was not sent.` means the log transport is selected for signup. A password reset uses `Password reset email was not sent.` The following lines are From, To, Subject, and the text. A link query, including a reset or verification token, is replaced with `?[redacted]`. `EMAIL_LOG_LINKS=full` keeps the query, and only when `NODE_ENV` is not `production`. In production that value stops the process.
 - `Verification email failed for <address>.` means the signup send failed. The account still exists. The log does not include `BREVO_API_KEY`, `SMTP_USER`, or `SMTP_PASSWORD`. Sign-up does not wait for the provider.
 
-A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'magnificode+factrove2@mail.grokbot.com'`.
+A second request for the same address is 422 and does not send another email. Pass a different plus tag to try again, for example `send_factrove_invite 'ada+factrove2@example.com'`.
 
 The signup form at `http://localhost:3000/signup` sends the same request. `pnpm dev` starts the web app and the API together. Use the curl above when you only need the API.
 

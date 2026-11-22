@@ -30,7 +30,7 @@ import {
 import { BLOB_STORE } from "../src/storage/blob-store.js";
 import { TEST_AUTH_SECRET } from "./auth-session.js";
 
-const PLUS_EMAIL = "magnificode+factrove@mail.grokbot.com";
+const PLUS_EMAIL = "ada+factrove@example.com";
 const FAKE_KEY = "xkeysib-test-key-not-real";
 const SMTP_PASSWORD = "smtp-secret-not-real";
 
@@ -841,7 +841,7 @@ describe("invite mailer", () => {
     try {
       for (let index = 0; index < 6; index += 1) {
         await mailer.sendInvite({
-          email: `user${index}+factrove@mail.grokbot.com`,
+          email: `user${index}+factrove@example.com`,
           name: "Ada Lovelace",
         });
       }
@@ -872,7 +872,7 @@ describe("invite mailer", () => {
       },
     }, apiConfig({}));
     mailer.concurrency = 1;
-    const skipped = "overflow+factrove@mail.grokbot.com";
+    const skipped = "overflow+factrove@example.com";
     const warn = Logger.prototype.warn;
     const lines: string[] = [];
     Logger.prototype.warn = function (message: unknown) {
@@ -882,7 +882,7 @@ describe("invite mailer", () => {
     try {
       for (let index = 0; index < INVITE_QUEUE_LIMIT + 1; index += 1) {
         await mailer.sendInvite({
-          email: `user${index}+factrove@mail.grokbot.com`,
+          email: `user${index}+factrove@example.com`,
           name: "Ada Lovelace",
         });
       }
@@ -929,8 +929,8 @@ describe("invite mailer", () => {
     }, apiConfig({}));
     mailer.concurrency = 1;
     mailer.shutdownTimeoutMs = 1_000;
-    await mailer.sendInvite({ email: "one+factrove@mail.grokbot.com", name: "Ada Lovelace" });
-    await mailer.sendInvite({ email: "two+factrove@mail.grokbot.com", name: "Ada Lovelace" });
+    await mailer.sendInvite({ email: "one+factrove@example.com", name: "Ada Lovelace" });
+    await mailer.sendInvite({ email: "two+factrove@example.com", name: "Ada Lovelace" });
     await flush();
     expect(releases).toHaveLength(1);
     const lines: string[] = [];
@@ -969,10 +969,10 @@ describe("invite mailer", () => {
     mailer.shutdownTimeoutMs = 40;
     try {
       await mailer.sendInvite({ email: PLUS_EMAIL, name: "Ada Lovelace" });
-      await mailer.sendInvite({ email: "other+factrove@mail.grokbot.com", name: "Ada Lovelace" });
+      await mailer.sendInvite({ email: "other+factrove@example.com", name: "Ada Lovelace" });
       const lines = await captureLogs(() => mailer.onApplicationShutdown());
       expect(lines).toEqual([
-        `Auth email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@mail.grokbot.com.`,
+        `Auth email shutdown left 2 send(s) unfinished: ${PLUS_EMAIL}, other+factrove@example.com.`,
       ]);
     } finally {
       release();
@@ -996,7 +996,7 @@ describe("invite mailer", () => {
     try {
       for (let index = 0; index < 6; index += 1) {
         await mailer.sendInvite({
-          email: `user${index}+factrove@mail.grokbot.com`,
+          email: `user${index}+factrove@example.com`,
           name: "Ada Lovelace",
         });
       }
@@ -1005,8 +1005,8 @@ describe("invite mailer", () => {
       const lines = await captureLogs(() => mailer.onApplicationShutdown());
       expect(lines).toHaveLength(1);
       expect(lines[0]).toContain("left 6 send(s) unfinished");
-      expect(lines[0]).toContain("user4+factrove@mail.grokbot.com");
-      expect(lines[0]).toContain("user5+factrove@mail.grokbot.com");
+      expect(lines[0]).toContain("user4+factrove@example.com");
+      expect(lines[0]).toContain("user5+factrove@example.com");
       expect(started).toBe(4);
     } finally {
       release();
@@ -1097,7 +1097,7 @@ describe("sign-up invite", () => {
       sendPasswordResetEmail: async () => {},
       sendVerificationEmail: async () => {},
     });
-    const created = await auth.handler(signUpRequest("Magnificode+Factrove@Mail.Grokbot.com"));
+    const created = await auth.handler(signUpRequest("Ada+Factrove@Example.com"));
     expect(created.status).toBe(200);
     expect(invited).toEqual([{ email: PLUS_EMAIL, name: "Invite Check" }]);
 
@@ -1130,7 +1130,7 @@ describe("sign-up invite", () => {
       sendVerificationEmail: async () => {},
     });
     const created = await Promise.race([
-      auth.handler(signUpRequest("pending+factrove@mail.grokbot.com")),
+      auth.handler(signUpRequest("pending+factrove@example.com")),
       new Promise<Response>((_resolve, reject) => {
         setTimeout(() => reject(new Error("sign-up waited on the invite")), 200);
       }),
