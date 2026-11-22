@@ -33,6 +33,10 @@ Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configur
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, and `package.json`. `pnpm-workspace.yaml` sets `engineStrict` so those `engines` ranges apply to the running Node. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.
 
+## UI
+
+For any UI or visual work in `apps/web`, or for docs styling, load and follow [`.agents/skills/frontend-design/SKILL.md`](.agents/skills/frontend-design/SKILL.md). Keep the existing brand (indigo and lilac, light theme) and Factrove's rule of no decorative motion in the signed-in app.
+
 ## Rules
 
 The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html` and commit only when the stored revision still matches the revision the replace read. Older rows keep `{artifactId}.html`. Do not store a bucket name, a filesystem path, or a client-supplied location.
