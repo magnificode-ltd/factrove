@@ -55,9 +55,12 @@ describe("organization share control", () => {
       await page.frameLocator("iframe").locator("p").waitFor({ timeout: 8_000 });
 
       const library = page.getByTestId("library-row");
-      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(1);
+      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
       expect(await library.getByText("Organization shared").count()).toBe(1);
-      expect(await page.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(2);
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      expect(await page.getByRole("menuitem", { name: "Share with Local Organization" }).count()).toBe(1);
+      await page.keyboard.press("Escape");
+      expect(await page.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(1);
 
       await saveShot(page, "org-share-owner-private.png");
       await trigger.click();
@@ -81,18 +84,22 @@ describe("organization share control", () => {
       await page.keyboard.press("Enter");
       await dialog.waitFor({ state: "hidden", timeout: 5_000 });
       expect(await header.getByTestId("artifact-access").innerText()).toBe("Organization shared");
-      expect(await header.getByTestId("artifact-access").evaluate((element) => element === document.activeElement)).toBe(true);
+      await page.waitForFunction(() => {
+        const access = document.querySelector("header [data-testid='artifact-access']");
+        return access !== null && access === document.activeElement;
+      }, undefined, { timeout: 5_000 });
       expect(await header.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
       await page.waitForFunction(
         () => document.body.textContent?.includes("Shared with \u2068Local Organization\u2069") ?? false
       );
       await saveShot(page, "org-share-after.png");
 
-      const rowTrigger = library.getByRole("button", { name: "Share with Local Organization" });
-      await rowTrigger.click();
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      await page.getByRole("menuitem", { name: "Share with Local Organization" }).click();
       await page.getByRole("dialog").getByRole("button", { name: "Share with Local Organization" }).click();
       await page.getByRole("dialog").waitFor({ state: "hidden" });
-      expect(await library.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(0);
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      expect(await page.getByRole("menuitem", { name: "Share with Local Organization" }).count()).toBe(0);
       expect(await library.getByTestId("artifact-access").first().innerText()).toBe("Organization shared");
     } finally {
       await page.close();
@@ -143,7 +150,8 @@ describe("organization share control", () => {
       await expectVisibleLabel(link, 80);
       await expectVisibleLabel(page.getByRole("heading", { name: "Launch notes" }), 100);
 
-      await library.getByRole("button", { name: "Rename" }).first().click();
+      await library.getByRole("button", { name: "More actions" }).first().click();
+      await page.getByRole("menuitem", { name: "Rename" }).click();
       const dialog = page.getByRole("dialog", { name: "Rename artifact" });
       await dialog.getByLabel("Name").fill("Renamed notes");
       await dialog.getByRole("button", { name: "Save name" }).click();
@@ -151,8 +159,9 @@ describe("organization share control", () => {
       const renamed = library.getByRole("link", { name: "Renamed notes" });
       await renamed.waitFor();
       await expectVisibleLabel(renamed, 80);
-      expect(await library.locator("code").first().innerText()).toBe(libraryId);
-      expect(await library.getByRole("button", { name: "Copy ID" }).first().innerText()).toContain("Copy ID");
+      expect(await library.locator("code").first().innerText()).toBe(libraryId.slice(0, 8));
+      expect(await library.locator("code").first().getAttribute("title")).toBe(libraryId);
+      expect(await library.getByRole("button", { name: "Copy ID" }).first().getAttribute("aria-label")).toBe("Copy ID");
 
       await page.getByRole("button", { name: "Rename" }).first().click();
       const headerDialog = page.getByRole("dialog", { name: "Rename artifact" });

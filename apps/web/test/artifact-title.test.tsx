@@ -59,10 +59,31 @@ function buttonNamed(name: string): HTMLButtonElement {
   return found;
 }
 
-async function saveName(next: string) {
+async function openRowMenu(scope: ParentNode) {
+  const trigger = [...scope.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "More actions");
+  if (!(trigger instanceof HTMLButtonElement)) {
+    throw new Error("row menu missing");
+  }
   await act(async () => {
-    buttonNamed("Rename").click();
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   });
+}
+
+async function chooseMenuItem(name: string) {
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find((candidate) => candidate.textContent?.includes(name));
+  if (!(item instanceof HTMLElement)) {
+    throw new Error(`menu item ${name} missing`);
+  }
+  await act(async () => {
+    item.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
+}
+
+async function fillName(next: string) {
   const input = document.querySelector("input");
   if (!(input instanceof HTMLInputElement)) {
     throw new Error("name input missing");
@@ -96,12 +117,19 @@ describe("artifact title", () => {
 
     const link = container.querySelector("a");
     expect(link?.textContent).toBe("Launch notes");
-    expect(container.querySelector("code")?.textContent).toBe(id);
-    await saveName("Calendar");
+    expect(link?.getAttribute("title")).toBe("Launch notes");
+    expect(container.querySelector("code")?.textContent).toBe(id.slice(0, 8));
+    expect(container.querySelector("code")?.getAttribute("title")).toBe(id);
+    await openRowMenu(container);
+    expect(document.body.textContent).toContain("Rename");
+    expect(document.body.textContent).toContain("Copy ID");
+    await chooseMenuItem("Rename");
+    await fillName("Calendar");
     expect(renameArtifact).toHaveBeenCalledWith(id, "Calendar");
     expect(container.querySelector("a")?.textContent).toBe("Calendar");
-    expect(container.querySelector("code")?.textContent).toBe(id);
-    expect(buttonNamed("Copy ID").textContent).toContain("Copy ID");
+    expect(container.querySelector("code")?.textContent).toBe(id.slice(0, 8));
+    const copyId = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "Copy ID");
+    expect(copyId).toBeTruthy();
   });
 
   it("shows a renamed viewer title immediately", async () => {
@@ -124,7 +152,10 @@ describe("artifact title", () => {
     });
 
     expect(container.querySelector("h1")?.textContent).toBe("Launch notes");
-    await saveName("Calendar");
+    await act(async () => {
+      buttonNamed("Rename").click();
+    });
+    await fillName("Calendar");
     expect(container.querySelector("h1")?.textContent).toBe("Calendar");
     expect(container.querySelector("code")?.textContent).toBe(id);
   });
