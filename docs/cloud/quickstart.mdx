@@ -72,7 +72,7 @@ The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 
 
 With no profile and no API URL, `factrove` and `ftrv` already call `https://api.factrove.app`. Saving it on the profile keeps that origin when no flag or `FACTROVE_API_URL` / `FACTROVE_ENDPOINT_URL` is set. Those environment variables outrank the profile, so unset them (or pass `--api-url https://api.factrove.app`) when you use Factrove Cloud. Precedence is in [CLI](/guides/cli).
 
-On a terminal, `factrove configure` with no `--api-url` prompts `Factrove API URL [https://api.factrove.app]:` when nothing else has set an origin. Press Enter to accept it, or pass `--api-url` as above. A `FACTROVE_API_URL` already set in the environment is the suggestion instead, so pass `--api-url https://api.factrove.app` when you want the hosted API stored.
+On a terminal, `factrove configure` with no `--api-url` prompts `Factrove API URL [https://api.factrove.app]:` when nothing else has set an origin. Press Enter to accept it, or pass `--api-url` as above. The bracket is the origin only. A username, password, path, or query on the suggested URL is not shown. A `FACTROVE_API_URL` already set in the environment is the suggestion instead, so pass `--api-url https://api.factrove.app` when you want the hosted API stored.
 
 <Info>
 If you also run a server of your own, give each one a profile. Configuring the `default` profile again replaces its API origin.

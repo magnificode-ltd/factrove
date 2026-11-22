@@ -25,6 +25,13 @@ export function configureHttpApp(app: INestApplication): void {
   const config = app.get<ApiConfig>(API_CONFIG);
   const auth = app.get(AuthService);
   app.setGlobalPrefix("api/v1");
+  // Replace any caller-supplied client IP before routing. Path classification
+  // uses the URL pathname, and this assignment does not depend on it, so an
+  // absolute-form target cannot keep a spoofed x-factrove-client-ip.
+  app.use((request: IncomingMessage, _response: ServerResponse, next: () => void) => {
+    assignClientIp(request, config.trustedProxies);
+    next();
+  });
   app.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
     if (applyCors(request, response, browserOrigins(config.webOrigin, config.publicBaseUrl))) {
       return;

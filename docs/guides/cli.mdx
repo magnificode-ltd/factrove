@@ -79,6 +79,8 @@ From this repository the same commands run as `pnpm factrove`. After `npm i -g f
 
 `configure` saves an API key and API URL for a profile. `--api-key` prompts when omitted, so the key stays out of shell history. `--api-url` sets the origin, and `--endpoint-url` is the same option. `--profile` selects the profile. The default profile name is `default`. The key belongs to the organization it was created for. There is no organization flag. Keys created before that ownership change stopped working and must be created again. Create the key in the web app at `/account/api-keys`, or with the [session recipe](/api-reference/overview#create-an-api-key-from-a-session). If configure cannot reach the API, see [Troubleshooting](/guides/troubleshooting).
 
+The success line prints the API origin only: the scheme, host, and port. It does not print a path, query, username, or password. On a terminal, the URL prompt shows that same origin in brackets, so a username, password, path, or query in the suggested URL is not printed. A URL with a username, a password, or a query parameter that carries a token, password, or API key is rejected and is not saved. The saved `api_url` can still include a path.
+
 ## Flags
 
 `--api-url <origin>` and `--endpoint-url <origin>` set the API origin for one command. They must be the same value when both are present. `configure` stores that origin as `api_url`.
@@ -105,7 +107,7 @@ The API origin is the first value that is set:
 
 The API key is `FACTROVE_API_KEY`, then `factrove_api_key` in the selected profile. An explicit `--profile` skips `FACTROVE_API_KEY` and uses that profile's key. The profile name is `--profile`, then `FACTROVE_PROFILE`, then `default`.
 
-`configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. Directories Factrove creates for those files are mode 0700. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override the paths. The command does not print the key.
+`configure` writes `~/.factrove/credentials` and `~/.factrove/config` with mode 0600. Directories Factrove creates for those files are mode 0700. `FACTROVE_CONFIG_DIR`, `FACTROVE_SHARED_CREDENTIALS_FILE`, and `FACTROVE_CONFIG_FILE` override the paths. The command does not print the key. Its success line and its terminal URL prompt print the API origin only, and it rejects a URL that includes a username, a password, or a credential query parameter.
 
 ## Dev env file
 

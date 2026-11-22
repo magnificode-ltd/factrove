@@ -218,6 +218,37 @@ describe("password reset email", () => {
     expect(fresh.status).toBe(200);
     expect(await sessionUser(auth, cookieHeader(fresh))).toBeTruthy();
   });
+
+  it("stores a hash of the reset token and still resets the password", async () => {
+    const db = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [] as Array<{ identifier: string; value: string }>,
+      apikey: [],
+    };
+    const sent: Array<{ resetUrl: string }> = [];
+    const auth = createAuth({
+      ...authInput(async (message) => {
+        sent.push(message);
+      }),
+      database: memoryAdapter(db),
+    });
+    expect((await auth.handler(signUpRequest("hashed+reset@example.com", "203.0.113.90"))).status).toBe(200);
+    expect((await auth.handler(requestReset("hashed+reset@example.com", "203.0.113.91"))).status).toBe(200);
+    await flush();
+    const token = new URL(sent[0]?.resetUrl ?? "").searchParams.get("token") ?? "";
+    expect(token.length).toBeGreaterThan(0);
+    expect(db.verification.length).toBeGreaterThan(0);
+    for (const row of db.verification) {
+      expect(row.identifier).not.toContain(token);
+      expect(row.identifier.startsWith("reset-password:")).toBe(false);
+      expect(row.value).not.toContain(token);
+    }
+    expect((await auth.handler(submitReset(token, "canyon-lantern-48", "203.0.113.92"))).status).toBe(200);
+    const signedIn = await auth.handler(signInRequest("hashed+reset@example.com", "canyon-lantern-48", "203.0.113.93"));
+    expect(signedIn.status).toBe(200);
+  });
 });
 
 function authInput(sendPasswordResetEmail: (message: { email: string; name: string; resetUrl: string }) => Promise<void>) {

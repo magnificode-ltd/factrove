@@ -134,6 +134,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261021193000_add_artifact_name",
       "20261115190000_backfill_organizations",
       "20261115200000_org_owned_api_keys",
+      "20261122120000_delete_plaintext_password_reset_tokens",
     ]);
   });
 

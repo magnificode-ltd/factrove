@@ -483,7 +483,7 @@ export const cliReferenceNotes: Record<string, string> = {
   configure: [
     "## Behavior",
     "",
-    "The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. `--api-key` prompts when it is omitted.",
+    "The command writes `~/.factrove/credentials` and `~/.factrove/config` mode 0600 and does not print the key. The success line prints the API origin only. On a terminal, the URL prompt shows that same origin, so a username, password, path, or query in the suggested URL is not printed. A URL with a username, a password, or a query parameter that carries a token, password, or API key is rejected and is not saved. `--api-key` prompts when it is omitted.",
     "",
     "The key belongs to the organization it was created for. A configured key is that organization. There is no organization flag. Keys created before organization ownership stopped working and must be created again.",
     "",
