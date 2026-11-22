@@ -165,17 +165,11 @@
 .ft-tab-pill {
   position: absolute;
   z-index: 0;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  width: calc(50% - 3px);
+  inset: 0;
+  border: 1px solid color-mix(in srgb, var(--ink) 8%, var(--line));
   border-radius: 6px;
   background: var(--card);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
-}
-
-.ft-tab-pill[data-tab="org"] {
-  left: calc(50% + 1px);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
 .ft-card {

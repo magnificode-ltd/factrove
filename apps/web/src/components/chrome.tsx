@@ -89,25 +89,37 @@ export function ModeNote() {
 
 export function LibraryTabs({ view }: { view: LibraryView | "none" }) {
   return (
-    <nav className="relative grid h-8 w-full grid-cols-2 rounded-lg bg-lilac p-0.5 sm:inline-grid sm:w-auto" aria-label="Artifact lists">
-      {view === "none" ? null : <span aria-hidden="true" data-tab={view} className="ft-tab-pill" />}
-      <a href="/" aria-current={view === "mine" ? "page" : undefined} className={tabClass(view === "mine")}>
-        My artifacts
-      </a>
-      <a
-        href="/?view=org"
-        aria-current={view === "org" ? "page" : undefined}
-        className={tabClass(view === "org")}
-      >
-        Organization artifacts
-      </a>
+    <nav className="inline-flex items-center gap-0.5 rounded-lg bg-lilac p-0.5" aria-label="Artifact lists">
+      <TabLink href="/" tab="mine" current={view === "mine"} label="My artifacts" />
+      <TabLink href="/?view=org" tab="org" current={view === "org"} label="Organization artifacts" />
     </nav>
+  );
+}
+
+function TabLink({
+  href,
+  tab,
+  current,
+  label
+}: {
+  href: string;
+  tab: "mine" | "org";
+  current: boolean;
+  label: string;
+}) {
+  return (
+    <a href={href} aria-current={current ? "page" : undefined} className={tabClass(current)}>
+      {current ? <span aria-hidden="true" data-tab={tab} className="ft-tab-pill" /> : null}
+      <span className="relative">{label}</span>
+    </a>
   );
 }
 
 function tabClass(current: boolean) {
   return cn(
-    "relative z-10 flex h-7 items-center justify-center rounded-md px-2.5 text-center text-sm font-medium whitespace-nowrap no-underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d",
-    current ? "text-ink" : "text-muted-foreground hover:text-ink"
+    "relative inline-flex h-8 shrink-0 items-center justify-center rounded-md px-3 text-sm font-medium whitespace-nowrap no-underline focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d",
+    current
+      ? "text-ink"
+      : "text-muted-foreground hover:bg-[color-mix(in_srgb,white_72%,transparent)] hover:text-ink"
   );
 }
