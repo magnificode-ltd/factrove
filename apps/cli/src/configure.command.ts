@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { CliConfigService } from "./cli-config.service.js";
 import { CliError } from "./cli-error.js";
 import { saveProfile } from "./credentials.js";
+import { safeApiOrigin } from "./parse-args.js";
 import { promptSecret, readAllStdin } from "./secret-input.js";
 import { Inject, Injectable } from "@nestjs/common";
 
@@ -95,7 +96,7 @@ async function readAnswers(
     };
   }
   const apiKey = apiKeyFlag ?? (await promptSecret("Factrove API key: ", "Configure cancelled.")).trim();
-  const typedUrl = apiUrlFlag ?? (await promptLine(`Factrove API URL [${suggestedApiUrl}]: `));
+  const typedUrl = apiUrlFlag ?? (await promptLine(`Factrove API URL [${safeApiOrigin(suggestedApiUrl)}]: `));
   return { apiKey, apiUrl: typedUrl };
 }
 

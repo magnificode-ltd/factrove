@@ -1087,6 +1087,45 @@ describe("factrove configure", () => {
     expect(still).not.toContain("cfg-pass-s3cret");
   });
 
+  it("shows only the origin in the terminal URL prompt", async () => {
+    const directory = await makeTemp();
+    const key = "ftrv_configure_prompt_key";
+    const secretUrl = "http://cfg-user:cfg-pass-s3cret@127.0.0.1:3999/api/v1?token=query-token-s3cret&safe=1";
+    const env = {
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+      FACTROVE_API_URL: secretUrl,
+    };
+    const answered = await runConfigurePty(
+      ["configure", "--api-key", key],
+      "http://127.0.0.1:4002\n",
+      env,
+    );
+    expect(answered.code).toBe(0);
+    expect(answered.text).toContain("Factrove API URL [http://127.0.0.1:3999]:");
+    expect(answered.text).toContain('Configured profile "default" for http://127.0.0.1:4002.');
+    expectPromptHidesUrlSecrets(answered.text);
+    const config = await readFile(join(directory, "config"), "utf8");
+    expect(config).toContain("api_url = http://127.0.0.1:4002");
+    expect(config).not.toContain("cfg-pass-s3cret");
+    expect(config).not.toContain("query-token-s3cret");
+
+    await writeFile(
+      join(directory, "config"),
+      "[stored]\napi_url = http://cfg-user:cfg-pass-s3cret@127.0.0.1:4010/secret?token=query-token-s3cret\n",
+    );
+    const fromProfile = await runConfigurePty(["configure", "--profile", "stored", "--api-key", key], "\n", {
+      FACTROVE_CONFIG_DIR: directory,
+      FACTROVE_API_KEY: "",
+    });
+    expect(fromProfile.code).toBe(1);
+    expect(fromProfile.text).toContain("Factrove API URL [http://127.0.0.1:4010]:");
+    expect(fromProfile.text).toContain("API URL must not include a username or password.");
+    expectPromptHidesUrlSecrets(fromProfile.text);
+    const unchanged = await readFile(join(directory, "config"), "utf8");
+    expect(unchanged).toContain("api_url = http://cfg-user:cfg-pass-s3cret@127.0.0.1:4010/secret?token=query-token-s3cret");
+  });
+
   it("fails a command that has no API key", async () => {
     const result = await runCli(["upload", fixturePath], { env: { FACTROVE_API_KEY: "" } });
     expect(result.code).toBe(1);
@@ -1200,6 +1239,84 @@ type CliResult = {
   stdout: string;
   stderr: string;
 };
+
+function expectPromptHidesUrlSecrets(text: string): void {
+  expect(text).not.toContain("cfg-user");
+  expect(text).not.toContain("cfg-pass-s3cret");
+  expect(text).not.toContain("query-token-s3cret");
+  expect(text).not.toContain("token=");
+  expect(text).not.toContain("/api/v1");
+  expect(text).not.toContain("/secret");
+  expect(text).not.toContain("safe=1");
+}
+
+function runConfigurePty(
+  args: string[],
+  answer: string,
+  envOverrides?: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; text: string }> {
+  const script = `
+import os, pty, select, time, json, sys
+node, cli = sys.argv[1], sys.argv[2]
+rest = sys.argv[3:]
+answer = os.environ["FACTROVE_CONFIGURE_PTY_ANSWER"].encode()
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(node, [node, cli, *rest])
+buf = b""
+answered = False
+code = None
+deadline = time.time() + 8
+while time.time() < deadline and code is None:
+    ready, _, _ = select.select([fd], [], [], 0.2)
+    if ready:
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            chunk = b""
+        if chunk:
+            buf += chunk
+            if (not answered) and b"Factrove API URL [" in buf and b"]: " in buf:
+                answered = True
+                os.write(fd, answer)
+    waited, status = os.waitpid(pid, os.WNOHANG)
+    if waited:
+        code = os.waitstatus_to_exitcode(status)
+text = buf.decode("utf-8", "replace").replace("\\r", "")
+sys.stdout.write(json.dumps({"code": code, "text": text}))
+`;
+  return new Promise((resolve, reject) => {
+    const child = spawn("python3", ["-c", script, process.execPath, cliPath, ...args], {
+      env: { ...cliEnv(envOverrides), FACTROVE_CONFIGURE_PTY_ANSWER: answer },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`PTY command timed out: ${args.join(" ")}`));
+    }, 20_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`PTY helper exited ${code}: ${stderr}`));
+        return;
+      }
+      resolve(JSON.parse(stdout) as { code: number | null; text: string });
+    });
+  });
+}
 
 function runCliPty(
   args: string[],
