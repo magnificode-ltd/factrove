@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { FactroveApiError, type FactroveClient } from "@factrove/api-client";
@@ -14,22 +14,31 @@ import { cn } from "@/lib/utils";
 
 type DialogMode = "rename" | "delete" | null;
 
+export type ArtifactActionHandle = {
+  openRename: (returnFocus?: HTMLButtonElement | null) => void;
+  openDelete: (returnFocus?: HTMLButtonElement | null) => void;
+};
+
 export function ArtifactActions({
   artifactId,
   name,
   compact = false,
+  buttons = true,
   returnTo,
   client,
   onRenamed,
-  onDeleted
+  onDeleted,
+  ref
 }: {
   artifactId: string;
   name: string | null;
   compact?: boolean;
+  buttons?: boolean;
   returnTo?: string;
   client?: FactroveClient;
   onRenamed: (artifact: ArtifactDto) => void;
   onDeleted: () => void;
+  ref?: Ref<ArtifactActionHandle>;
 }) {
   const [mode, setMode] = useState<DialogMode>(null);
   const [draft, setDraft] = useState(name ?? "");
@@ -105,12 +114,21 @@ export function ArtifactActions({
     setError(null);
   }
 
-  function open(next: Exclude<DialogMode, null>, trigger: HTMLButtonElement) {
+  function open(next: Exclude<DialogMode, null>, trigger: HTMLButtonElement | null) {
     triggerRef.current = trigger;
     setDraft(name ?? "");
     setError(null);
     setMode(next);
   }
+
+  useImperativeHandle(ref, () => ({
+    openRename(returnFocus) {
+      open("rename", returnFocus ?? null);
+    },
+    openDelete(returnFocus) {
+      open("delete", returnFocus ?? null);
+    }
+  }));
 
   function trapTab(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Tab") {
@@ -282,30 +300,34 @@ export function ArtifactActions({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        className={buttonClass}
-        aria-haspopup="dialog"
-        aria-expanded={mode === "rename"}
-        aria-controls={dialogId}
-        data-testid="rename-artifact"
-        onClick={(event) => open("rename", event.currentTarget)}
-      >
-        Rename
-      </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        className={buttonClass}
-        aria-haspopup="dialog"
-        aria-expanded={mode === "delete"}
-        aria-controls={dialogId}
-        data-testid="delete-artifact"
-        onClick={(event) => open("delete", event.currentTarget)}
-      >
-        Delete
-      </Button>
+      {buttons ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            className={buttonClass}
+            aria-haspopup="dialog"
+            aria-expanded={mode === "rename"}
+            aria-controls={dialogId}
+            data-testid="rename-artifact"
+            onClick={(event) => open("rename", event.currentTarget)}
+          >
+            Rename
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className={buttonClass}
+            aria-haspopup="dialog"
+            aria-expanded={mode === "delete"}
+            aria-controls={dialogId}
+            data-testid="delete-artifact"
+            onClick={(event) => open("delete", event.currentTarget)}
+          >
+            Delete
+          </Button>
+        </>
+      ) : null}
       {dialog && typeof document !== "undefined" ? createPortal(dialog, document.body) : null}
     </>
   );

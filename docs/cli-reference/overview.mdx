@@ -17,8 +17,6 @@ ftrv --help
 With no profile and no API URL, the CLI calls `https://api.factrove.app`. That origin is [Factrove Cloud](/cloud/quickstart). A server you run needs `--api-url`, `FACTROVE_API_URL`, or `factrove configure` pointed at your API origin. [Self-host](/self-host/quickstart) saves that profile. Commands and flags are the same on both. The API origin is what changes.
 </Info>
 
-[Release the CLI](/guides/releasing-the-cli) is the manual publish. It does not run on push.
-
 From a checkout, contributors use `pnpm factrove`. Install dependencies and build the CLI plus the workspace packages it imports. The launcher refuses to start until `apps/cli/dist/main.js` exists:
 
 ```bash
