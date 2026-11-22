@@ -17,8 +17,8 @@ import { TEST_AUTH_SECRET } from "./auth-session.js";
 
 const WEB_ORIGIN = "http://localhost:3000";
 const API_ORIGIN = "http://localhost:3001";
-const PLUS_EMAIL = "magnificode+reset@mail.grokbot.com";
-const STORED_EMAIL = "magnificode+reset@mail.grokbot.com";
+const PLUS_EMAIL = "ada+reset@example.com";
+const STORED_EMAIL = "ada+reset@example.com";
 
 describe("password reset email", () => {
   it("uses the welcome layout, the web origin, and a one-hour expiry", () => {
@@ -117,8 +117,8 @@ describe("password reset email", () => {
     const created = await auth.handler(signUpRequest(PLUS_EMAIL, "203.0.113.10"));
     expect(created.status).toBe(200);
 
-    const known = await auth.handler(requestReset("Magnificode+Reset@Mail.Grokbot.com", "203.0.113.11"));
-    const unknown = await auth.handler(requestReset("missing+reset@mail.grokbot.com", "203.0.113.12"));
+    const known = await auth.handler(requestReset("Ada+Reset@Example.com", "203.0.113.11"));
+    const unknown = await auth.handler(requestReset("missing+reset@example.com", "203.0.113.12"));
     await flush();
 
     expect(known.status).toBe(200);
@@ -137,10 +137,10 @@ describe("password reset email", () => {
       release = resolve;
     });
     const auth = createAuth(authInput(() => gate));
-    const created = await auth.handler(signUpRequest("pending+reset@mail.grokbot.com", "203.0.113.20"));
+    const created = await auth.handler(signUpRequest("pending+reset@example.com", "203.0.113.20"));
     expect(created.status).toBe(200);
     const response = await Promise.race([
-      auth.handler(requestReset("pending+reset@mail.grokbot.com", "203.0.113.21")),
+      auth.handler(requestReset("pending+reset@example.com", "203.0.113.21")),
       new Promise<Response>((_resolve, reject) => {
         setTimeout(() => reject(new Error("password reset waited on the email")), 200);
       }),
@@ -157,8 +157,8 @@ describe("password reset email", () => {
     const auth = createAuth(authInput(async (message) => {
       sent.push(message);
     }));
-    expect((await auth.handler(signUpRequest("common+reset@mail.grokbot.com", "203.0.113.30"))).status).toBe(200);
-    expect((await auth.handler(requestReset("common+reset@mail.grokbot.com", "203.0.113.31"))).status).toBe(200);
+    expect((await auth.handler(signUpRequest("common+reset@example.com", "203.0.113.30"))).status).toBe(200);
+    expect((await auth.handler(requestReset("common+reset@example.com", "203.0.113.31"))).status).toBe(200);
     await flush();
     const token = new URL(sent[0]?.resetUrl ?? "").searchParams.get("token");
     expect(token).toBeTruthy();
@@ -177,9 +177,9 @@ describe("password reset email", () => {
     expect(again.status).toBe(400);
     expect((await again.json()).message).toMatch(/token/i);
 
-    const signedIn = await auth.handler(signInRequest("common+reset@mail.grokbot.com", "canyon-lantern-48", "203.0.113.36"));
+    const signedIn = await auth.handler(signInRequest("common+reset@example.com", "canyon-lantern-48", "203.0.113.36"));
     expect(signedIn.status).toBe(200);
-    const oldPassword = await auth.handler(signInRequest("common+reset@mail.grokbot.com", "local-invite-check-1", "203.0.113.37"));
+    const oldPassword = await auth.handler(signInRequest("common+reset@example.com", "local-invite-check-1", "203.0.113.37"));
     expect(oldPassword.ok).toBe(false);
   });
 
@@ -188,7 +188,7 @@ describe("password reset email", () => {
     const ip = "203.0.113.40";
     const statuses: number[] = [];
     for (let index = 0; index < PASSWORD_RESET_REQUEST_MAX + 1; index += 1) {
-      const response = await auth.handler(requestReset(`nobody-${index}+reset@mail.grokbot.com`, ip));
+      const response = await auth.handler(requestReset(`nobody-${index}+reset@example.com`, ip));
       statuses.push(response.status);
     }
     expect(statuses.slice(0, PASSWORD_RESET_REQUEST_MAX).every((status) => status === 200)).toBe(true);
@@ -200,21 +200,21 @@ describe("password reset email", () => {
     const auth = createAuth(authInput(async (message) => {
       sent.push(message);
     }));
-    const created = await auth.handler(signUpRequest("sessions+reset@mail.grokbot.com", "203.0.113.80"));
+    const created = await auth.handler(signUpRequest("sessions+reset@example.com", "203.0.113.80"));
     const signupCookie = cookieHeader(created);
-    const again = await auth.handler(signInRequest("sessions+reset@mail.grokbot.com", "local-invite-check-1", "203.0.113.81"));
+    const again = await auth.handler(signInRequest("sessions+reset@example.com", "local-invite-check-1", "203.0.113.81"));
     const signInCookie = cookieHeader(again);
     expect(await sessionUser(auth, signupCookie)).toBeTruthy();
     expect(await sessionUser(auth, signInCookie)).toBeTruthy();
 
-    expect((await auth.handler(requestReset("sessions+reset@mail.grokbot.com", "203.0.113.82"))).status).toBe(200);
+    expect((await auth.handler(requestReset("sessions+reset@example.com", "203.0.113.82"))).status).toBe(200);
     await flush();
     const token = new URL(sent[0]?.resetUrl ?? "").searchParams.get("token") ?? "";
     expect((await auth.handler(submitReset(token, "canyon-lantern-48", "203.0.113.83"))).status).toBe(200);
 
     expect(await sessionUser(auth, signupCookie)).toBeNull();
     expect(await sessionUser(auth, signInCookie)).toBeNull();
-    const fresh = await auth.handler(signInRequest("sessions+reset@mail.grokbot.com", "canyon-lantern-48", "203.0.113.84"));
+    const fresh = await auth.handler(signInRequest("sessions+reset@example.com", "canyon-lantern-48", "203.0.113.84"));
     expect(fresh.status).toBe(200);
     expect(await sessionUser(auth, cookieHeader(fresh))).toBeTruthy();
   });

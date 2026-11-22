@@ -148,7 +148,7 @@ describe("local runtime", () => {
         DATABASE_URL: "postgresql://factrove:factrove@127.0.0.1:5432/factrove",
         BASE_URL: "http://127.0.0.1:3001",
         AWS_PROFILE: "dev",
-        S3_REGION: "eu-central-1",
+        S3_REGION: "us-west-2",
         S3_ENDPOINT: "http://127.0.0.1:3900",
         NEXT_PUBLIC_API_URL: "",
       },
@@ -190,7 +190,7 @@ describe("local runtime", () => {
     assert.match(legacyRootEnvWarning(legacyFile), /apps\/cli\/\.env/);
     await rm(legacyDir, { recursive: true, force: true });
     assert.deepEqual(missingApiSettings({}, {}), ["DATABASE_URL", "S3_BUCKET", "S3_REGION"]);
-    assert.deepEqual(missingApiSettings({ DATABASE_URL: "postgresql://local" }, { S3_BUCKET: "bucket", S3_REGION: "eu-central-1" }), []);
+    assert.deepEqual(missingApiSettings({ DATABASE_URL: "postgresql://local" }, { S3_BUCKET: "bucket", S3_REGION: "us-west-2" }), []);
   });
 
   it("stops infrastructure without removing the volume", () => {
@@ -294,7 +294,7 @@ describe("local runtime", () => {
     const parent = {
       S3_ENDPOINT: "",
       S3_BUCKET: "real-bucket",
-      S3_REGION: "eu-central-1",
+      S3_REGION: "us-west-2",
       AWS_ACCESS_KEY_ID: "AKIAREALKEY",
       AWS_SECRET_ACCESS_KEY: "real-secret-value",
       AWS_SESSION_TOKEN: "real-session",
@@ -417,6 +417,33 @@ describe("local runtime", () => {
     assert.match(apiExample, /^# DOCS_BASE_URL=https:\/\/factrove\.mintlify\.app$/m);
     assert.equal(apiExample.includes("support@factrove.app"), false);
     assert.equal(apiExample.includes("https://factrove.app"), false);
+  });
+
+  it("ships the shadcn/ui MIT notice with the web image and keeps the skill license", () => {
+    const uiLicense = readFileSync(join(repoRoot, "apps/web/src/components/ui/LICENSE"), "utf8");
+    const thirdParty = readFileSync(join(repoRoot, "THIRD_PARTY_NOTICES.md"), "utf8");
+    assert.match(uiLicense, /Copyright \(c\) 2023 shadcn/);
+    assert.match(uiLicense, /Permission is hereby granted/);
+    assert.match(thirdParty, /Copyright \(c\) 2023 shadcn/);
+    assert.match(thirdParty, /Permission is hereby granted/);
+    assert.match(readFileSync(join(repoRoot, "README.md"), "utf8"), /THIRD_PARTY_NOTICES\.md/);
+    assert.match(readFileSync(join(repoRoot, "NOTICE"), "utf8"), /THIRD_PARTY_NOTICES\.md/);
+    const dockerfile = readFileSync(join(repoRoot, "Dockerfile"), "utf8");
+    assert.match(dockerfile, /\/src\/apps\/web\/src\/components\/ui\/LICENSE/);
+    assert.match(dockerfile, /\/src\/THIRD_PARTY_NOTICES\.md/);
+    const ignore = readFileSync(join(repoRoot, ".dockerignore"), "utf8");
+    assert.equal(dockerignoreExcludes(ignore, "docs/self-host/deploy.mdx"), true);
+    assert.equal(dockerignoreExcludes(ignore, "prd/org-first-plan.md"), true);
+    assert.equal(dockerignoreExcludes(ignore, "apps/web/test/ui.test.tsx"), true);
+    assert.equal(dockerignoreExcludes(ignore, "THIRD_PARTY_NOTICES.md"), false);
+    assert.equal(dockerignoreExcludes(ignore, "apps/web/src/components/ui/LICENSE"), false);
+    assert.equal(dockerignoreExcludes(ignore, ".agents/skills/frontend-design/LICENSE.txt"), false);
+    for (const dir of [".agents/skills/frontend-design", ".claude/skills/frontend-design"]) {
+      const license = readFileSync(join(repoRoot, dir, "LICENSE.txt"), "utf8");
+      assert.match(license, /Apache License/);
+      assert.match(license, /Version 2\.0, January 2004/);
+      assert.match(readFileSync(join(repoRoot, dir, "SKILL.md"), "utf8"), /license: Complete terms in LICENSE\.txt/);
+    }
   });
 
   it("copies only NEXT_PUBLIC_API_URL from the application env file", async () => {
@@ -634,6 +661,65 @@ function killProcess(pid) {
       // The process has already exited.
     }
   }
+}
+
+function dockerignoreExcludes(text, filePath) {
+  const normalized = filePath.replace(/^\/+/, "");
+  let excluded = false;
+  for (const rule of dockerignoreRules(text)) {
+    const negate = rule.startsWith("!");
+    const pattern = negate ? rule.slice(1) : rule;
+    if (dockerignorePatternMatches(pattern, normalized)) {
+      excluded = !negate;
+    }
+  }
+  return excluded;
+}
+
+function dockerignoreRules(text) {
+  return text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+}
+
+function dockerignorePatternMatches(pattern, filePath) {
+  const body = pattern.replace(/^\//, "").replace(/\/$/, "");
+  const regex = dockerignoreGlobToRegExp(body);
+  if (regex.test(filePath)) {
+    return true;
+  }
+  const parts = filePath.split("/");
+  for (let index = 1; index < parts.length; index += 1) {
+    if (regex.test(parts.slice(0, index).join("/"))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function dockerignoreGlobToRegExp(pattern) {
+  let source = "^";
+  for (let index = 0; index < pattern.length; index += 1) {
+    if (pattern.startsWith("**/", index)) {
+      source += "(?:.*/)?";
+      index += 2;
+      continue;
+    }
+    if (pattern.startsWith("**", index)) {
+      source += ".*";
+      index += 1;
+      continue;
+    }
+    const char = pattern[index];
+    if (char === "*") {
+      source += "[^/]*";
+    } else if (char === "?") {
+      source += "[^/]";
+    } else if ("\\^$+?.()|[]{}".includes(char)) {
+      source += `\\${char}`;
+    } else {
+      source += char;
+    }
+  }
+  return new RegExp(`${source}$`);
 }
 
 function withTimeout(promise, ms, label) {

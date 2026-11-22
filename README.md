@@ -344,7 +344,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 
 ## License
 
-Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository.
+Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository. The web UI components derived from shadcn/ui are MIT. That copyright and permission notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [apps/web/src/components/ui/LICENSE](apps/web/src/components/ui/LICENSE).
 
 ## Contributing
 
