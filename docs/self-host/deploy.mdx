@@ -71,12 +71,9 @@ Each image has five tags:
 
 A manual run from another branch publishes that commit's SHA tags, with and without the `sha-` prefix, and leaves `latest` where it is. Each image carries `org.opencontainers.image.source`, `org.opencontainers.image.revision` (the full commit SHA), and `org.opencontainers.image.licenses=AGPL-3.0-or-later`.
 
-The packages stay private while this repository is private. That is the GitHub Container Registry default. When the repository is open-sourced, set `factrove-api` and `factrove-web` to public in each package's settings. Package visibility is separate from repository visibility. Making a package public is permanent.
-
-Pull a private package with a GitHub account that can read it and a token that has the `read:packages` scope:
+Pull an image:
 
 ```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 docker pull ghcr.io/magnificode-ltd/factrove-api:latest
 docker pull ghcr.io/magnificode-ltd/factrove-web:latest
 ```

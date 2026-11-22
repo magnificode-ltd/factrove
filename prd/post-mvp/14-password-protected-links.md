@@ -4,7 +4,7 @@
 
 Let the owner put an optional password on a public share link. A visitor with the link sees a password page and gets no artifact content until the password checks out. This builds on [task 15](15-shareable-links.md) and keeps all of its guarantees: links are `{PUBLIC_BASE_URL}/share/{id}/{token}`, tokens are AES-256-GCM ciphertext bound to the artifact id and looked up by SHA-256 hash, rotating the key revokes links, public loads omit credentials and are rate limited, and every inactive link is the same 404.
 
-Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: implemented in this change.**
+Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: implemented.**
 
 ## Owns
 

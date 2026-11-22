@@ -8,7 +8,7 @@ Read [the MVP end state](../../MVP_END_STATE.md), [the project README](../../../
 
 ## Product decision
 
-The owner chose a fully local stack for now. A local S3-compatible stand-in is allowed. Real AWS S3 remains a configuration option: leave `S3_ENDPOINT` unset and the API keeps calling AWS in `S3_REGION`. This supersedes the task 07 exclusion of a local S3 emulator.
+The local stack is fully local. A local S3-compatible stand-in is allowed. Real AWS S3 remains a configuration option: leave `S3_ENDPOINT` unset and the API keeps calling AWS in `S3_REGION`. This supersedes the task 07 exclusion of a local S3 emulator.
 
 Garage `v2.3.0` is the stand-in. Official MinIO community images are no longer published. Garage is a maintained multi-arch image, and `--default-bucket` creates the local bucket when the service starts.
 
