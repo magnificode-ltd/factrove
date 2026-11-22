@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DocsLink } from "@/components/docs-link";
 import { SourceCodeLink } from "@/components/source-code-link";
 import { Wordmark } from "@/components/wordmark";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ export function AppBar({ children, clear = false }: { children?: ReactNode; clea
       <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3 sm:px-8">
         <Wordmark />
         {children}
-        <SourceCodeLink className={cn(sourceLinkClass, "ml-auto")} />
+        <HeaderLinks className={children ? undefined : "ml-auto"} />
       </div>
     </header>
   );
@@ -58,9 +59,18 @@ export function ViewerBar({
         </h1>
         {meta}
         {tools}
-        <SourceCodeLink className={sourceLinkClass} />
+        <HeaderLinks />
       </div>
     </header>
+  );
+}
+
+function HeaderLinks({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex shrink-0 items-center gap-4", className)}>
+      <DocsLink className={sourceLinkClass} />
+      <SourceCodeLink className={sourceLinkClass} />
+    </div>
   );
 }
 
