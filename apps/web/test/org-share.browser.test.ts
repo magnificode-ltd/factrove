@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const screenshotDir = process.env.FACTROVE_SCREENSHOT_DIR;
@@ -140,11 +140,8 @@ describe("organization share control", () => {
       const library = page.getByTestId("library-row");
       const link = library.getByRole("link", { name: "Library notes" }).first();
       await link.waitFor();
-      const linkBox = await link.boundingBox();
-      expect(linkBox?.width ?? 0).toBeGreaterThan(80);
-      const heading = page.getByRole("heading", { name: "Launch notes" });
-      const headingBox = await heading.boundingBox();
-      expect(headingBox?.width ?? 0).toBeGreaterThan(100);
+      await expectVisibleLabel(link, 80);
+      await expectVisibleLabel(page.getByRole("heading", { name: "Launch notes" }), 100);
 
       await library.getByRole("button", { name: "Rename" }).first().click();
       const dialog = page.getByRole("dialog", { name: "Rename artifact" });
@@ -153,7 +150,7 @@ describe("organization share control", () => {
       await dialog.waitFor({ state: "hidden" });
       const renamed = library.getByRole("link", { name: "Renamed notes" });
       await renamed.waitFor();
-      expect((await renamed.boundingBox())?.width ?? 0).toBeGreaterThan(80);
+      await expectVisibleLabel(renamed, 80);
       expect(await library.locator("code").first().innerText()).toBe(libraryId);
       expect(await library.getByRole("button", { name: "Copy ID" }).first().innerText()).toContain("Copy ID");
 
@@ -164,7 +161,7 @@ describe("organization share control", () => {
       await headerDialog.waitFor({ state: "hidden" });
       const renamedHeading = page.getByRole("heading", { name: "Renamed header" });
       await renamedHeading.waitFor();
-      expect((await renamedHeading.boundingBox())?.width ?? 0).toBeGreaterThan(100);
+      await expectVisibleLabel(renamedHeading, 100);
     } finally {
       await page.close();
     }
@@ -202,6 +199,12 @@ describe("organization share control", () => {
     }
   }, 45_000);
 });
+
+async function expectVisibleLabel(locator: Locator, minWidth: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan(minWidth);
+  expect(await locator.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+}
 
 async function focusedText(page: Page): Promise<string> {
   return page.evaluate(() => document.activeElement?.textContent ?? "");

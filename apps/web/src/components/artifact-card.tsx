@@ -31,9 +31,9 @@ export function ArtifactCard({
 
   return (
     <li className="ft-card relative">
-      <div className="relative grid gap-3 px-5 py-4 sm:grid-cols-[minmax(12rem,1fr)_minmax(0,2fr)] sm:items-center">
+      <div className="relative flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
         <a
-          className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+          className="min-w-40 flex-1 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
           title={label}
         >
