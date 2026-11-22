@@ -4,12 +4,18 @@ export const DEFAULT_SOURCE_CODE_URL = "https://github.com/magnificode-ltd/factr
 
 export const DEFAULT_DOCS_BASE_URL = "https://factrove.mintlify.app";
 
+export const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
+
+const POSTHOG_KEY_RE = /^phc_[A-Za-z0-9_-]{8,200}$/;
+
 type RuntimeEnv = {
   BROWSER_API_URL?: string;
   INTERNAL_API_URL?: string;
   NEXT_PUBLIC_API_URL?: string;
   SOURCE_CODE_URL?: string;
   DOCS_BASE_URL?: string;
+  POSTHOG_KEY?: string;
+  POSTHOG_HOST?: string;
 };
 
 export function readPublicApiOrigin(value: string | undefined): string | undefined {
@@ -147,18 +153,62 @@ export function browserApiUrl(): string {
   return readPublicApiOrigin(process.env.NEXT_PUBLIC_API_URL) ?? DEFAULT_PUBLIC_API_URL;
 }
 
+// Public PostHog project key. A personal key is rejected. Empty and invalid
+// values leave analytics off.
+export function readPosthogKey(value: string | undefined): string | undefined {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0 || !POSTHOG_KEY_RE.test(raw)) {
+    return undefined;
+  }
+  return raw;
+}
+
+export function readPosthogHost(value: string | undefined): string | undefined {
+  return readPublicApiOrigin(value);
+}
+
+// Key and host for the browser. Unset or invalid POSTHOG_KEY disables analytics.
+// An invalid POSTHOG_HOST keeps the key and uses the default US Cloud host.
+export function posthogSettings(env?: RuntimeEnv): { key: string; host: string } | undefined {
+  const source = runtimeEnv(env);
+  const key = readPosthogKey(source.POSTHOG_KEY);
+  if (source.POSTHOG_KEY?.trim() && !key) {
+    console.warn("POSTHOG_KEY must be a public PostHog project key (phc_...). Analytics stays off.");
+  }
+  if (!key) {
+    return undefined;
+  }
+  const host = readPosthogHost(source.POSTHOG_HOST);
+  if (source.POSTHOG_HOST?.trim() && !host) {
+    console.warn(
+      "POSTHOG_HOST must be an absolute http(s) origin without a path, query, or hash. Using https://us.i.posthog.com.",
+    );
+  }
+  return { key, host: host ?? DEFAULT_POSTHOG_HOST };
+}
+
 // Inline script for the root layout. When BROWSER_API_URL is unset the baked origin stays in place.
+// POSTHOG_KEY is included only when it is a public project key, so an unset key does not reach the browser.
 export function publicConfigScript(env?: RuntimeEnv): string {
   const source = runtimeEnv(env);
   const override = readPublicApiOrigin(source.BROWSER_API_URL);
   if (source.BROWSER_API_URL?.trim() && !override) {
     warnInvalid("BROWSER_API_URL");
   }
-  if (!override) {
+  const analytics = posthogSettings(source);
+  const payload: { apiUrl?: string; posthogKey?: string; posthogHost?: string } = {};
+  if (override) {
+    payload.apiUrl = override;
+  }
+  if (analytics) {
+    payload.posthogKey = analytics.key;
+    payload.posthogHost = analytics.host;
+  }
+  if (!payload.apiUrl && !payload.posthogKey) {
     return "window.__FACTROVE_PUBLIC__=window.__FACTROVE_PUBLIC__||{}";
   }
-  const payload = JSON.stringify({ apiUrl: override }).replaceAll("<", "\\u003c");
-  return `window.__FACTROVE_PUBLIC__=${payload}`;
+  const json = JSON.stringify(payload).replaceAll("<", "\\u003c");
+  return `window.__FACTROVE_PUBLIC__=${json}`;
 }
 
 function warnInvalid(name: string): void {
@@ -167,6 +217,6 @@ function warnInvalid(name: string): void {
 
 declare global {
   interface Window {
-    __FACTROVE_PUBLIC__?: { apiUrl?: string };
+    __FACTROVE_PUBLIC__?: { apiUrl?: string; posthogKey?: string; posthogHost?: string };
   }
 }
