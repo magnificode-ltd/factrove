@@ -41,7 +41,7 @@ describe("invite failure process", () => {
         },
       }, workerConfig());
       await mailer.sendInvite({
-        email: "magnificode+factrove@mail.grokbot.com",
+        email: "ada+factrove@example.com",
         name: "Ada Lovelace",
       });
       await flush();
@@ -74,7 +74,7 @@ describe("invite failure process", () => {
         },
         body: JSON.stringify({
           name: "Ada Lovelace",
-          email: "ada+factrove@mail.grokbot.com",
+          email: "ada+factrove@example.com",
           password: "local-invite-check-1",
         }),
       }));

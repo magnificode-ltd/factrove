@@ -12,9 +12,9 @@ Publishing happens only when someone runs the [Publish CLI](https://github.com/m
 
 The workflow reads the `NPM_TOKEN` repository secret. It does not publish without that secret, and a dry run does not need it.
 
-Create a granular access token on the npm account that owns `factrove` (npm user `tommagni`):
+Create a granular access token on the npm account that owns the `factrove` package:
 
-1. Open [npm Access Tokens](https://www.npmjs.com/settings/tommagni/tokens) and generate a **Granular Access Token**.
+1. Open the Access Tokens page for that npm account and generate a **Granular Access Token**.
 2. Name it for GitHub Actions, and set an expiration you will rotate.
 3. Under packages, grant **read and write** only for the `factrove` package. Do not grant access to every package on the account.
 4. Tick **Bypass two-factor authentication**. It is off by default. CI cannot publish until that box is ticked. The token is still a granular access token, scoped to read and write on `factrove` only.
@@ -22,7 +22,7 @@ Create a granular access token on the npm account that owns `factrove` (npm user
 
 Do not commit the token, and do not put it in the workflow file. The workflow writes it to `~/.npmrc` only for the publish step.
 
-The publish command is `npm publish --access public`. It does not pass `--provenance`. The publish step sets `NPM_CONFIG_PROVENANCE` to the opposite of `github.event.repository.private`. While this repository is private, that value is false and npm publishes without provenance, which is what npm accepts from a private repository. When the repository is later made public, the same workflow turns provenance on without a workflow edit. `id-token: write` is already set so a public repository can sign it. You do not need to make the repository public before the first publish.
+The publish command is `npm publish --access public`. It does not pass `--provenance`. The publish step sets `NPM_CONFIG_PROVENANCE` from repository visibility: provenance is on when the repository is public, and off when it is private. npm accepts a publish without provenance from a private repository. `id-token: write` is set so a public repository can sign provenance.
 
 ## Cut a release
 
@@ -40,7 +40,7 @@ The job installs dependencies, builds the CLI, runs the CLI tests, writes the pu
 
 ### Publish
 
-Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance stays off while the repository is private and turns on automatically once the repository is public. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
+Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance is on when the repository is public and off when it is private. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
 
 `pnpm cli:pack` from a checkout writes the same `apps/cli/npm/` directory. It does not publish.
 

@@ -1,6 +1,6 @@
 # Contributor License Agreement
 
-This is an individual contributor license agreement for Factrove. It is not legal advice. Tom will review it before launch.
+This is an individual contributor license agreement for Factrove. It is not legal advice.
 
 You agree to it by signing as described in [CONTRIBUTING.md](CONTRIBUTING.md). "You" means the person who signs. "Magnificode LTD" means Magnificode LTD. The "Project" means the Factrove software and documentation in the magnificode-ltd/factrove repository. A "contribution" is any work you submit for inclusion in the Project, including source code, tests, and documentation.
 

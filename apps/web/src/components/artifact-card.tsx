@@ -27,17 +27,19 @@ export function ArtifactCard({
     setAudience(organization);
   }, [organization]);
   const uploaded = formatUploadedAt(artifact.uploadedAt);
+  const label = artifactLabel({ ...artifact, name });
 
   return (
     <li className="ft-card relative">
-      <div className="relative grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div className="relative flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
         <a
-          className="min-w-0 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
+          className="min-w-40 flex-1 truncate text-base font-semibold text-ink no-underline after:absolute after:inset-0 after:rounded-[14px] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d"
           href={`/artifacts/${encodeURIComponent(artifact.id)}`}
+          title={label}
         >
-          {artifactLabel({ ...artifact, name })}
+          {label}
         </a>
-        <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
+        <div className="pointer-events-none relative z-10 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground sm:justify-end">
           <code className="font-mono text-[13px] tracking-tight text-ink">{artifact.id}</code>
           {canShare ? (
             <span className="pointer-events-auto relative z-10">

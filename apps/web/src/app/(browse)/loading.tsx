@@ -1,17 +1,20 @@
 import { AppBar, LibraryTabs, ModeNote } from "@/components/chrome";
-import { Button } from "@/components/ui/button";
+import { RefreshLink } from "@/components/refresh-link";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {
   return (
     <div className="ft-canvas min-h-dvh">
       <div className="ft-hero">
-        <AppBar clear>
-          <LibraryTabs view="none" />
-          <div className="ml-auto">
-            <Button asChild variant="outline" className="h-10 bg-white">
-              <a href="/">Refresh</a>
-            </Button>
+        <AppBar
+          end={
+            <div className="ml-auto flex items-center">
+              <RefreshLink href="/" />
+            </div>
+          }
+        >
+          <div className="order-last w-full sm:order-none sm:w-auto">
+            <LibraryTabs view="none" />
           </div>
         </AppBar>
         <main className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">

@@ -2,7 +2,7 @@
 
 Factrove is a self-hostable home for artifacts created by people and agents. Its web application organizes artifacts. Its command-line client publishes HTML files and prints the new artifact id. The share command prints a public link.
 
-This repository contains the product: frontend, backend, CLI, and shared packages. It is private initially and intended for a future open-source release. A separate `factrove-cloud` repository is planned for proprietary managed-hosting capabilities.
+This repository contains the product: frontend, backend, CLI, and shared packages. Run it yourself, or use Factrove Cloud, the hosted service.
 
 ## Install the CLI
 
@@ -265,7 +265,7 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. The packages stay private while this repository is private. When the repository is open-sourced, each package is set to public in its package settings. Pulling them needs a token with `read:packages`. The EC2 read:packages token will be stored in AWS Secrets Manager, created by `factrove-cloud`. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
 
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 
@@ -275,7 +275,7 @@ docker compose --env-file .env.docker -f docker-compose.yml run --rm migrate
 
 Set `FACTROVE_MIGRATE=1` on the API container only when that container should migrate before it listens. Any other value leaves startup as it is.
 
-`BROWSER_API_URL` is the origin the browser uses to call the API. The web server injects it when it renders a page, so one image works for any host. It must match the host and port you publish for the API. `INTERNAL_API_URL` is `http://api:3001` on this Compose network, which is the origin the Next.js server uses for its own requests. Changing either value does not require a rebuild. `pnpm build` and `next start` still keep `NEXT_PUBLIC_API_URL` from the build. `SOURCE_CODE_URL` is the URL of the Source code link. It defaults to `https://github.com/magnificode-ltd/factrove`. The web server reads it when it renders a page. Set it on the web process, or in `.env.docker` for Compose, when a fork should point at its own repository. `DOCS_BASE_URL` is the base URL for docs links in the web app, including the CLI reference on an empty library. It defaults to `https://factrove.mintlify.app`. Unset or empty keeps that default. The web server reads it when it renders a page.
+`BROWSER_API_URL` is the origin the browser uses to call the API. The web server injects it when it renders a page, so one image works for any host. It must match the host and port you publish for the API. `INTERNAL_API_URL` is `http://api:3001` on this Compose network, which is the origin the Next.js server uses for its own requests. Changing either value does not require a rebuild. `pnpm build` and `next start` still keep `NEXT_PUBLIC_API_URL` from the build. `SOURCE_CODE_URL` is the URL of the Source code link. It defaults to `https://github.com/magnificode-ltd/factrove`. The web server reads it when it renders a page. Set it on the web process, or in `.env.docker` for Compose, when a fork should point at its own repository. `DOCS_BASE_URL` is the base URL for docs links in the web app. The header Docs link opens that URL in a new tab. Other links append a path, including the CLI reference on an empty library. It defaults to `https://factrove.mintlify.app`. Unset or empty keeps that default. The web server reads it when it renders a page.
 
 Garage is `http://garage:3900` on the Compose network, and it creates the bucket named by `S3_BUCKET` when it starts. The API sets `S3_ALLOW_INSECURE_HTTP=true` so that private-network HTTP endpoint is accepted. The access key is sent in cleartext. Leave the flag unset for localhost and for AWS.
 
@@ -344,8 +344,10 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 
 ## License
 
-Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository.
+Copyright (C) 2026 Magnificode LTD. Factrove is released under the [GNU Affero General Public License v3.0](LICENSE) or any later version (`AGPL-3.0-or-later`). The copyright notice is in [NOTICE](NOTICE). If you run a modified version as a network service, you must offer its source to the people who use it. The web app shows a Source code link for that purpose, and `SOURCE_CODE_URL` points a fork at its own repository. The web UI components derived from shadcn/ui are MIT. That copyright and permission notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [apps/web/src/components/ui/LICENSE](apps/web/src/components/ui/LICENSE).
 
-Factrove is not accepting outside pull requests yet; issues, bug reports, and feedback are welcome; outside pull requests will be closed without merging.
+## Contributing
 
-Contributors keep their copyright and license their contributions to Magnificode LTD under the [contributor license agreement](CLA.md), which includes the right to relicense those contributions. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Factrove is not accepting outside pull requests yet. Issues, bug reports, and ideas are welcome.
+
+The [contributor license agreement](CLA.md) will apply once contributions open. Signing steps are in [CONTRIBUTING.md](CONTRIBUTING.md).

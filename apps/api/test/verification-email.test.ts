@@ -15,7 +15,7 @@ import { TEST_AUTH_SECRET } from "./auth-session.js";
 
 const WEB_ORIGIN = "http://localhost:3000";
 const API_ORIGIN = "http://localhost:3001";
-const PLUS_EMAIL = "magnificode+verify@mail.grokbot.com";
+const PLUS_EMAIL = "ada+verify@example.com";
 
 describe("verification email", () => {
   it("welcomes the person and links to the web app", async () => {
@@ -109,7 +109,7 @@ describe("verification email", () => {
       sendVerificationEmail: () => gate,
     }));
     const created = await Promise.race([
-      auth.handler(signUpRequest("pending+verify@mail.grokbot.com", "203.0.113.60")),
+      auth.handler(signUpRequest("pending+verify@example.com", "203.0.113.60")),
       new Promise<Response>((_resolve, reject) => {
         setTimeout(() => reject(new Error("sign-up waited on the verification email")), 200);
       }),
@@ -126,7 +126,7 @@ describe("verification email", () => {
     const ip = "203.0.113.70";
     const statuses: number[] = [];
     for (let index = 0; index < EMAIL_VERIFICATION_REQUEST_MAX + 1; index += 1) {
-      const response = await auth.handler(resendRequest(`nobody-${index}+verify@mail.grokbot.com`, ip));
+      const response = await auth.handler(resendRequest(`nobody-${index}+verify@example.com`, ip));
       statuses.push(response.status);
     }
     expect(statuses.slice(0, EMAIL_VERIFICATION_REQUEST_MAX).every((status) => status === 200)).toBe(true);

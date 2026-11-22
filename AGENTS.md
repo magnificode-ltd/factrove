@@ -34,6 +34,10 @@ Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configur
 
 Node and pnpm pins live in `.nvmrc`, `.node-version`, and `package.json`. `pnpm-workspace.yaml` sets `engineStrict` so those `engines` ranges apply to the running Node. Common checks are `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`. PostgreSQL schema and data changes use committed Prisma SQL migrations.
 
+## UI
+
+For any UI or visual work in `apps/web`, or for docs styling, load and follow [`.agents/skills/frontend-design/SKILL.md`](.agents/skills/frontend-design/SKILL.md). Keep the existing brand (indigo and lilac, light theme) and Factrove's rule of no decorative motion in the signed-in app.
+
 ## Rules
 
 The current HTML object key and its content revision are stored on the artifact row together with the size. The API generates the key. Clients never send it, and HTTP responses do not include it. The public filename stays `{artifactId}.html`. New writes use `{artifactId}/{contentId}.html` and commit only when the stored revision still matches the revision the replace read. Older rows keep `{artifactId}.html`. Do not store a bucket name, a filesystem path, or a client-supplied location.
@@ -44,4 +48,4 @@ The project is licensed under AGPL-3.0-or-later. New packages must set `"license
 
 Every new CLI feature, and every change to CLI commands, flags, or output, ships in the same PR as the matching docs. Update the CLI guide pages under `docs/` (Mintlify reads that folder), regenerate the CLI reference with `pnpm docs:cli`, and update README CLI examples when they are affected. When the API changes, regenerate the OpenAPI reference with `pnpm docs:openapi`. A PR that adds a CLI feature without those docs is incomplete. See [DOCUMENTATION.md](DOCUMENTATION.md).
 
-Factrove's core is open-source and self-hostable. Runtime code, config defaults, env examples, and docker-compose must not hardcode Factrove Cloud values such as `https://factrove.app`, server-side `api.factrove.app`, or `support@factrove.app`. Instance URLs come from config (`WEB_ORIGIN`, `PUBLIC_BASE_URL`, `API_PUBLIC_ORIGIN`). Sender addresses come from `EMAIL_FROM_ADDRESS` with no Cloud default. These values always come from environment variables. A hosted deployment (Cloud) just sets those same env vars, with no special code path. Cloud-only code lives in `ee/`. Docs may use `factrove.app` as the hosted Cloud example, and the published CLI may default to `https://api.factrove.app`. Tests use `example.com` or localhost-style values unless they test Cloud config.
+Factrove is open-source and self-hostable. A hosted offering called Factrove Cloud is available. Runtime code, config defaults, env examples, and docker-compose must not hardcode Factrove Cloud values such as `https://factrove.app`, server-side `api.factrove.app`, or `support@factrove.app`. Instance URLs come from config (`WEB_ORIGIN`, `PUBLIC_BASE_URL`, `API_PUBLIC_ORIGIN`). Sender addresses come from `EMAIL_FROM_ADDRESS` with no Cloud default. These values always come from environment variables. Docs may use `factrove.app` as the hosted Cloud example, and the published CLI may default to `https://api.factrove.app`. Tests use `example.com` or localhost-style values unless they test Cloud config.
