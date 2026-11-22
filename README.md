@@ -265,7 +265,7 @@ docker compose --env-file .env.docker -f docker-compose.yml up --build
 
 `docker compose up` without `-f docker-compose.yml` still uses `compose.yaml` and does not start the API or the web app. Published ports bind to `127.0.0.1`. The web app is `http://localhost:3000`. The API health check is `http://localhost:3001/api/v1/health`. Add `-d` to leave the stack in the background. Every `.env.docker` variable, the reverse proxy, an external database or bucket, the CLI, upgrades, and backups are in [docs/self-host/deploy.mdx](docs/self-host/deploy.mdx).
 
-Pushes to `main` also publish `linux/arm64` images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web`. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
+Pushes to `main` also publish images at `ghcr.io/magnificode-ltd/factrove-api` and `ghcr.io/magnificode-ltd/factrove-web` that run on amd64 and arm64. Build from source with the Compose command above to use this checkout. Tags are the full commit SHA, the 7-character short SHA, `sha-` plus each of those SHAs, and `latest` from the default branch. Image names, tags, and the pull commands are in [Published images](docs/self-host/deploy.mdx#published-images).
 
 The `migrate` service runs `prisma migrate deploy` and exits. The API process does not migrate on startup. Run the migration again with:
 

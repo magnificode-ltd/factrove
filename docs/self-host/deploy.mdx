@@ -14,7 +14,7 @@ keywords:
 
 Use this page to deploy a Factrove server you run. The short path is the [self-host quickstart](/self-host/quickstart). Origins and env files are in [Configuration](/self-host/configuration). Factrove Cloud setup is the [Factrove Cloud quickstart](/cloud/quickstart).
 
-Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/arm64` images for the API and the web app. See [Published images](#published-images).
+Factrove runs as your own install. The primary path is `docker-compose.yml`: PostgreSQL, Garage, a one-shot migration, the API, and the web app. That stack builds its images from this repository. GitHub Actions also publishes `linux/amd64` and `linux/arm64` images for the API and the web app. See [Published images](#published-images).
 
 Factrove is licensed under the GNU Affero General Public License v3.0 or later. If you run a modified version as a network service, offer its source to the people who use it. The web app includes a Source code link. Set `SOURCE_CODE_URL` on the web process to your fork. The default is `https://github.com/magnificode-ltd/factrove`.
 
@@ -52,7 +52,7 @@ cd factrove
 
 ## Published images
 
-`.github/workflows/image.yml` publishes two `linux/arm64` images on every push to `main`, and when someone runs that workflow by hand. The runner is `ubuntu-24.04-arm`, so `linux/arm64` is a native build. Both images come from the existing `Dockerfile`.
+`.github/workflows/image.yml` publishes two images on every push to `main`, and when someone runs that workflow by hand. The published GHCR images run on `linux/amd64` and `linux/arm64`. A host pulls the image for its architecture, or builds from source. Both images come from the existing `Dockerfile`.
 
 | Image | Target | Role |
 | --- | --- | --- |
@@ -80,7 +80,7 @@ docker pull ghcr.io/magnificode-ltd/factrove-web:latest
 
 Replace `latest` with a full or short commit SHA, or with `sha-` and that SHA, to pin a build. The `sha-` tags and the bare commit SHA tags name the same commit.
 
-`docker-compose.yml` still builds `factrove-api:local` and `factrove-web:local` on the machine running Compose. Published tags are `linux/arm64` only. An `amd64` host keeps building from this checkout.
+`docker-compose.yml` builds `factrove-api:local` and `factrove-web:local` from this checkout on the machine running Compose. That build-from-source path and the published GHCR images both run on amd64 and arm64.
 
 ## Configure
 
