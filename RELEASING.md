@@ -1,7 +1,6 @@
----
-title: Release the CLI
-description: Publish the factrove npm package from a manual GitHub Actions dispatch. Nothing publishes on push.
----
+# Release the CLI
+
+Maintainer notes for publishing the `factrove` npm package. This file is not part of the public docs site.
 
 The public npm package is `factrove`. It installs two commands, `factrove` and `ftrv`. They run the same program. npm rejected a separate `ftrv` package name, so `ftrv` is only a bin alias.
 
@@ -27,22 +26,22 @@ The publish command is `npm publish --access public`. It does not pass `--proven
 
 ## Cut a release
 
-<Steps>
-  <Step title="Set the version">
-    The version in `apps/cli/package.json` is what gets published when the version input is empty. Bump that version in a commit on `main` before a real publish. The input overrides the tarball version without changing the file. Pass a semver such as `0.1.0`, with no leading `v`.
+### Set the version
 
-    npm already has the placeholder `factrove@0.0.1`. Do not republish `0.0.1`. The first release from this repository is the version in `apps/cli/package.json` (`0.1.0` until that file changes).
-  </Step>
-  <Step title="Dry-run">
-    Open **Actions → Publish CLI → Run workflow** on `main`. Leave **Dry-run** checked. That is the default. Leave **Version** empty to use `package.json`, or type a version to pack that version instead.
+The version in `apps/cli/package.json` is what gets published when the version input is empty. Bump that version in a commit on `main` before a real publish. The input overrides the tarball version without changing the file. Pass a semver such as `0.1.0`, with no leading `v`.
 
-    The job installs dependencies, builds the CLI, runs the CLI tests, writes the publish directory, prints `npm pack --dry-run`, and fails if that version is already on npm. It then installs the tarball into a clean prefix and runs `factrove --help` and `ftrv --help`. It does not publish.
-  </Step>
-  <Step title="Publish">
-    Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance is on when the repository is public and off when it is private. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
-  </Step>
-</Steps>
+npm already has the placeholder `factrove@0.0.1`. Do not republish `0.0.1`. The first release from this repository is the version in `apps/cli/package.json` (`0.1.0` until that file changes).
+
+### Dry-run
+
+Open **Actions → Publish CLI → Run workflow** on `main`. Leave **Dry-run** checked. That is the default. Leave **Version** empty to use `package.json`, or type a version to pack that version instead.
+
+The job installs dependencies, builds the CLI, runs the CLI tests, writes the publish directory, prints `npm pack --dry-run`, and fails if that version is already on npm. It then installs the tarball into a clean prefix and runs `factrove --help` and `ftrv --help`. It does not publish.
+
+### Publish
+
+Run the workflow again from `main` with **Dry-run** unchecked. The same checks run, then `npm publish --access public`. Provenance is on when the repository is public and off when it is private. A missing `NPM_TOKEN` fails this step. A version that already exists fails before the smoke test, with an error that names the version.
 
 `pnpm cli:pack` from a checkout writes the same `apps/cli/npm/` directory. It does not publish.
 
-Contributors still run `pnpm factrove` from the repository root. That launcher is not the published package. Install instructions for the published commands are in [CLI](/guides/cli) and [CLI overview](/cli-reference/overview).
+Contributors still run `pnpm factrove` from the repository root. That launcher is not the published package. Install instructions for the published commands are in [CLI](docs/guides/cli.mdx) and [CLI overview](docs/cli-reference/overview.mdx).

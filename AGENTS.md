@@ -20,6 +20,7 @@ Documentation follows these roles: README.md provides long-term codebase documen
 
 - [README.md](README.md) explains the repository, architecture, and development commands. Its [backend directory structure](README.md#backend-directory-structure) is the canonical layout.
 - [docs/](docs/introduction.mdx) is the user-facing documentation: an overview that separates self-hosting from Factrove Cloud, a quickstart for each, shared guides, and the generated CLI and API references.
+- [RELEASING.md](RELEASING.md) is the maintainer process for publishing the CLI. It is not part of the docs site.
 - [prd/README.md](prd/README.md) indexes the feature documents.
 
 ## CLI
