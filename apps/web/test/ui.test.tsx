@@ -30,7 +30,7 @@ const artifact: ArtifactDto = {
 };
 
 describe("LibraryTabs", () => {
-  it("marks the current list and slides the pill between the two links", () => {
+  it("marks the current list with the pill on the active link", () => {
     const mine = renderToStaticMarkup(<LibraryTabs view="mine" />);
     const org = renderToStaticMarkup(<LibraryTabs view="org" />);
     const none = renderToStaticMarkup(<LibraryTabs view="none" />);
@@ -41,8 +41,15 @@ describe("LibraryTabs", () => {
     expect(mine).toContain("ft-tab-pill");
     expect(mine.match(/aria-current="page"/g)).toHaveLength(1);
     expect(mine).toContain("focus-visible:outline-peri-d");
+    expect(mine).toContain("px-3");
+    expect(mine).toContain("h-8");
+    expect(mine).not.toContain("grid-cols-2");
+    expect(mine).not.toContain("flex-1");
+    expect(mine).not.toContain("w-full");
+    expect(mine).not.toContain("min-w-");
     expect(org).toContain('data-tab="org"');
     expect(org.indexOf('aria-current="page"')).toBeGreaterThan(org.indexOf('href="/"'));
+    expect(org).toContain("hover:text-ink");
     expect(none).not.toContain("ft-tab-pill");
     expect(none).not.toContain("aria-current");
   });
@@ -195,5 +202,14 @@ describe("contrast tokens", () => {
     expect(css).toContain("--primary: var(--peri-d)");
     expect(css).toContain("--peri-d: #5e64d6");
     expect(css).toContain(".ft-card:focus-within");
+    const hover = css.match(/\.ft-card:hover\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(hover).toContain("background");
+    expect(hover).not.toContain("transform");
+    expect(hover).not.toContain("transition");
+    const pill = css.match(/\.ft-tab-pill\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(pill).toContain("inset: 0");
+    expect(pill).not.toContain("width:");
+    expect(pill).not.toContain("transform");
+    expect(pill).not.toContain("transition");
   });
 });

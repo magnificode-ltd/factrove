@@ -83,10 +83,11 @@ export function readDocsBaseUrl(value: string | undefined): string | undefined {
   return href.replace(/\/+$/, "");
 }
 
-// Base URL for docs links such as the CLI reference. Read when a page renders
-// so an install can set DOCS_BASE_URL without rebuilding the web app.
-// Unset, empty, or a URL with a query or hash keeps the public docs site.
-// A trailing slash is dropped.
+// Base URL for docs links. The header Docs link opens this URL. Other links
+// append a path, including the CLI reference. Read when a page renders so an
+// install can set DOCS_BASE_URL without rebuilding the web app. Unset, empty,
+// or a URL with a query or hash keeps the public docs site. A trailing slash
+// is dropped.
 export function docsBaseUrl(env?: RuntimeEnv): string {
   const source = runtimeEnv(env);
   const override = readDocsBaseUrl(source.DOCS_BASE_URL);
