@@ -1,6 +1,6 @@
 # Feature requirements
 
-`prd/` is one document per feature. Each file states the purpose, the behavior the code implements, and the constraints a later change has to keep. User guides live in [docs/](../docs/introduction.mdx). Repository layout and development commands live in [README.md](../README.md).
+`prd/` is one document per feature. Each file states the purpose, the behavior the code implements, and the constraints a later change has to keep. User guides live in [docs/](../docs/introduction.mdx). The user landing page is [README.md](../README.md). Repository layout and development commands live in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | Document | Feature |
 | --- | --- |

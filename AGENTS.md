@@ -16,16 +16,17 @@ User and Organization are Better Auth identity models (core and organization plu
 
 ## Documentation map
 
-Documentation follows these roles: README.md provides long-term codebase documentation. `prd/` holds one document per feature, covering current behavior and the constraints a change has to keep. AGENTS.md provides general orientation. Feature-specific constraints belong in the relevant PRD.
+Documentation follows these roles: README.md is the user landing page. CONTRIBUTING.md is the maintainer guide for repository layout, architecture, and local development. `prd/` holds one document per feature, covering current behavior and the constraints a change has to keep. AGENTS.md provides general orientation. Feature-specific constraints belong in the relevant PRD.
 
-- [README.md](README.md) explains the repository, architecture, and development commands. Its [backend directory structure](README.md#backend-directory-structure) is the canonical layout.
+- [README.md](README.md) is the short user landing page.
+- [CONTRIBUTING.md](CONTRIBUTING.md) explains the repository, architecture, and development commands. Its [backend directory structure](CONTRIBUTING.md#backend-directory-structure) is the canonical layout.
 - [docs/](docs/introduction.mdx) is the user-facing documentation: an overview that separates self-hosting from Factrove Cloud, a quickstart for each, shared guides, and the generated CLI and API references.
 - [RELEASING.md](RELEASING.md) is the maintainer process for publishing the CLI. It is not part of the docs site.
 - [prd/README.md](prd/README.md) indexes the feature documents.
 
 ## CLI
 
-Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [prd/cli.md](prd/cli.md), [docs/guides/cli.mdx](docs/guides/cli.mdx), and [README.md](README.md).
+Commands are `upload`, `list`, `get`, `share`, `rename`, `delete`, and `configure`. Flags, config precedence, and the deliberate differences from `aws s3` are described in [prd/cli.md](prd/cli.md) and [docs/guides/cli.mdx](docs/guides/cli.mdx). Checkout commands are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Tooling
 
@@ -43,6 +44,6 @@ When adding an environment variable, add that key to the committed example for t
 
 The project is licensed under AGPL-3.0-or-later. New packages must set `"license": "AGPL-3.0-or-later"` in package.json.
 
-Every new CLI feature, and every change to CLI commands, flags, or output, ships in the same PR as the matching docs. Update the CLI guide pages under `docs/` (Mintlify reads that folder), regenerate the CLI reference with `pnpm docs:cli`, and update README CLI examples when they are affected. When the API changes, regenerate the OpenAPI reference with `pnpm docs:openapi`. A PR that adds a CLI feature without those docs is incomplete. See [DOCUMENTATION.md](DOCUMENTATION.md).
+Every new CLI feature, and every change to CLI commands, flags, or output, ships in the same PR as the matching docs. Update the CLI guide pages under `docs/` (Mintlify reads that folder), regenerate the CLI reference with `pnpm docs:cli`, and update the CLI examples in those docs when they are affected. The [README.md](README.md) quickstart is `npm i -g factrove`, `factrove configure`, and `factrove upload ./file.html`; update it when those commands change. When the API changes, regenerate the OpenAPI reference with `pnpm docs:openapi`. A PR that adds a CLI feature without those docs is incomplete. See [DOCUMENTATION.md](DOCUMENTATION.md).
 
 Factrove is open-source and self-hostable. A hosted offering called Factrove Cloud is available. Runtime code, config defaults, env examples, and docker-compose must not hardcode Factrove Cloud values such as `https://factrove.app`, server-side `api.factrove.app`, or `support@factrove.app`. Instance URLs come from config (`WEB_ORIGIN`, `PUBLIC_BASE_URL`, `API_PUBLIC_ORIGIN`). Sender addresses come from `EMAIL_FROM_ADDRESS` with no Cloud default. These values always come from environment variables. Docs may use `factrove.app` as the hosted Cloud example, and the published CLI may default to `https://api.factrove.app`. Tests use `example.com` or localhost-style values unless they test Cloud config.
