@@ -154,7 +154,7 @@ The upload endpoint is the ingestion path. Files placed into the bucket independ
 - **Identity schema:** Better Auth core + organization plugin, generated backend-locally and referenced directly by Artifact; live authentication remains deferred.
 - **Migrations:** committed SQL for schema changes and DML transformations in the same history; explicit idempotent local seeding.
 
-Database and storage access remain in the backend. CLI/web communicate through the shared HTTP client. The product runs independently of the later closed-source cloud repository.
+Database and storage access remain in the backend. CLI/web communicate through the shared HTTP client. A hosted version is available as Factrove Cloud.
 
 ## Self-hosted end state
 
@@ -195,7 +195,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](./post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](./post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](./post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, content version history, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](./post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](./post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](./post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, content version history, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, and Azure/GCP implementations remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

@@ -6,8 +6,8 @@ name: Publish images
 # Pull requests are built without a push by docker-images.yml.
 # This workflow does not run for pull requests, including forks.
 # Each image is tagged with the bare commit SHA (long and short), sha-<long>,
-# sha-<short>, and latest on the default branch. Bare SHA tags stay so an
-# existing reference keeps resolving.
+# sha-<short>, and latest on the default branch. The sha- tags and the bare
+# SHA tags name the same commit.
 
 on:
   push:
