@@ -5,16 +5,28 @@ import {
   cliApiOrigin,
   DEFAULT_DOCS_BASE_URL,
   DEFAULT_SOURCE_CODE_URL,
+  DEFAULT_POSTHOG_HOST,
   docsBaseUrl,
+  posthogSettings,
   publicConfigScript,
   readDocsBaseUrl,
+  readPosthogHost,
+  readPosthogKey,
   readPublicApiOrigin,
   readSourceCodeUrl,
   serverApiUrl,
   sourceCodeUrl,
 } from "../src/public-config";
 
-const keys = ["BROWSER_API_URL", "INTERNAL_API_URL", "NEXT_PUBLIC_API_URL", "SOURCE_CODE_URL", "DOCS_BASE_URL"] as const;
+const keys = [
+  "BROWSER_API_URL",
+  "INTERNAL_API_URL",
+  "NEXT_PUBLIC_API_URL",
+  "SOURCE_CODE_URL",
+  "DOCS_BASE_URL",
+  "POSTHOG_KEY",
+  "POSTHOG_HOST",
+] as const;
 
 afterEach(() => {
   for (const key of keys) {
@@ -128,6 +140,48 @@ describe("public API origin", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(cliApiOrigin({ BROWSER_API_URL: "https://api.example.com/library" })).toBe("http://localhost:3001");
     expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("omits PostHog from the page when POSTHOG_KEY is unset or not a public project key", () => {
+    expect(readPosthogKey(undefined)).toBeUndefined();
+    expect(readPosthogKey("  ")).toBeUndefined();
+    expect(readPosthogKey("phx_personal_secret")).toBeUndefined();
+    expect(readPosthogKey("phc_testkey123")).toBe("phc_testkey123");
+    expect(readPosthogHost(" https://posthog.example.com/ ")).toBe("https://posthog.example.com");
+    expect(readPosthogHost("https://posthog.example.com/ingest")).toBeUndefined();
+    expect(posthogSettings({})).toBeUndefined();
+    expect(posthogSettings({ POSTHOG_HOST: "https://posthog.example.com" })).toBeUndefined();
+    expect(publicConfigScript({})).toBe("window.__FACTROVE_PUBLIC__=window.__FACTROVE_PUBLIC__||{}");
+    expect(publicConfigScript({ POSTHOG_HOST: "https://posthog.example.com" })).toBe(
+      "window.__FACTROVE_PUBLIC__=window.__FACTROVE_PUBLIC__||{}",
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(publicConfigScript({ POSTHOG_KEY: "not-a-key" })).toBe(
+      "window.__FACTROVE_PUBLIC__=window.__FACTROVE_PUBLIC__||{}",
+    );
+    expect(
+      posthogSettings({ POSTHOG_KEY: "phx_personal_secret", POSTHOG_HOST: "https://posthog.example.com/path" }),
+    ).toBeUndefined();
+    expect(publicConfigScript({ BROWSER_API_URL: "https://api.example.com", POSTHOG_KEY: " " })).toBe(
+      'window.__FACTROVE_PUBLIC__={"apiUrl":"https://api.example.com"}',
+    );
+    expect(posthogSettings({ POSTHOG_KEY: "phc_testkey123", POSTHOG_HOST: "https://posthog.example.com/path" })).toEqual({
+      key: "phc_testkey123",
+      host: DEFAULT_POSTHOG_HOST,
+    });
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(publicConfigScript({ POSTHOG_KEY: "phc_testkey123" })).toBe(
+      `window.__FACTROVE_PUBLIC__={"posthogKey":"phc_testkey123","posthogHost":"${DEFAULT_POSTHOG_HOST}"}`,
+    );
+    expect(
+      publicConfigScript({
+        BROWSER_API_URL: "https://api.example.com",
+        POSTHOG_KEY: "phc_testkey123",
+        POSTHOG_HOST: "https://posthog.example.com",
+      }),
+    ).toBe(
+      'window.__FACTROVE_PUBLIC__={"apiUrl":"https://api.example.com","posthogKey":"phc_testkey123","posthogHost":"https://posthog.example.com"}',
+    );
   });
 
   it("prefers the injected browser origin over the baked value", () => {

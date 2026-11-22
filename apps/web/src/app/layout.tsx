@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@/components/analytics";
 import { DocsUrlProvider } from "@/components/docs-link";
 import { SourceCodeUrlProvider } from "@/components/source-code-link";
 import { Toaster } from "@/components/ui/sonner";
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en" className={cn(sans.variable, mono.variable, "font-sans")}>
       <body>
         <script dangerouslySetInnerHTML={{ __html: publicConfigScript() }} />
+        <Analytics />
         <DocsUrlProvider url={docsBaseUrl()}>
           <SourceCodeUrlProvider url={sourceCodeUrl()}>{children}</SourceCodeUrlProvider>
         </DocsUrlProvider>

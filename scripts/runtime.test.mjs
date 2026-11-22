@@ -157,11 +157,13 @@ describe("local runtime", () => {
         FACTROVE_API_URL: "http://localhost:3001",
         DATABASE_URL: "postgresql://from-file",
         SOURCE_CODE_URL: "https://git.example.com/from-file",
+        POSTHOG_KEY: "phc_fromfilekey",
       },
     );
 
     assert.equal(env.NEXT_PUBLIC_API_URL, "http://localhost:3001");
     assert.equal(env.SOURCE_CODE_URL, undefined);
+    assert.equal(env.POSTHOG_KEY, undefined);
     assert.equal(env.DATABASE_URL, undefined);
     assert.equal(env.BASE_URL, undefined);
     assert.equal(env.AWS_PROFILE, undefined);
@@ -177,11 +179,12 @@ describe("local runtime", () => {
 
   it("keeps an explicit web origin and reports missing API settings", async () => {
     const env = webLaunchEnv(
-      { NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001", SOURCE_CODE_URL: "https://git.example.com/fork" },
+      { NEXT_PUBLIC_API_URL: "http://127.0.0.1:3001", SOURCE_CODE_URL: "https://git.example.com/fork", POSTHOG_KEY: "phc_parentkey" },
       { NEXT_PUBLIC_API_URL: "http://localhost:3001" },
     );
     assert.equal(env.NEXT_PUBLIC_API_URL, "http://127.0.0.1:3001");
     assert.equal(env.SOURCE_CODE_URL, "https://git.example.com/fork");
+    assert.equal(env.POSTHOG_KEY, "phc_parentkey");
     assert.equal(legacyRootEnvWarning(join(repoRoot, ".env-does-not-exist")), "");
     const legacyDir = await mkdtemp(join(tmpdir(), "factrove-legacy-env-"));
     const legacyFile = join(legacyDir, ".env");
@@ -412,9 +415,19 @@ describe("local runtime", () => {
     const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
     assert.match(compose, /SOURCE_CODE_URL: \$\{SOURCE_CODE_URL:-https:\/\/github\.com\/magnificode-ltd\/factrove\}/);
     assert.match(compose, /DOCS_BASE_URL: \$\{DOCS_BASE_URL:-https:\/\/factrove\.mintlify\.app\}/);
+    assert.match(compose, /POSTHOG_KEY: \$\{POSTHOG_KEY:-\}/);
+    assert.match(compose, /POSTHOG_HOST: \$\{POSTHOG_HOST:-https:\/\/us\.i\.posthog\.com\}/);
+    assert.equal(compose.includes("phc_"), false);
     const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
     assert.match(apiExample, /^# SOURCE_CODE_URL=https:\/\/github\.com\/magnificode-ltd\/factrove$/m);
     assert.match(apiExample, /^# DOCS_BASE_URL=https:\/\/factrove\.mintlify\.app$/m);
+    assert.match(apiExample, /^# POSTHOG_KEY=$/m);
+    assert.match(apiExample, /^# POSTHOG_HOST=https:\/\/us\.i\.posthog\.com$/m);
+    for (const line of apiExample.split("\n")) {
+      if (line.includes("phc_") && !line.trimStart().startsWith("#")) {
+        assert.fail(`apps/api/.env.example sets a PostHog key: ${line}`);
+      }
+    }
     assert.equal(apiExample.includes("support@factrove.app"), false);
     assert.equal(apiExample.includes("https://factrove.app"), false);
   });
@@ -477,11 +490,13 @@ describe("local runtime", () => {
     const probe = "https://api.probe-example.test";
     writeFileSync(
       envFile,
-      `NEXT_PUBLIC_API_URL=${probe}\nDATABASE_URL=postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\n`,
+      `NEXT_PUBLIC_API_URL=${probe}\nDATABASE_URL=postgresql://probe-secret-user:probe-secret-pass@db.internal/factrove\nAWS_SECRET_ACCESS_KEY=probe-aws-secret\nPOSTHOG_KEY=phc_fileprobekey\n`,
     );
     const env = { ...process.env };
     delete env.NEXT_PUBLIC_API_URL;
+    delete env.POSTHOG_KEY;
     env.FACTROVE_APP_ENV_FILE = envFile;
+    env.POSTHOG_KEY = "phc_processprobekey";
     const result = spawnSync(webDevBin, ["build"], { cwd: webAppDir, env, encoding: "utf8", timeout: 180000 });
     assert.equal(result.status, 0, `${result.stdout ?? ""}\n${result.stderr ?? ""}`);
     const staticDir = join(webAppDir, ".next/static");
@@ -489,8 +504,12 @@ describe("local runtime", () => {
     assert.equal(treeContains(staticDir, "api.probe-example.test"), true);
     assert.equal(treeContains(staticDir, "probe-secret-pass"), false);
     assert.equal(treeContains(staticDir, "probe-aws-secret"), false);
+    assert.equal(treeContains(staticDir, "phc_processprobekey"), false);
+    assert.equal(treeContains(staticDir, "phc_fileprobekey"), false);
     assert.equal(treeContains(serverDir, "probe-secret-pass"), false);
     assert.equal(treeContains(serverDir, "probe-aws-secret"), false);
+    assert.equal(treeContains(serverDir, "phc_processprobekey"), false);
+    assert.equal(treeContains(serverDir, "phc_fileprobekey"), false);
     await rm(directory, { recursive: true, force: true });
   });
 });
