@@ -31,12 +31,11 @@ From this repository, `pnpm factrove` runs the CLI in the checkout. That is the 
 | `fixtures` | Sample files for development and verification |
 | `scripts` | Repository tooling |
 | `docs` | Product and architecture documentation |
-| `prd` | Implementation briefs, contracts, task ownership, and progress |
-| `prd/mvp/done` | Completed MVP task briefs and verification records |
+| `prd` | Feature requirements, one document per feature |
 
 ### Backend directory structure
 
-This is the canonical backend layout for implementation PRDs. The directory boundaries and the locations of the database module, repositories, Prisma schema, and migrations are intentional. Feature filenames illustrate the convention; add files in the corresponding responsibility directory as features grow. This describes the target structure, not a claim that every file is already implemented.
+This is the canonical backend layout. The directory boundaries and the locations of the database module, repositories, Prisma schema, and migrations are intentional. Feature filenames illustrate the convention; add files in the corresponding responsibility directory as features grow. This describes the target structure, not a claim that every file is already implemented.
 
 ```text
 apps/api/
@@ -336,9 +335,7 @@ User guides and the generated CLI and API references live in [docs/](docs/introd
 - [Release the CLI](RELEASING.md): manual npm publish of the `factrove` package. It does not run on push. Maintainers only; this file is not on the docs site.
 - [Sharing links](docs/guides/sharing-links.mdx): public links, passwords, and lockout recovery.
 - [Troubleshooting](docs/guides/troubleshooting.mdx): ports, secrets, storage, and cookie-origin failures.
-- [MVP end state](prd/MVP_END_STATE.md): the agreed product target, models, behavior, and completion criteria.
-- [Implementation task index](prd/README.md): task status, dependencies, and ownership.
-- [Shared MVP contract](prd/mvp_contract.md): API, package interfaces, and local configuration.
+- [Feature requirements](prd/README.md): current behavior and constraints, one document per feature. CLI flags, config precedence, and the differences from `aws s3` are in [prd/cli.md](prd/cli.md).
 - [Docs site maintenance](DOCUMENTATION.md): regenerate Mintlify references and preview locally. The pages themselves are the user documentation above.
 - [Agent orientation](AGENTS.md): a concise guide to the codebase and its documentation.
 
