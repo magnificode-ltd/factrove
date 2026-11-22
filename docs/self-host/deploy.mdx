@@ -52,7 +52,7 @@ cd factrove
 
 ## Published images
 
-`.github/workflows/image.yml` publishes two `linux/arm64` images on every push to `main`, and when someone runs that workflow by hand. The runner is `ubuntu-24.04-arm`, which matches Graviton instances such as `t4g` in AWS `us-east-1`. Both images come from the existing `Dockerfile`.
+`.github/workflows/image.yml` publishes two `linux/arm64` images on every push to `main`, and when someone runs that workflow by hand. The runner is `ubuntu-24.04-arm`, so `linux/arm64` is a native build. Both images come from the existing `Dockerfile`.
 
 | Image | Target | Role |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ docker pull ghcr.io/magnificode-ltd/factrove-api:latest
 docker pull ghcr.io/magnificode-ltd/factrove-web:latest
 ```
 
-Replace `latest` with a full or short commit SHA, or with `sha-` and that SHA, to pin a build. `factrove-cloud` accepts an image tag when it is a release tag containing a dot, a tag starting with `sha-`, or a sha256 digest. The bare commit SHA tags stay so a reference that already uses them still resolves. The token AWS EC2 will use to pull these images will be stored in AWS Secrets Manager, created by `factrove-cloud`.
+Replace `latest` with a full or short commit SHA, or with `sha-` and that SHA, to pin a build. The `sha-` tags and the bare commit SHA tags name the same commit.
 
 `docker-compose.yml` still builds `factrove-api:local` and `factrove-web:local` on the machine running Compose. Published tags are `linux/arm64` only. An `amd64` host keeps building from this checkout.
 
