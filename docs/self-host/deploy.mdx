@@ -124,7 +124,7 @@ Compose reads `.env.docker` only when you pass `--env-file .env.docker`. A varia
 | `PUBLIC_BASE_URL` | set it whenever the web origin is not `http://localhost:3000` | Origin for viewer URLs and public share links. An empty value becomes `http://localhost:3000`. It does not follow `WEB_ORIGIN` |
 | `BROWSER_API_URL` | no | Origin the browser uses to call the API. Default `http://localhost:3001`. Read when a page is rendered |
 | `SOURCE_CODE_URL` | no | Source code link in the web app. Default `https://github.com/magnificode-ltd/factrove`. Read when a page is rendered |
-| `DOCS_BASE_URL` | no | Docs links in the web app, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. Read when a page is rendered |
+| `DOCS_BASE_URL` | no | Docs links in the web app. The header Docs link opens this URL. Other links append a path, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. Read when a page is rendered |
 | `WEB_PORT` | no | Host port published on `127.0.0.1` for the web app. Default `3000` |
 | `API_PORT` | no | Host port published on `127.0.0.1` for the API. Default `3001` |
 | `SHARE_TOKEN_KEY` | no | Share-token encryption key, at least 32 characters when set. Empty derives the key from `BETTER_AUTH_SECRET` with HKDF |
@@ -477,7 +477,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `NEXT_PUBLIC_API_URL` | Origin baked into the web client at `pnpm build`. Default `http://localhost:3001` |
 | `BROWSER_API_URL` | Optional runtime override of the browser API origin. The web process reads it when rendering a page |
 | `SOURCE_CODE_URL` | Optional URL for the Source code link. Default `https://github.com/magnificode-ltd/factrove`. The web process reads it when rendering a page |
-| `DOCS_BASE_URL` | Optional base URL for docs links. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. The web process reads it when rendering a page |
+| `DOCS_BASE_URL` | Optional base URL for docs links. The header Docs link opens this URL. Other links append a path, including the CLI reference. Default `https://factrove.mintlify.app`. Unset or empty keeps that default. The web process reads it when rendering a page |
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
