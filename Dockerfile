@@ -55,6 +55,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build --chown=node:node /src/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /src/apps/web/.next/static ./apps/web/.next/static
+# The UI components are MIT. The notice has to be in the image, not only the source tree.
+COPY --from=build --chown=node:node /src/apps/web/src/components/ui/LICENSE ./apps/web/src/components/ui/LICENSE
+COPY --from=build --chown=node:node /src/THIRD_PARTY_NOTICES.md ./apps/web/THIRD_PARTY_NOTICES.md
 RUN if [ ! -f apps/web/server.js ]; then find . -name server.js | head -20; exit 1; fi
 USER node
 WORKDIR /app/apps/web

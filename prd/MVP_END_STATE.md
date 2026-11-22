@@ -4,7 +4,7 @@ This document is the north star for the agreed MVP. It describes the desired com
 
 ## The outcome
 
-The owner runs Factrove's frontend and backend locally on a Mac, asks a coding agent to upload an HTML file using the CLI, refreshes the web library, sees the file, and clicks it to view the HTML.
+You run Factrove's frontend and backend locally on a Mac, ask a coding agent to upload an HTML file using the CLI, refresh the web library, see the file, and click it to view the HTML.
 
 That complete loop, backed by persistent PostgreSQL metadata and object storage, is the MVP. It works without authentication, API keys, or a Factrove cloud service.
 
@@ -154,11 +154,11 @@ The upload endpoint is the ingestion path. Files placed into the bucket independ
 - **Identity schema:** Better Auth core + organization plugin, generated backend-locally and referenced directly by Artifact; live authentication remains deferred.
 - **Migrations:** committed SQL for schema changes and DML transformations in the same history; explicit idempotent local seeding.
 
-Database and storage access remain in the backend. CLI/web communicate through the shared HTTP client. The product runs independently of the later closed-source cloud repository.
+Database and storage access remain in the backend. CLI/web communicate through the shared HTTP client. A hosted version is available as Factrove Cloud.
 
 ## Self-hosted end state
 
-A documented fresh-checkout setup works on the owner's Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in the configured S3 bucket. Local setup starts Garage beside PostgreSQL and creates that bucket. Real AWS S3 remains available when `S3_ENDPOINT` is unset.
+A documented fresh-checkout setup works on a Mac with pinned Node/pnpm and a container runtime. PostgreSQL has a persistent volume. Artifact bytes live in the configured S3 bucket. Local setup starts Garage beside PostgreSQL and creates that bucket. Real AWS S3 remains available when `S3_ENDPOINT` is unset.
 
 Before `pnpm dev`, the API process needs `S3_BUCKET` and `S3_REGION`. The local defaults also set `S3_ENDPOINT`, path-style addressing, and the Garage credentials. An AWS configuration supplies credentials for an existing bucket and leaves `S3_ENDPOINT` unset.
 
@@ -195,7 +195,7 @@ Mocks help individual tasks develop independently; the final acceptance loop use
 
 ## Later work
 
-Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](./post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](./post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](./post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, content version history, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, Azure/GCP implementations, and managed hosting remain later work.
+Login, personal accounts, Better Auth API keys, and owner or member access checks are specified in [prd/post-mvp/20-login-accounts-api-keys.md](./post-mvp/20-login-accounts-api-keys.md) and the shared contract. Public share links, built from `PUBLIC_BASE_URL` plus an unguessable token, are specified in [prd/post-mvp/15-shareable-links.md](./post-mvp/15-shareable-links.md). An optional password on those links is specified in [prd/post-mvp/14-password-protected-links.md](./post-mvp/14-password-protected-links.md). Membership administration, specific-person sharing, content version history, further CLI commands including `mv`, `sync`, `mb`, and `rb`, UI uploading, grouping, search/pagination, storing Markdown or other source formats, previews, screenshots, headless rendering, and Azure/GCP implementations remain later work.
 
 Reading stored HTML back as Markdown, and the `get` command that prints it, are specified in the shared contract and the post-MVP task notes. Factrove still stores HTML only.
 

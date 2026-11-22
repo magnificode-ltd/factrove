@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Run Factrove on the owner's Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
+Run Factrove locally on a Mac. An agent uploads an HTML file through the Nest CLI. Refreshing the Next.js library shows it, and clicking it displays the HTML. PostgreSQL persists metadata locally, and the configured S3 bucket persists artifact bytes. Local setup uses Garage. Real AWS S3 remains available when `S3_ENDPOINT` is unset. No Factrove authentication or API keys are required.
 
 The agreed product target and models are in [./MVP_END_STATE.md](./MVP_END_STATE.md). The [shared contract](mvp_contract.md) defines implementation interfaces; this index tracks execution and progress. Tasks 01–08 are complete except the macOS localhost check, which remains open in [mvp/mvp_macos_localhost.md](mvp/mvp_macos_localhost.md). Task 06 is stub-verified. Completed briefs are archived under `prd/mvp/done/`.
 
@@ -28,7 +28,7 @@ All implementation tasks follow the [canonical backend directory structure](../R
 3. Task 07 can prepare local PostgreSQL and setup instructions alongside those tasks. Task 08 adds the local Garage stand-in. An AWS bucket remains an optional configuration.
 4. Integrate 02/03 into 04, then verify web and CLI against the real backend. Task 07 provides the local runtime. Task 08 runs the remaining live upload and macOS checks.
 
-With fewer agents, schedule these streams in waves. With shared checkouts, respect the disjoint ownership above; isolated branches/worktrees can also be used. Do not overwrite another task's in-progress work.
+These streams can run in waves. With shared checkouts, respect the disjoint ownership above; isolated branches or worktrees can also be used. Do not overwrite another task's in-progress work.
 
 Task 01 owns app entrypoints only until its baseline handoff. Afterward, 04 owns API entrypoints, 05 owns web, and 06 owns CLI. Only 02 owns the Prisma migration history. API owners coordinate additions to the API package manifest; 07 reconciles the root lockfile and setup scripts. App owners report needed shared dependency changes rather than independently changing version policy.
 
@@ -36,7 +36,7 @@ Stub implementations are development aids, not final deliverables. Mark all mock
 
 ## Scope exclusions
 
-Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, password-protected links, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, cloud billing, and non-HTML rendering are deferred. Public links for people outside the owner's Mac are task 15.
+Better Auth identity schema generation is included in the database task. Live authentication setup, API keys, login screens, auth middleware, membership administration, organization switching, file sharing to specific recipients, password-protected links, UI uploading, deletion/renaming, replacement/versioning, pagination/search, quotas, Redis, Temporal, billing, and non-HTML rendering are deferred. Public links for people who are not on that Mac are task 15.
 
 Use Artifact as the custom product table alongside the schema required by Better Auth core and its organization plugin. Keep a small backend-local S3 boundary. Local development uses Garage. Real AWS S3 remains the configuration with `S3_ENDPOINT` unset.
 
@@ -58,7 +58,7 @@ Use Artifact as the custom product table alongside the schema required by Better
 - [x] S3-gated integration tests pass (`storage.integration` and `content.s3.integration`, enabled with `S3_INTEGRATION=1`).
 - [x] Setup instructions distinguish unauthenticated list classifications from actual access control.
 
-Checked items were observed on October 18, 2026. The upload loop, library refresh, sandboxed viewer, content headers, restart, and `S3_INTEGRATION=1` tests ran on Linux against local PostgreSQL and Garage. Headless Chromium showed the fixture's inline script inside the iframe and showed that the frame could not read the parent document or call `https://example.com/`. The parent page did not contain the uploaded HTML. The review follow-up ran `pnpm e2e` in Compose project `factrove-e2e` while the dev project stayed up on ports 5432 and 3900. That shell exported an empty `S3_ENDPOINT` and AWS credential variables. The dev database still had its 3 artifacts, and the dev Garage object was unchanged. `storage.integration` and `content.s3.integration` passed (4 tests). The default `pnpm test` still skips those 4 unless `S3_INTEGRATION=1`. Root lint, typecheck, test, and build passed: api-client 6, web 17, cli 24, api 46 passed and 4 skipped, plus 14 runtime script tests.
+Checked items were observed on October 18, 2026. The upload loop, library refresh, sandboxed viewer, content headers, restart, and `S3_INTEGRATION=1` tests ran on Linux against local PostgreSQL and Garage. Headless Chromium showed the fixture's inline script inside the iframe and showed that the frame could not read the parent document or call `https://example.com/`. The parent page did not contain the uploaded HTML. A later check ran `pnpm e2e` in Compose project `factrove-e2e` while the dev project stayed up on ports 5432 and 3900. That shell exported an empty `S3_ENDPOINT` and AWS credential variables. The dev database still had its 3 artifacts, and the dev Garage object was unchanged. `storage.integration` and `content.s3.integration` passed (4 tests). The default `pnpm test` still skips those 4 unless `S3_INTEGRATION=1`. Root lint, typecheck, test, and build passed: api-client 6, web 17, cli 24, api 46 passed and 4 skipped, plus 14 runtime script tests.
 
 The macOS item is unchecked. This run was Linux x86_64, Node 24.16.0, pnpm 11.25.0, Docker Engine 29.1.3, and Compose 2.40.3. A real AWS bucket was not called. A unit test checks that an unset `S3_ENDPOINT` still targets the regional AWS host. The second-user list check remains the earlier database insert plus the real API and library UI. The oversized-file CLI error remains the earlier check; missing file, non-HTML, unknown id, and the web unavailable-backend screen were checked again.
 
@@ -71,9 +71,9 @@ These items are outside the local MVP task list. They follow the same contract a
 | ID | Brief | Status | Owns |
 | --- | --- | --- | --- |
 | 13 | [Get artifact content as HTML or Markdown](post-mvp/13-get-artifact-content.md) | Done — Garage-verified; real AWS not tested | Content format on the existing content route, shared client, CLI `get`, on-request conversion |
-| 14 | [Password-protected links](post-mvp/14-password-protected-links.md) | Implemented in this change | Optional Argon2id link password, public unlock with scoped grants and content tickets, attempt throttling, CLI password flags, web password controls and visitor password page |
+| 14 | [Password-protected links](post-mvp/14-password-protected-links.md) | Implemented | Optional Argon2id link password, public unlock with scoped grants and content tickets, attempt throttling, CLI password flags, web password controls and visitor password page |
 | 15 | [Shareable links](post-mvp/15-shareable-links.md) | Done | `PUBLIC_BASE_URL`, owner share and revoke, anonymous public HTML, CLI `share`, web Share control |
-| 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented in this change | Better Auth sign-in, sessions, hashed API keys, owner and member access |
+| 20 | [Login, accounts, and API keys](post-mvp/20-login-accounts-api-keys.md) | Implemented | Better Auth sign-in, sessions, hashed API keys, owner and member access |
 | 81 | [Organizations before billing](org-first-plan.md) | In progress. The first pull request mounts the organization plugin and rejects the management routes this work does not ship. | Signup stays unchanged. A later guard requires one organization before product routes. Billing stays deferred. |
 
 Task 20 supersedes the unauthenticated local actor in the MVP outcome above. The MVP itself did not require login.

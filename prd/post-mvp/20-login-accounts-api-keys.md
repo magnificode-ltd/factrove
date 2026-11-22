@@ -4,7 +4,7 @@
 
 Replace the unauthenticated local actor with Better Auth email/password sessions, personal artifact ownership, and hashed API keys for the CLI. Private artifacts are readable only by their owner. Organization-shared artifacts are readable by members of the artifact's organization.
 
-Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: implemented in this change.** The MVP outcome stays the historical unauthenticated loop. This task supersedes that actor.
+Read [the MVP end state](../MVP_END_STATE.md), [the project README](../../README.md), and [the shared contract](../mvp_contract.md). **Status: implemented.** The MVP outcome stays the historical unauthenticated loop. This task supersedes that actor.
 
 ## Owns
 
