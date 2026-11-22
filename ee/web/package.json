@@ -1,0 +1,7 @@
+{
+  "name": "@factrove/ee-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Factrove Cloud web UI. Not part of the pnpm workspace. No license is set."
+}

@@ -9,7 +9,7 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
-    "test": "pnpm --filter @factrove/cli... build && FACTROVE_CLI_ALREADY_BUILT=1 pnpm -r --if-present test && node --test scripts/runtime.test.mjs scripts/docs-samples.test.mjs scripts/pack-cli.test.mjs && pnpm docs:check",
+    "test": "pnpm --filter @factrove/cli... build && FACTROVE_CLI_ALREADY_BUILT=1 pnpm -r --if-present test && node --test scripts/runtime.test.mjs scripts/docs-samples.test.mjs scripts/pack-cli.test.mjs scripts/ee-boundary.test.mjs && pnpm docs:check",
     "docs:openapi": "pnpm --filter @factrove/contracts build && node scripts/docs-openapi.mjs",
     "docs:cli": "pnpm --filter @factrove/cli... build && node scripts/docs-cli.mjs",
     "docs:check": "pnpm --filter @factrove/contracts --filter @factrove/cli... build && node scripts/docs-check.mjs",

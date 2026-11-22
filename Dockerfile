@@ -16,6 +16,7 @@ RUN apt-get update \
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 WORKDIR /src
+# .dockerignore excludes ee/, so this context is the open-source core.
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @factrove/api... build
