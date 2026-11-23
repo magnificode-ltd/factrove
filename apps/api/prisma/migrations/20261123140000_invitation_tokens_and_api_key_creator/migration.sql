@@ -1,52 +1,51 @@
 -- Invitation secrets and the membership that created an API key.
--- Idempotent: a second run keeps matching keys, leaves organizations and
--- artifacts in place, and does not choose among duplicate memberships.
+-- Idempotent: a second run keeps a key whose stored membership still matches,
+-- leaves organizations and artifacts in place, and does not choose among
+-- duplicate memberships. createdByMemberId is written only when it is absent.
+-- A stored id that is no longer that user's row in the key's organization is
+-- invalidated and is not replaced with a newer membership.
 --
--- Lock order, held until this transaction commits:
+-- Lock order, held until this transaction commits. Table locks, not a
+-- snapshot of user ids: a row loop misses users inserted after the snapshot.
 -- 1. artifact ACCESS EXCLUSIVE
--- 2. user rows FOR UPDATE, in id order
--- 3. organization SHARE ROW EXCLUSIVE
--- 4. member ACCESS EXCLUSIVE
+-- 2. "user" SHARE ROW EXCLUSIVE
+-- 3. member ACCESS EXCLUSIVE
+-- 4. organization SHARE ROW EXCLUSIVE
 -- 5. invitation ACCESS EXCLUSIVE
 -- 6. apikey ACCESS EXCLUSIVE, then the data changes
 --
--- ACCESS EXCLUSIVE on artifact comes first so an upload cannot hold
--- ROW EXCLUSIVE on artifact and then wait on a user or organization row
--- while this migration already holds those locks. Every user row is locked
--- before organization, member, and invitation so a create that already holds
--- a user row cannot wait on a row this migration inserts. Apikey is last so
--- a key created during the migration waits until createdByMemberId is written
--- or the unmatched secret is invalidated.
+-- An upload takes ROW EXCLUSIVE on artifact and then KEY SHARE on the creator
+-- and the organization. Artifact is first so this transaction does not hold
+-- those later locks while it waits for the upload.
+-- SHARE ROW EXCLUSIVE on "user" blocks inserts for the rest of the
+-- transaction, so the membership read cannot miss a user created mid-migration.
+-- It does not conflict with the row share lock onboarding takes on its user.
+-- Onboarding in auth/create-first-organization.ts locks its user, then reads
+-- member, then inserts the organization. Member is locked before organization
+-- so that in-flight create, which already holds ACCESS SHARE on member, can
+-- finish its organization insert instead of waiting on this transaction while
+-- this transaction waits on member. Invitation follows the tables it references.
+-- Apikey is last. A key inserted by the previous process after this lock, or
+-- after commit, still has only createdByUserId; the actor binds that id on use.
 
 CREATE OR REPLACE FUNCTION factrove_invitation_tokens_and_api_key_creator() RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE
-  user_row record;
   key_row record;
   duplicate_report text;
   unknown_invitations text;
   bad_hashes text;
   meta jsonb;
   creator text;
+  stored_member text;
   member_id text;
   member_count integer;
   next_metadata text;
 BEGIN
   LOCK TABLE artifact IN ACCESS EXCLUSIVE MODE;
-
-  FOR user_row IN
-    SELECT "user".id
-    FROM "user"
-    ORDER BY "user".id
-  LOOP
-    PERFORM 1
-    FROM "user"
-    WHERE "user".id = user_row.id
-    FOR UPDATE;
-  END LOOP;
-
-  LOCK TABLE organization IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE member IN ACCESS EXCLUSIVE MODE;
+  LOCK TABLE organization IN SHARE ROW EXCLUSIVE MODE;
   LOCK TABLE invitation IN ACCESS EXCLUSIVE MODE;
   LOCK TABLE apikey IN ACCESS EXCLUSIVE MODE;
 
@@ -168,13 +167,37 @@ BEGIN
     END;
 
     creator := NULL;
+    stored_member := NULL;
     IF meta IS NOT NULL THEN
       creator := NULLIF(meta->>'createdByUserId', '');
+      stored_member := NULLIF(meta->>'createdByMemberId', '');
+    END IF;
+
+    -- A recorded membership id is never rewritten. When that row is still
+    -- this user in this organization, and the digest is still a secret, leave
+    -- the key alone. A missing or mismatched row falls through and the digest
+    -- is replaced, so a newer membership cannot receive the secret.
+    IF stored_member IS NOT NULL
+      AND creator IS NOT NULL
+      AND key_row.key_digest NOT LIKE 'invalidated:%'
+    THEN
+      SELECT count(*)::integer
+      INTO member_count
+      FROM member
+      WHERE member.id = stored_member
+        AND member."userId" = creator
+        AND member."organizationId" = key_row.reference_id;
+      IF member_count = 1 THEN
+        CONTINUE;
+      END IF;
     END IF;
 
     member_id := NULL;
     member_count := 0;
-    IF creator IS NOT NULL THEN
+    IF stored_member IS NULL
+      AND creator IS NOT NULL
+      AND key_row.key_digest NOT LIKE 'invalidated:%'
+    THEN
       SELECT count(*)::integer, min(member.id)
       INTO member_count, member_id
       FROM member
@@ -182,11 +205,7 @@ BEGIN
         AND member."organizationId" = key_row.reference_id;
     END IF;
 
-    -- A replaced digest stays dead. A later membership must not receive it.
-    IF member_count = 1
-      AND member_id IS NOT NULL
-      AND key_row.key_digest NOT LIKE 'invalidated:%'
-    THEN
+    IF member_count = 1 AND member_id IS NOT NULL THEN
       next_metadata := jsonb_build_object(
         'createdByUserId', creator,
         'createdByMemberId', member_id
@@ -201,23 +220,24 @@ BEGIN
             "updatedAt" = CURRENT_TIMESTAMP
         WHERE id = key_row.id;
       END IF;
+      CONTINUE;
+    END IF;
+
+    IF creator IS NOT NULL THEN
+      next_metadata := jsonb_build_object('createdByUserId', creator)::text;
     ELSE
-      IF creator IS NOT NULL THEN
-        next_metadata := jsonb_build_object('createdByUserId', creator)::text;
-      ELSE
-        next_metadata := NULL;
-      END IF;
-      IF coalesce(key_row.enabled, true) IS DISTINCT FROM false
-        OR key_row.key_digest IS DISTINCT FROM ('invalidated:' || key_row.id)
-        OR key_row.metadata IS DISTINCT FROM next_metadata
-      THEN
-        UPDATE apikey
-        SET enabled = false,
-            "key" = 'invalidated:' || id,
-            metadata = next_metadata,
-            "updatedAt" = CURRENT_TIMESTAMP
-        WHERE id = key_row.id;
-      END IF;
+      next_metadata := NULL;
+    END IF;
+    IF coalesce(key_row.enabled, true) IS DISTINCT FROM false
+      OR key_row.key_digest IS DISTINCT FROM ('invalidated:' || key_row.id)
+      OR key_row.metadata IS DISTINCT FROM next_metadata
+    THEN
+      UPDATE apikey
+      SET enabled = false,
+          "key" = 'invalidated:' || id,
+          metadata = next_metadata,
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE id = key_row.id;
     END IF;
   END LOOP;
 END;

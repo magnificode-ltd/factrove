@@ -52,19 +52,20 @@ describe("invitation token primitives", () => {
     expect(normalizeInvitationEmail("  ")).toBe("");
   });
 
-  it("locks artifact, then users, then organization, member, invitation, and apikey", () => {
+  it("locks artifact, then users, then member, then organization, invitation, and apikey", () => {
     const artifact = migrationSql.indexOf("LOCK TABLE artifact IN ACCESS EXCLUSIVE MODE");
-    const users = migrationSql.indexOf("FOR UPDATE;");
-    const organization = migrationSql.indexOf("LOCK TABLE organization IN SHARE ROW EXCLUSIVE MODE");
+    const users = migrationSql.indexOf('LOCK TABLE "user" IN SHARE ROW EXCLUSIVE MODE');
     const member = migrationSql.indexOf("LOCK TABLE member IN ACCESS EXCLUSIVE MODE");
+    const organization = migrationSql.indexOf("LOCK TABLE organization IN SHARE ROW EXCLUSIVE MODE");
     const invitation = migrationSql.indexOf("LOCK TABLE invitation IN ACCESS EXCLUSIVE MODE");
     const apikey = migrationSql.indexOf("LOCK TABLE apikey IN ACCESS EXCLUSIVE MODE");
     expect(artifact).toBeGreaterThan(-1);
     expect(artifact).toBeLessThan(users);
-    expect(users).toBeLessThan(organization);
-    expect(organization).toBeLessThan(member);
-    expect(member).toBeLessThan(invitation);
+    expect(users).toBeLessThan(member);
+    expect(member).toBeLessThan(organization);
+    expect(organization).toBeLessThan(invitation);
     expect(invitation).toBeLessThan(apikey);
+    expect(migrationSql).not.toContain("FOR UPDATE");
   });
 });
 
@@ -546,6 +547,37 @@ describe("invitation tokens and API key creator migration", () => {
     expect(rejoined.enabled).toBe(false);
     expect(JSON.parse(rejoined.metadata ?? "")).toEqual({ createdByUserId: "key-stranger" });
     expect(await prisma.member.count({ where: { id: "key-stranger-member" } })).toBe(1);
+
+    await insertApiKey(prisma, {
+      id: "key-late",
+      referenceId: "key-org",
+      key: "late-digest",
+      metadata: JSON.stringify({ createdByUserId: "key-user" }),
+      updatedAt: now,
+    });
+    await runMigration();
+    expect(JSON.parse((await prisma.apikey.findUniqueOrThrow({ where: { id: "key-late" } })).metadata ?? "")).toEqual({
+      createdByUserId: "key-user",
+      createdByMemberId: "key-member",
+    });
+    expect((await prisma.apikey.findUniqueOrThrow({ where: { id: "key-late" } })).key).toBe("late-digest");
+
+    await prisma.member.delete({ where: { id: "key-member" } });
+    await insertMember(prisma, {
+      id: "key-member-new",
+      organizationId: "key-org",
+      userId: "key-user",
+      role: "member",
+      createdAt: now,
+    });
+    await runMigration();
+    for (const id of ["key-matched", "key-encoded", "key-late"]) {
+      const row = await prisma.apikey.findUniqueOrThrow({ where: { id } });
+      expect(row.enabled).toBe(false);
+      expect(row.key).toBe(`invalidated:${id}`);
+      expect(JSON.parse(row.metadata ?? "")).toEqual({ createdByUserId: "key-user" });
+    }
+    expect(await prisma.member.count({ where: { id: "key-member-new" } })).toBe(1);
     expect(await functionExists(prisma)).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -551,6 +551,95 @@ describe("organization-owned API keys", () => {
     expect(after.status).toBe(200);
   });
 
+  it("binds a rollout key that has no membership id and does not rebind it after the creator rejoins", async () => {
+    const owner = await signUp(baseUrl, {
+      email: "rollout-keys@example.com",
+      password: "rollout-keys-password",
+      name: "Rollout",
+    });
+    const org = await createFirstOrganization(baseUrl, owner.cookie, "Rollout Lab");
+    const member = await prisma.member.findFirstOrThrow({
+      where: { userId: owner.userId, organizationId: org.id },
+    });
+    const secret = await insertRolloutKey(prisma, {
+      id: "rollout-key",
+      organizationId: org.id,
+      userId: owner.userId,
+    });
+    const [first, second] = await Promise.all([
+      fetch(`${baseUrl}/api/v1/context`, { headers: { authorization: `Bearer ${secret}` } }),
+      fetch(`${baseUrl}/api/v1/context`, { headers: { authorization: `Bearer ${secret}` } }),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: member.id,
+    });
+    const again = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(again.status).toBe(200);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: member.id,
+    });
+
+    await prisma.member.delete({ where: { id: member.id } });
+    const rejoinedId = randomUUID();
+    await prisma.member.create({
+      data: {
+        id: rejoinedId,
+        organizationId: org.id,
+        userId: owner.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const revived = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(revived.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata).createdByMemberId).toBe(member.id);
+
+    const unbound = await insertRolloutKey(prisma, {
+      id: "rollout-unbound",
+      organizationId: org.id,
+      userId: owner.userId,
+    });
+    await prisma.member.delete({ where: { id: rejoinedId } });
+    const rejected = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${unbound}` },
+    });
+    expect(rejected.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-unbound" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: null,
+    });
+
+    const otherOrg = randomUUID();
+    await prisma.organization.create({
+      data: { id: otherOrg, name: "Other Lab", slug: otherOrg, createdAt: new Date() },
+    });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: otherOrg,
+        userId: owner.userId,
+        role: "owner",
+        createdAt: new Date(),
+      },
+    });
+    const elsewhere = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${unbound}` },
+    });
+    expect(elsewhere.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-unbound" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: null,
+    });
+  });
+
   it("keeps a key inside its own organization when the creator also belongs to another", async () => {
     const user = await signUp(baseUrl, {
       email: "two-orgs@example.com",
@@ -710,6 +799,30 @@ async function expectForeignKey(): Promise<void> {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+async function insertRolloutKey(
+  prisma: PrismaService,
+  input: { id: string; organizationId: string; userId: string },
+): Promise<string> {
+  const secret = `ftrv_${randomBytes(32).toString("base64url")}`;
+  const now = new Date();
+  await prisma.apikey.create({
+    data: {
+      id: input.id,
+      name: input.id,
+      start: secret.slice(0, 12),
+      prefix: "ftrv_",
+      referenceId: input.organizationId,
+      metadata: JSON.stringify({ createdByUserId: input.userId }),
+      key: createHash("sha256").update(secret).digest("base64url"),
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  return secret;
 }
 
 function readKeyMetadata(metadata: string | null): { createdByUserId: string | null; createdByMemberId: string | null } {
