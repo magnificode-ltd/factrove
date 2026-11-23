@@ -5,6 +5,9 @@ import {
   contentMediaTypes,
   contextEnvelopeSchema,
   createOrganizationResponseSchema,
+  invitationEnvelopeSchema,
+  invitationListSchema,
+  invitationPreviewSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   SHARE_GRANT_HEADER,
@@ -16,6 +19,9 @@ import {
   type ContentMediaType,
   type ContextEnvelope,
   type CreateOrganizationResponse,
+  type InvitationEnvelope,
+  type InvitationList,
+  type InvitationPreview,
   type PublicArtifactEnvelope,
   type PublicUnlockEnvelope,
   type ShareEnvelope
@@ -70,6 +76,18 @@ export interface FactroveClient {
   getContext(): Promise<ContextEnvelope>;
   /** Creates the signed-in user's first organization. Session cookie only. */
   createOrganization(name: string): Promise<CreateOrganizationResponse>;
+  /** Lists invitations for the caller's current organization. Session owner only. */
+  listOrganizationInvitations(input?: { limit?: number; cursor?: string }): Promise<InvitationList>;
+  /** Invites an email address. The response says queued, not delivered. */
+  createOrganizationInvitation(email: string): Promise<InvitationEnvelope>;
+  /** Rotates the secret and queues another email. */
+  resendOrganizationInvitation(id: string): Promise<InvitationEnvelope>;
+  /** Revokes a pending invitation. The response is empty. */
+  revokeOrganizationInvitation(id: string): Promise<void>;
+  /** Reads a live invitation without a session. */
+  previewInvitation(token: string): Promise<InvitationPreview>;
+  /** Accepts an invitation for the signed-in account. */
+  acceptInvitation(token: string): Promise<CreateOrganizationResponse>;
   uploadArtifact(input: UploadArtifactInput): Promise<ArtifactEnvelope>;
   /** Replaces the current HTML for an existing artifact. Does not change access or the share token. */
   replaceArtifactContent(id: string, input: ReplaceArtifactContentInput): Promise<ArtifactEnvelope>;
@@ -244,6 +262,51 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ name })
+        },
+        createOrganizationResponseSchema
+      ),
+    listOrganizationInvitations: (input?: { limit?: number; cursor?: string }) => {
+      const params = new URLSearchParams();
+      if (input?.limit !== undefined) params.set("limit", String(input.limit));
+      if (input?.cursor !== undefined) params.set("cursor", input.cursor);
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      return request(`/organization/invitations${query}`, { method: "GET" }, invitationListSchema);
+    },
+    createOrganizationInvitation: (email: string) =>
+      request(
+        "/organization/invitations",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email })
+        },
+        invitationEnvelopeSchema
+      ),
+    resendOrganizationInvitation: (id: string) =>
+      request(
+        `/organization/invitations/${encodeURIComponent(id)}/resend`,
+        { method: "POST" },
+        invitationEnvelopeSchema
+      ),
+    revokeOrganizationInvitation: (id: string) =>
+      requestEmpty(`/organization/invitations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    previewInvitation: (token: string) =>
+      request(
+        "/invitations/preview",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token })
+        },
+        invitationPreviewSchema
+      ),
+    acceptInvitation: (token: string) =>
+      request(
+        "/invitations/accept",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token })
         },
         createOrganizationResponseSchema
       ),

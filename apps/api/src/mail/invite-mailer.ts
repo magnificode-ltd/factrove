@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, type OnApplicationShutdown } from "@nestjs/
 import { API_CONFIG, type ApiConfig } from "../services/api-config.js";
 import { EMAIL_SENDER, emailPurpose, redactSecrets, type EmailSender, type OutboundEmail } from "./email-sender.js";
 import { buildInviteEmail, type InviteRecipient } from "./invite-email.js";
+import { buildOrganizationInviteEmail } from "./organization-invite-email.js";
 import { buildPasswordResetEmail } from "./password-reset-email.js";
 import { buildVerificationEmail } from "./verification-email.js";
 import { logWithoutThrowing } from "./safe-log.js";
@@ -13,6 +14,7 @@ export const INVITE_SHUTDOWN_TIMEOUT_MS = 10_000;
 type InviteJob = {
   email: string;
   purpose: string;
+  secrets: readonly string[];
   run: () => Promise<void>;
 };
 
@@ -26,6 +28,14 @@ export type VerificationMessage = {
   email: string;
   name: string;
   verifyUrl: string;
+};
+
+export type OrganizationInviteMessage = {
+  email: string;
+  organizationName: string;
+  inviterName: string;
+  expiresAt: Date;
+  acceptUrl: string;
 };
 
 @Injectable()
@@ -87,6 +97,26 @@ export class InviteMailer implements OnApplicationShutdown {
     }));
   }
 
+  // False means the invitation row must stay and the request can be retried.
+  // Signup mail stays fire-and-forget when this queue is full.
+  trySendOrganizationInvite(message: OrganizationInviteMessage): boolean {
+    const email = message.email.trim();
+    const acceptUrl = message.acceptUrl.trim();
+    if (email.length === 0 || acceptUrl.length === 0) {
+      return false;
+    }
+    return this.enqueue(buildOrganizationInviteEmail({
+      email,
+      organizationName: message.organizationName,
+      inviterName: message.inviterName,
+      expiresAt: message.expiresAt,
+      acceptUrl,
+      supportEmail: this.config.emailFromAddress,
+      siteUrl: this.config.webOrigin,
+      logoUrl: this.config.emailLogoUrl,
+    }), secretsInAcceptUrl(acceptUrl));
+  }
+
   async onApplicationShutdown(): Promise<void> {
     const deadline = Date.now() + this.shutdownTimeoutMs;
     while (this.waiting.length > 0 || this.inFlight.size > 0) {
@@ -134,7 +164,7 @@ export class InviteMailer implements OnApplicationShutdown {
       tracked = Promise.resolve()
         .then(() => job.run())
         .then(() => undefined, (error: unknown) => {
-          this.reportFailure(job.email, job.purpose, error);
+          this.reportFailure(job.email, job.purpose, job.secrets, error);
         })
         .then(() => undefined, () => undefined)
         .finally(() => {
@@ -146,29 +176,32 @@ export class InviteMailer implements OnApplicationShutdown {
     }
   }
 
-  private enqueue(message: OutboundEmail): void {
+  private enqueue(message: OutboundEmail, secrets: readonly string[] = []): boolean {
     const email = message.to.trim();
     const purpose = emailPurpose(message);
     if (email.length === 0 || this.closed) {
-      return;
+      return false;
     }
     if (this.waiting.length >= INVITE_QUEUE_LIMIT) {
       logWithoutThrowing(
         (line) => this.logger.warn(line),
         `${purpose} skipped for ${email}. The send queue is full.`,
       );
-      return;
+      return false;
     }
-    // The provider call stays in the background. The request already returned.
+    // The provider call stays in the background. Signup already returned.
+    // An organization invitation uses the boolean and answers 503 when this is full.
     this.waiting.push({
       email,
       purpose,
+      secrets,
       run: () => this.email.send(message),
     });
     this.pump();
+    return true;
   }
 
-  private reportFailure(email: string, purpose: string, error: unknown): void {
+  private reportFailure(email: string, purpose: string, secrets: readonly string[], error: unknown): void {
     let message = `${purpose} failed for ${email}.`;
     try {
       const detail = error instanceof Error ? error.message : "request failed";
@@ -176,6 +209,7 @@ export class InviteMailer implements OnApplicationShutdown {
         this.config.brevoApiKey,
         this.config.smtp?.password,
         this.config.smtp?.user,
+        ...secrets,
       ]).replace(/https?:\/\/\S+/g, "[url]");
       message = `${purpose} failed for ${email}. ${redacted}`;
     } catch {
@@ -183,6 +217,19 @@ export class InviteMailer implements OnApplicationShutdown {
     }
     logWithoutThrowing((line) => this.logger.error(line), message);
   }
+}
+
+function secretsInAcceptUrl(acceptUrl: string): readonly string[] {
+  const secrets = [acceptUrl];
+  try {
+    const token = new URL(acceptUrl).searchParams.get("token");
+    if (token && token.length > 0) {
+      secrets.push(token);
+    }
+  } catch {
+    return secrets;
+  }
+  return secrets;
 }
 
 function wait(ms: number): { done: Promise<void>; cancel: () => void } {

@@ -509,7 +509,7 @@ Edit `apps/api/.env`. The API loads that file on startup and keeps variables tha
 | `INTERNAL_API_URL` | Optional origin the Next.js server uses to reach the API. Unset, it follows the browser origin |
 | `BETTER_AUTH_SECRET` | Required, at least 32 characters. The example value is a local placeholder |
 | `SHARE_TOKEN_KEY`, `AUTH_COOKIE_DOMAIN`, `TRUSTED_PROXIES` | Same as the Compose table. Leave the cookie domain unset on localhost |
-| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up invite and the password reset). Unset transport is `log`. `EMAIL_FROM_ADDRESS` is required for `smtp` and `brevo`. Unset with `log` uses `no-reply@localhost`. The from name defaults to `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages, including the footer |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `EMAIL_LOGO_URL` | Auth email (the sign-up verification, the password reset, and an organization invitation). Unset transport is `log`. `EMAIL_FROM_ADDRESS` is required for `smtp` and `brevo`. Unset with `log` uses `no-reply@localhost`. The from name defaults to `Factrove`. An empty logo URL uses the text wordmark. `WEB_ORIGIN` is the start of every link in those messages, including the footer |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD` | Required for `EMAIL_TRANSPORT=smtp`, except the user, password, and `SMTP_REQUIRE_TLS`. User and password are both set or both empty. Unset `SMTP_REQUIRE_TLS` requires STARTTLS when `SMTP_SECURE` is `false` |
 | `BREVO_API_KEY` | Required for `EMAIL_TRANSPORT=brevo`. Ignored otherwise |
 | `S3_BUCKET`, `S3_REGION` | Required. The API does not create an AWS bucket |
@@ -544,7 +544,9 @@ pnpm --filter @factrove/web start --hostname 127.0.0.1 --port 3000
 
 ### Invite email
 
-Creating an account sends one email to that address. It welcomes the person and asks them to confirm the address. Sign-in is not blocked. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts, and API keys are unchanged. People who already have an account are not emailed. There is no organization-member invite route.
+Creating an account sends one email to that address. It welcomes the person and asks them to confirm the address. Sign-in is not blocked. The signup page and `POST /api/auth/sign-up/email` are the same path. The CLI does not create accounts, and API keys are unchanged. People who already have an account are not emailed again by sign-up.
+
+An organization invitation is a different message. An owner sends it with `POST /api/v1/organization/invitations`. The link is `WEB_ORIGIN/invites/accept?token=...`. The subject names the organization. The sign-up message asks the person to confirm the new account and links to `WEB_ORIGIN/verify-email`. Both use this same `EMAIL_TRANSPORT`. The API reports the organization invitation as queued once it is stored and accepted by the send queue. It does not report that a provider delivered it. If the queue cannot take it, the invitation stays and the response is `503` with `Retry-After`. Resend rotates the secret and tries again. With `EMAIL_TRANSPORT=log`, the API writes the message and does not send it. The log drops the query string, so the token is not written, unless `EMAIL_LOG_LINKS=full` and the process is not production. Production keeps the query redacted.
 
 The invite depends on `EmailSender`. `EMAIL_TRANSPORT` picks the implementation. `log` writes the message and does not send it. `smtp` sends through any SMTP server. `brevo` posts `https://api.brevo.com/v3/smtp/email`. An unknown transport, or a missing setting for the transport you chose, stops the process before it listens. Startup does not open a network connection and does not call `GET /v3/account`.
 
@@ -556,7 +558,7 @@ Set `WEB_ORIGIN` to the public URL of the web app before you send mail. Confirma
 
 Sign-up does not wait for the provider. The API sends at most four auth emails at once and keeps at most 100 more waiting. A sign-up past that limit still creates the account. The log says `Verification email skipped for <address>. The send queue is full.` and that message is not sent. A password reset past the limit logs `Password reset email skipped for <address>. The send queue is full.` On shutdown the API waits up to 10 seconds for queued and in-flight auth email, then logs `Auth email shutdown left N send(s) unfinished:` followed by those addresses. `pnpm dev` force-stops the API after 15 seconds, and the Compose API service sets `stop_grace_period: 15s`, so that drain can finish.
 
-The signup wording lives in `apps/api/src/mail/verification-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
+The signup wording lives in `apps/api/src/mail/verification-email.ts`. The organization invitation wording lives in `apps/api/src/mail/organization-invite-email.ts`. The shared shell is `apps/api/src/mail/branded-email.ts`. Edit those files, then rebuild the API, to change the wording, colors, or layout. `EMAIL_LOGO_URL`, when set to an absolute `http` or `https` URL, replaces the text wordmark with that image. Leave it unset to keep the wordmark.
 
 This install needs Node.js 24 (`>=24.7.0 <25`; 24.16.0 is pinned). A ready API answers `GET /api/v1/health`.
 
