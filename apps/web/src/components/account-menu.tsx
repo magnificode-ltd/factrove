@@ -41,6 +41,11 @@ export function AccountMenu({ name, organization }: { name: string; organization
           </div>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item asChild>
+            <a href="/account/members" className={itemClass}>
+              Members
+            </a>
+          </DropdownMenu.Item>
+          <DropdownMenu.Item asChild>
             <a href="/account/api-keys" className={itemClass}>
               API keys
             </a>

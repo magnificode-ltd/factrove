@@ -35,6 +35,7 @@ afterEach(() => {
   root = undefined;
   document.body.innerHTML = "";
   window.sessionStorage.clear();
+  document.cookie = "factrove-invite-next=; Path=/; Max-Age=0";
   getSession.mockReset();
   sendVerificationEmail.mockReset();
   verifyEmail.mockReset();
@@ -127,6 +128,36 @@ describe("verify email page", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(container.querySelector('[data-testid="verify-email-expired"]')).not.toBeNull();
+  });
+
+  it("returns a confirmed invitation to the accept page without showing the token", async () => {
+    const page = readFileSync(path.resolve(process.cwd(), "src/app/verify-email/page.tsx"), "utf8");
+    expect(page).toContain('referrer: "no-referrer"');
+    expect(page).toContain("index: false");
+    const returnTo = "/invites/accept?token=invite-token";
+    verifyEmail.mockResolvedValueOnce({ error: null });
+    const container = await render(<VerifyEmailScreen token="good-token" returnTo={returnTo} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const link = container.querySelector(`a[href="${returnTo}"]`);
+    expect(link?.textContent).toBe("Continue");
+    expect(link?.getAttribute("href")).toBe(returnTo);
+    expect(container.textContent).toContain("Continue to join the organization.");
+    expect(container.textContent).not.toContain("invite-token");
+    expect(container.textContent).not.toContain("Back to the library");
+
+    document.cookie = `factrove-invite-next=${encodeURIComponent(returnTo)}; Path=/`;
+    getSession.mockResolvedValue({ data: { user }, error: null });
+    sendVerificationEmail.mockResolvedValue({ error: null });
+    const notice = await render(<VerifyEmailNotice />);
+    await act(async () => {
+      button(notice, "Resend").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(sendVerificationEmail).toHaveBeenCalledWith({ email: "ada@example.com", callbackURL: returnTo });
   });
 });
 

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { FactroveApiError } from "@factrove/api-client";
 import { createRequestClient } from "@/api/server-client";
+import { pendingInvitationPath } from "@/auth/pending-invitation";
 import { AuthScreen } from "@/components/auth-screen";
 import { CreateOrganizationForm } from "@/components/create-organization-form";
 
@@ -19,6 +20,11 @@ export default async function OnboardingPage() {
     if (!(error instanceof FactroveApiError && error.status === 403 && error.code === "ORGANIZATION_SETUP_REQUIRED")) {
       throw error;
     }
+  }
+
+  const invite = await pendingInvitationPath();
+  if (invite) {
+    redirect(invite);
   }
 
   return (

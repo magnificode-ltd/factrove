@@ -21,6 +21,7 @@ import { createIsolatedDatabase, dropIsolatedDatabase, type IsolatedDatabase } f
 
 const execFileAsync = promisify(execFile);
 const apiRoot = fileURLToPath(new URL("..", import.meta.url));
+const gateState = { header: "" };
 
 const config: ApiConfig = {
   host: "127.0.0.1",
@@ -79,6 +80,67 @@ describe("organization invitations", () => {
     } else {
       process.env.DATABASE_URL = previousDatabaseUrl;
     }
+  });
+
+  it("lists members for any member and pending invitations for an owner", async () => {
+    const ada = await owner("roster");
+    const bea = await register({ email: nextEmail("roster-member"), password: "password-123", name: "Bea Member" });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: ada.organizationId,
+        userId: bea.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const invited = nextEmail("roster-invite");
+    const created = await postJson("/organization/invitations", ada.cookie, { email: invited });
+    expect(created.response.status).toBe(201);
+    const stale = await postJson("/organization/invitations", ada.cookie, { email: nextEmail("roster-stale") });
+    expect(stale.response.status).toBe(201);
+    await prisma.$executeRaw`
+      UPDATE invitation
+      SET "expiresAt" = CURRENT_TIMESTAMP - interval '1 minute'
+      WHERE id = ${stale.body.invitation.id}
+    `;
+
+    const ownerPage = await getJson("/organization/members", ada.cookie);
+    expect(ownerPage.response.status).toBe(200);
+    expect(ownerPage.body.caller?.role).toBe("owner");
+    expect(ownerPage.body.members?.map((member) => member.email).sort()).toEqual([ada.email, bea.email].sort());
+    expect(ownerPage.body.members?.find((member) => member.email === ada.email)).toMatchObject({ name: "Ada Owner", role: "owner" });
+    expect(ownerPage.body.members?.find((member) => member.email === bea.email)).toMatchObject({ name: "Bea Member", role: "member" });
+    expect(ownerPage.body.invitations?.map((invitation) => invitation.email)).toEqual([invited]);
+    expect(ownerPage.body.invitations?.[0]?.status).toBe("pending");
+    expect(JSON.stringify(ownerPage.body)).not.toContain("tokenHash");
+
+    const memberPage = await getJson("/organization/members", bea.cookie);
+    expect(memberPage.response.status).toBe(200);
+    expect(memberPage.body.caller?.role).toBe("member");
+    expect(memberPage.body.members).toHaveLength(2);
+    expect(memberPage.body.invitations).toEqual([]);
+
+    const key = await createSessionApiKey(baseUrl, ada.cookie, "roster");
+    const byKey = await fetch(`${baseUrl}/api/v1/organization/members`, {
+      headers: { authorization: `Bearer ${key.apiKey}` },
+    });
+    expect(byKey.status).toBe(401);
+    expect((await byKey.json()).error.code).toBe("UNAUTHENTICATED");
+
+    const first = await getJson("/organization/members?limit=1", ada.cookie);
+    expect(first.response.status).toBe(200);
+    expect(first.body.members).toHaveLength(1);
+    expect(first.body.nextCursor).toBe(first.body.members?.[0]?.id);
+    const second = await getJson(`/organization/members?limit=1&cursor=${first.body.nextCursor}`, ada.cookie);
+    expect(second.response.status).toBe(200);
+    expect(second.body.members).toHaveLength(1);
+    expect(second.body.members?.[0]?.id).not.toBe(first.body.members?.[0]?.id);
+    expect(second.body.nextCursor).toBeNull();
+
+    const badCursor = await getJson("/organization/members?cursor=missing-member", ada.cookie);
+    expect(badCursor.response.status).toBe(400);
+    expect(badCursor.body.error?.code).toBe("INVALID_REQUEST");
   });
 
   it("creates, lists, resends, and revokes without returning a secret", async () => {
@@ -617,6 +679,52 @@ describe("organization invitations", () => {
     }
   });
 
+  it("routes a signed-in invited person from onboarding to a live invitation", async () => {
+    const ada = await owner("gate");
+    const guest = await register({ email: nextEmail("gate-guest"), password: "password-123", name: "Bea Guest" });
+    const created = await postJson("/organization/invitations", ada.cookie, { email: guest.email });
+    expect(created.response.status).toBe(201);
+    const token = await replaceToken(created.body.invitation.id);
+    const acceptPath = `/invites/accept?token=${encodeURIComponent(token)}`;
+    const guarded = await fetch(`${baseUrl}/api/v1/invitations/preview`, {
+      method: "POST",
+      headers: {
+        cookie: guest.cookie,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ token }),
+    });
+    expect(guarded.status).toBe(403);
+    expect((await guarded.json()).error.code).toBe("FORBIDDEN");
+
+    const previousInternal = process.env.INTERNAL_API_URL;
+    process.env.INTERNAL_API_URL = baseUrl;
+    gateState.header = `${guest.cookie}; factrove-invite-next=${encodeURIComponent(acceptPath)}`;
+    (globalThis as { __factroveGateJar?: unknown }).__factroveGateJar = {
+      get: (name: string) => {
+        const value = cookieValue(gateState.header, name);
+        return value === undefined ? undefined : { name, value };
+      },
+      delete: (name: string) => {
+        gateState.header = withoutCookie(gateState.header, name);
+      },
+      toString: () => gateState.header,
+    };
+    try {
+      const { default: OnboardingPage } = await import("../../web/src/app/(browse)/onboarding/page.tsx");
+      await expect(OnboardingPage()).rejects.toThrow(`REDIRECT ${acceptPath}`);
+      expect(cookieValue(gateState.header, "factrove-invite-next")).toBe(acceptPath);
+    } finally {
+      gateState.header = "";
+      delete (globalThis as { __factroveGateJar?: unknown }).__factroveGateJar;
+      if (previousInternal === undefined) {
+        delete process.env.INTERNAL_API_URL;
+      } else {
+        process.env.INTERNAL_API_URL = previousInternal;
+      }
+    }
+  });
+
   function nextEmail(label: string): string {
     sequence += 1;
     return `${label}${sequence}@example.com`;
@@ -752,7 +860,10 @@ describe("organization invitations", () => {
 type Payload = {
   delivery?: string;
   invitation?: { id: string; email: string };
-  invitations?: Array<{ id: string }>;
+  invitations?: Array<{ id: string; email?: string; status?: string }>;
+  caller?: { id: string; role: string };
+  members?: Array<{ id: string; name: string; email: string; role: string }>;
+  nextCursor?: string | null;
   organization?: { id: string; name: string };
   error?: { code: string; message: string };
 };
@@ -786,6 +897,31 @@ async function waitFor(ready: () => boolean): Promise<void> {
     }
     await delay(20);
   }
+}
+
+function cookieValue(header: string, name: string): string | undefined {
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0 || trimmed.slice(0, eq) !== name) {
+      continue;
+    }
+    const raw = trimmed.slice(eq + 1);
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return undefined;
+}
+
+function withoutCookie(header: string, name: string): string {
+  return header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !part.startsWith(`${name}=`))
+    .join("; ");
 }
 
 async function createApp(appConfig: ApiConfig): Promise<INestApplication> {

@@ -132,6 +132,70 @@ describe("verification email", () => {
     expect(statuses.slice(0, EMAIL_VERIFICATION_REQUEST_MAX).every((status) => status === 200)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
   });
+
+  it("keeps an invitation return path on the verification link and drops an off-site callback", async () => {
+    const invitePath = "/invites/accept?token=invite-token";
+    const withNext = new URL(emailVerificationUrl(WEB_ORIGIN, "header.payload.sig", invitePath) ?? "http://invalid");
+    expect(withNext.searchParams.get("token")).toBe("header.payload.sig");
+    expect(withNext.searchParams.get("next")).toBe(invitePath);
+    const dropped = new URL(emailVerificationUrl(WEB_ORIGIN, "header.payload.sig", "https://evil.example/steal") ?? "http://invalid");
+    expect(dropped.searchParams.has("next")).toBe(false);
+    expect(dropped.toString()).not.toContain("evil");
+
+    const sent: Array<{ verifyUrl: string }> = [];
+    const auth = createAuth(authInput({
+      sendVerificationEmail: async (message) => {
+        sent.push(message);
+      },
+    }));
+    const created = await auth.handler(signUpRequest("return+verify@example.com", "203.0.113.80", invitePath));
+    expect(created.status).toBe(200);
+    await flush();
+    const verifyUrl = sent[0]?.verifyUrl ?? "";
+    const parsed = new URL(verifyUrl);
+    expect(parsed.origin).toBe(WEB_ORIGIN);
+    expect(parsed.pathname).toBe("/verify-email");
+    expect(parsed.searchParams.get("next")).toBe(invitePath);
+    expect(parsed.searchParams.get("token")).not.toBe("invite-token");
+
+    const lines: string[] = [];
+    await new LogEmailSender({
+      emailFromAddress: "library@example.com",
+      emailFromName: "Factrove",
+      emailLogFullLinks: false,
+    }, (line) => lines.push(line)).send(buildVerificationEmail({
+      recipient: { email: "return+verify@example.com", name: "Return" },
+      verifyUrl,
+      supportEmail: "library@example.com",
+      siteUrl: WEB_ORIGIN,
+    }));
+    const logged = lines.join("\n");
+    expect(logged).toContain(`${WEB_ORIGIN}/verify-email?[redacted]`);
+    expect(logged).not.toContain("invite-token");
+    expect(logged).not.toContain("token=");
+
+    const resent = await auth.handler(jsonRequest("/api/auth/send-verification-email", "203.0.113.80", {
+      email: "return+verify@example.com",
+      callbackURL: invitePath,
+    }));
+    expect(resent.status).toBe(200);
+    await flush();
+    expect(new URL(sent.at(-1)?.verifyUrl ?? "http://invalid").searchParams.get("next")).toBe(invitePath);
+
+    const offSite = [
+      ["offsite+verify@example.com", "203.0.113.81", "https://evil.example/steal"],
+      ["protocol+verify@example.com", "203.0.113.82", "//evil.example"],
+      ["slash+verify@example.com", "203.0.113.83", "/\\evil.example"],
+    ] as const;
+    for (const [email, ip, callbackURL] of offSite) {
+      sent.length = 0;
+      const response = await auth.handler(signUpRequest(email, ip, callbackURL));
+      expect(response.status).toBe(200);
+      await flush();
+      expect(new URL(sent[0]?.verifyUrl ?? "http://invalid").searchParams.has("next")).toBe(false);
+      expect(sent[0]?.verifyUrl).not.toContain("evil");
+    }
+  });
 });
 
 function authInput(handlers: {
@@ -158,11 +222,12 @@ function authInput(handlers: {
   };
 }
 
-function signUpRequest(email: string, ip: string): Request {
+function signUpRequest(email: string, ip: string, callbackURL?: string): Request {
   return jsonRequest("/api/auth/sign-up/email", ip, {
     name: "Verify Check",
     email,
     password: "local-invite-check-1",
+    ...(callbackURL === undefined ? {} : { callbackURL }),
   });
 }
 

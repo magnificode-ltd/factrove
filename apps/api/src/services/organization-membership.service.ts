@@ -12,6 +12,8 @@ import {
   type InvitationEnvelope,
   type InvitationList,
   type InvitationPreview,
+  type OrganizationMember,
+  type OrganizationMemberList,
 } from "@factrove/contracts";
 import { Prisma } from "@prisma/client";
 import {
@@ -34,6 +36,7 @@ import { ApiErrorException } from "./api-error.js";
 import { InvitationRateLimiter } from "./invitation-rate-limit.js";
 
 const SESSION_MESSAGE = "Organization invitations require a browser session.";
+const MEMBER_SESSION_MESSAGE = "Listing members requires a browser session.";
 const OWNER_MESSAGE = "Only an owner can manage invitations.";
 const ALREADY_MEMBER_MESSAGE = "That person is already a member of this organization.";
 const PENDING_MESSAGE = "An invitation for this email is already pending.";
@@ -91,6 +94,45 @@ export class OrganizationMembershipService {
       invitations: visible.map(toInvitation),
       nextCursor: page.length > limit && last ? last.id : null,
     };
+  }
+
+  async listMembers(request: HeaderSource, query: { limit?: string; cursor?: string }): Promise<OrganizationMemberList> {
+    const actor = await this.requireMember(request);
+    const limit = readLimit(query.limit);
+    const cursor = readCursor(query.cursor);
+    return this.prisma.$transaction(async (tx) => {
+      // Lock order: the acting user, then that membership. This read does not lock
+      // organization, invitation, or apikey rows.
+      const user = await this.organizations.lockUser(tx, actor.user.id);
+      if (!user || !(await this.organizations.sessionIsCurrent(tx, actor.sessionId, actor.user.id))) {
+        throw new ApiErrorException(401, "UNAUTHENTICATED", "Sign in to continue.");
+      }
+      const membership = await this.organizations.membershipShare(tx, actor.user.id, actor.organization.id);
+      if (!membership) {
+        throw new ApiErrorException(403, "ORGANIZATION_SETUP_REQUIRED", "Create an organization to continue.");
+      }
+      const point = cursor === null ? null : await this.organizations.memberCursor(tx, actor.organization.id, cursor);
+      if (cursor !== null && point === null) {
+        throw new ApiErrorException(400, "INVALID_REQUEST", CURSOR_MESSAGE);
+      }
+      const rows = await this.organizations.listMembers(
+        tx,
+        actor.organization.id,
+        limit + 1,
+        point === null || cursor === null ? null : { createdAt: asDate(point), id: cursor },
+      );
+      const visible = rows.slice(0, limit);
+      const last = visible[visible.length - 1];
+      const pending = membership.role === "owner"
+        ? await this.organizations.listPendingInvitations(tx, actor.organization.id, INVITATION_LIST_MAX_LIMIT)
+        : [];
+      return {
+        caller: { id: membership.id, role: memberRole(membership.role) },
+        members: visible.map(toMember),
+        invitations: pending.map(toInvitation),
+        nextCursor: rows.length > limit && last ? last.id : null,
+      };
+    });
   }
 
   async create(request: HeaderSource, body: unknown): Promise<InvitationEnvelope> {
@@ -274,6 +316,17 @@ export class OrganizationMembershipService {
     });
   }
 
+  private async requireMember(request: HeaderSource): Promise<OwnerActor> {
+    if (this.actors.hasCredentialHeader(request)) {
+      throw new ApiErrorException(401, "UNAUTHENTICATED", MEMBER_SESSION_MESSAGE);
+    }
+    const actor = await this.actors.requireCurrentOrganization(request);
+    if (actor.via !== "session" || actor.sessionId === null) {
+      throw new ApiErrorException(401, "UNAUTHENTICATED", MEMBER_SESSION_MESSAGE);
+    }
+    return { ...actor, sessionId: actor.sessionId };
+  }
+
   private async requireOwner(request: HeaderSource): Promise<OwnerActor> {
     if (this.actors.hasCredentialHeader(request)) {
       throw new ApiErrorException(401, "UNAUTHENTICATED", SESSION_MESSAGE);
@@ -435,6 +488,22 @@ function clientIp(request: HeaderSource): string {
 
 function invitationAcceptUrl(webOrigin: string, token: string): string {
   return `${webOrigin.replace(/\/+$/, "")}/invites/accept?token=${encodeURIComponent(token)}`;
+}
+
+function toMember(row: { id: string; name: string; email: string; role: string }): OrganizationMember {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: memberRole(row.role),
+  };
+}
+
+function memberRole(role: string): OrganizationMember["role"] {
+  if (role === "owner" || role === "admin" || role === "member") {
+    return role;
+  }
+  return "member";
 }
 
 function toInvitation(row: InvitationRecord): Invitation {

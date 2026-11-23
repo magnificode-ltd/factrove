@@ -8,6 +8,7 @@ import {
   invitationEnvelopeSchema,
   invitationListSchema,
   invitationPreviewSchema,
+  organizationMemberListSchema,
   publicArtifactEnvelopeSchema,
   publicUnlockEnvelopeSchema,
   SHARE_GRANT_HEADER,
@@ -22,6 +23,7 @@ import {
   type InvitationEnvelope,
   type InvitationList,
   type InvitationPreview,
+  type OrganizationMemberList,
   type PublicArtifactEnvelope,
   type PublicUnlockEnvelope,
   type ShareEnvelope
@@ -76,6 +78,8 @@ export interface FactroveClient {
   getContext(): Promise<ContextEnvelope>;
   /** Creates the signed-in user's first organization. Session cookie only. */
   createOrganization(name: string): Promise<CreateOrganizationResponse>;
+  /** Lists members. Owners also receive pending invitations. Session only. */
+  listOrganizationMembers(input?: { limit?: number; cursor?: string }): Promise<OrganizationMemberList>;
   /** Lists invitations for the caller's current organization. Session owner only. */
   listOrganizationInvitations(input?: { limit?: number; cursor?: string }): Promise<InvitationList>;
   /** Invites an email address. The response says queued, not delivered. */
@@ -265,6 +269,13 @@ export function createFactroveClient(options: FactroveClientOptions): FactroveCl
         },
         createOrganizationResponseSchema
       ),
+    listOrganizationMembers: (input?: { limit?: number; cursor?: string }) => {
+      const params = new URLSearchParams();
+      if (input?.limit !== undefined) params.set("limit", String(input.limit));
+      if (input?.cursor !== undefined) params.set("cursor", input.cursor);
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      return request(`/organization/members${query}`, { method: "GET" }, organizationMemberListSchema);
+    },
     listOrganizationInvitations: (input?: { limit?: number; cursor?: string }) => {
       const params = new URLSearchParams();
       if (input?.limit !== undefined) params.set("limit", String(input.limit));

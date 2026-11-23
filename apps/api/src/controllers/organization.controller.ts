@@ -5,10 +5,12 @@ import {
   invitationEnvelopeSchema,
   invitationListSchema,
   invitationPreviewSchema,
+  organizationMemberListSchema,
   type CreateOrganizationResponse,
   type InvitationEnvelope,
   type InvitationList,
   type InvitationPreview,
+  type OrganizationMemberList,
 } from "@factrove/contracts";
 import { OrganizationMembershipService } from "../services/organization-membership.service.js";
 import { jsonBody } from "./json-body.js";
@@ -21,6 +23,16 @@ type JsonRequest = {
 @Controller()
 export class OrganizationController {
   constructor(@Inject(OrganizationMembershipService) private readonly membership: OrganizationMembershipService) {}
+
+  @Get("organization/members")
+  async listMembers(
+    @Req() request: JsonRequest,
+    @Query("limit") limit?: string,
+    @Query("cursor") cursor?: string,
+  ): Promise<OrganizationMemberList> {
+    const page = await this.membership.listMembers(request, { limit, cursor });
+    return organizationMemberListSchema.parse(page);
+  }
 
   @Get("organization/invitations")
   async list(

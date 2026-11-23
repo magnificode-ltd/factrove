@@ -63,6 +63,8 @@ describe("Account menu", () => {
 
     expect(document.body.textContent).toContain("Local User");
     expect(document.body.textContent).toContain("No organization");
+    const members = document.querySelector('a[href="/account/members"]');
+    expect(members?.textContent).toBe("Members");
     const keys = document.querySelector('a[href="/account/api-keys"]');
     expect(keys?.textContent).toBe("API keys");
     expect(document.body.textContent).toContain("Sign out");

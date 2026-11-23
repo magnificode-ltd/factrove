@@ -16,18 +16,37 @@ const redirect = vi.hoisted(() => vi.fn((path: string) => {
 const api = vi.hoisted(() => ({
   getContext: vi.fn(),
   listArtifacts: vi.fn(),
-  getArtifact: vi.fn()
+  getArtifact: vi.fn(),
+  previewInvitation: vi.fn()
 }));
+const inviteCookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 
 vi.mock("@/api/client", () => ({
   createWebClient: () => ({ createOrganization })
 }));
 
 vi.mock("@/api/server-client", () => ({
-  createRequestClient: async () => api
+  createRequestClient: async () => api,
+  createAnonymousServerClient: () => api
 }));
 
 vi.mock("next/navigation", () => ({ redirect }));
+
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => {
+      if (name !== "factrove-invite-next" || inviteCookie.value === undefined) {
+        return undefined;
+      }
+      return { name, value: inviteCookie.value };
+    },
+    delete: (name: string) => {
+      if (name === "factrove-invite-next") {
+        inviteCookie.value = undefined;
+      }
+    }
+  })
+}));
 
 import { CreateOrganizationForm } from "../src/components/create-organization-form";
 import OnboardingPage from "../src/app/(browse)/onboarding/page";
@@ -47,6 +66,8 @@ afterEach(() => {
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
   api.getArtifact.mockReset();
+  api.previewInvitation.mockReset();
+  inviteCookie.value = undefined;
 });
 
 describe("create organization page", () => {
@@ -121,6 +142,94 @@ describe("create organization page", () => {
       code: "ORGANIZATION_SETUP_REQUIRED"
     }));
     await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /onboarding");
+  });
+
+  it("returns a pending invitation to the accept page and ignores an off-site cookie", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=invite-token");
+    api.previewInvitation.mockResolvedValue({ email: "bea@example.com" });
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    api.getArtifact.mockRejectedValue(setupRequired);
+    await expect(OnboardingPage()).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+    await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+
+    inviteCookie.value = encodeURIComponent("https://evil.example/steal");
+    const html = renderToStaticMarkup(await OnboardingPage());
+    expect(html).toContain("Name your organization");
+    expect(html).not.toContain("evil.example");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
+
+    inviteCookie.value = encodeURIComponent("//evil.example");
+    await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /onboarding");
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=invite-token");
+    api.getContext.mockResolvedValue({
+      user: { id: "user-1", name: "Ada" },
+      organization: { id: "org-1", name: "Ada Lab" }
+    });
+    api.listArtifacts.mockResolvedValue({ items: [] });
+    const member = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+    expect(member).toContain("My artifacts");
+    await expect(OnboardingPage()).rejects.toThrow("REDIRECT /");
+  });
+
+  it("shows the name form when the stored invitation is no longer valid", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=dead-token");
+    api.previewInvitation.mockRejectedValue(new FactroveApiError("This invitation link is not valid.", {
+      status: 404,
+      code: "INVITATION_INVALID"
+    }));
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    const html = renderToStaticMarkup(await OnboardingPage());
+    expect(html).toContain("Name your organization");
+    expect(html).not.toContain("dead-token");
+    expect(redirect).not.toHaveBeenCalled();
+    expect(inviteCookie.value).toBeUndefined();
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=dead-token");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
+    expect(inviteCookie.value).toBeUndefined();
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=closed-token");
+    api.previewInvitation.mockRejectedValue(new FactroveApiError("You already belong to an organization.", {
+      status: 409,
+      code: "ORGANIZATION_EXISTS"
+    }));
+    const closed = renderToStaticMarkup(await OnboardingPage());
+    expect(closed).toContain("Name your organization");
+    expect(inviteCookie.value).toBeUndefined();
+  });
+
+  it("keeps the accept path when the invitation check is forbidden or unavailable", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    const acceptPath = "/invites/accept?token=invite-token";
+    inviteCookie.value = encodeURIComponent(acceptPath);
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    for (const error of [
+      new FactroveApiError("This request origin is not allowed.", { status: 403, code: "FORBIDDEN" }),
+      new FactroveApiError("The API is unavailable.", { status: 503, code: "UNAVAILABLE" }),
+      new FactroveApiError("Network request failed", { status: null, code: "NETWORK_ERROR" })
+    ]) {
+      inviteCookie.value = encodeURIComponent(acceptPath);
+      api.previewInvitation.mockRejectedValue(error);
+      await expect(OnboardingPage()).rejects.toThrow(`REDIRECT ${acceptPath}`);
+      await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow(`REDIRECT ${acceptPath}`);
+      expect(inviteCookie.value).toBe(encodeURIComponent(acceptPath));
+    }
   });
 });
 

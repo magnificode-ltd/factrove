@@ -1,8 +1,13 @@
-"use client";
-
 import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { VerifyEmailScreen } from "@/components/verify-email-screen";
+import type { Metadata } from "next";
+import { VerifyEmailRoute } from "@/components/verify-email-screen";
+
+export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+  robots: { index: false, follow: false },
+};
 
 export default function VerifyEmailPage() {
   return (
@@ -10,8 +15,4 @@ export default function VerifyEmailPage() {
       <VerifyEmailRoute />
     </Suspense>
   );
-}
-
-function VerifyEmailRoute() {
-  return <VerifyEmailScreen token={useSearchParams().get("token")} />;
 }

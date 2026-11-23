@@ -36,6 +36,14 @@ export type InvitationCursor = {
   id: string;
 };
 
+export type MemberRecord = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  createdAt: Date;
+};
+
 @Injectable()
 export class OrganizationsRepository {
   async lockUser(db: InvitationDb, userId: string): Promise<LockedUser | null> {
@@ -57,6 +65,21 @@ export class OrganizationsRepository {
         AND "expiresAt" > CURRENT_TIMESTAMP
     `;
     return rows.length === 1;
+  }
+
+  async membershipShare(
+    db: InvitationDb,
+    userId: string,
+    organizationId: string,
+  ): Promise<{ id: string; role: string } | null> {
+    const rows = await db.$queryRaw<Array<{ id: string; role: string }>>`
+      SELECT id, role
+      FROM member
+      WHERE "userId" = ${userId}
+        AND "organizationId" = ${organizationId}
+      FOR SHARE
+    `;
+    return rows[0] ?? null;
   }
 
   async membershipRole(db: InvitationDb, userId: string, organizationId: string): Promise<string | null> {
@@ -356,6 +379,56 @@ export class OrganizationsRepository {
       SELECT id, email, role, status, "expiresAt", "lastSentAt", "createdAt"
       FROM invitation
       WHERE "organizationId" = ${organizationId}
+      ORDER BY "createdAt" DESC, id DESC
+      LIMIT ${limit}
+    `;
+  }
+
+  async memberCursor(db: InvitationDb, organizationId: string, id: string): Promise<Date | null> {
+    const rows = await db.$queryRaw<Array<{ createdAt: Date }>>`
+      SELECT "createdAt"
+      FROM member
+      WHERE id = ${id}
+        AND "organizationId" = ${organizationId}
+    `;
+    return rows[0]?.createdAt ?? null;
+  }
+
+  // Joined date ascending, then id. The cursor is exclusive.
+  async listMembers(
+    db: InvitationDb,
+    organizationId: string,
+    limit: number,
+    cursor: InvitationCursor | null,
+  ): Promise<MemberRecord[]> {
+    if (cursor) {
+      return db.$queryRaw<MemberRecord[]>`
+        SELECT m.id, u.name, u.email, m.role, m."createdAt"
+        FROM member AS m
+        JOIN "user" AS u ON u.id = m."userId"
+        WHERE m."organizationId" = ${organizationId}
+          AND (m."createdAt", m.id) > (${cursor.createdAt}, ${cursor.id})
+        ORDER BY m."createdAt" ASC, m.id ASC
+        LIMIT ${limit}
+      `;
+    }
+    return db.$queryRaw<MemberRecord[]>`
+      SELECT m.id, u.name, u.email, m.role, m."createdAt"
+      FROM member AS m
+      JOIN "user" AS u ON u.id = m."userId"
+      WHERE m."organizationId" = ${organizationId}
+      ORDER BY m."createdAt" ASC, m.id ASC
+      LIMIT ${limit}
+    `;
+  }
+
+  async listPendingInvitations(db: InvitationDb, organizationId: string, limit: number): Promise<InvitationRecord[]> {
+    return db.$queryRaw<InvitationRecord[]>`
+      SELECT id, email, role, status, "expiresAt", "lastSentAt", "createdAt"
+      FROM invitation
+      WHERE "organizationId" = ${organizationId}
+        AND status = 'pending'
+        AND "expiresAt" > CURRENT_TIMESTAMP
       ORDER BY "createdAt" DESC, id DESC
       LIMIT ${limit}
     `;

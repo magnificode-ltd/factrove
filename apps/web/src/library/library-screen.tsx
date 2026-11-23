@@ -46,6 +46,11 @@ export function LibraryScreen({ state }: { state: LibraryModel }) {
               <SourceCodeLink className={headerLinkClass} />
               <RefreshLink href={refreshHref(state)} />
               {account ? (
+                <a href="/account/members" className={cn(headerLinkClass, "hidden sm:inline-flex")}>
+                  Members
+                </a>
+              ) : null}
+              {account ? (
                 <a href="/account/api-keys" className={cn(headerLinkClass, "hidden sm:inline-flex")}>
                   API keys
                 </a>

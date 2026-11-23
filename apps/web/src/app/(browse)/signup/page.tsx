@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { AuthField } from "@/components/auth-field";
 import { AuthScreen } from "@/components/auth-screen";
 import { Button } from "@/components/ui/button";
+import { invitationEmailSchema } from "@factrove/contracts";
 import { authClient } from "@/auth/client";
-import { authPageHref, safeNextPath } from "@/auth/return-path";
+import { invitationReturnPath, forgetInvitationReturn, rememberInvitationReturn, authPageHref, safeNextPath } from "@/auth/return-path";
 
 export default function SignupPage() {
   return (
@@ -17,9 +18,21 @@ export default function SignupPage() {
 }
 
 function SignupForm() {
-  const next = safeNextPath(useSearchParams().get("next"));
+  const params = useSearchParams();
+  const next = safeNextPath(params.get("next"));
+  const inviteNext = invitationReturnPath(next);
+  const invited = invitationEmailSchema.safeParse(params.get("email") ?? "");
+  const emailDefault = invited.success ? invited.data : "";
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (inviteNext) {
+      rememberInvitationReturn(inviteNext);
+      return;
+    }
+    forgetInvitationReturn();
+  }, [inviteNext]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -29,7 +42,12 @@ function SignupForm() {
     const password = String(form.get("password") ?? "");
     setPending(true);
     setError(null);
-    const result = await authClient.signUp.email({ name, email, password });
+    const result = await authClient.signUp.email({
+      name,
+      email,
+      password,
+      ...(inviteNext ? { callbackURL: inviteNext } : {}),
+    });
     if (result.error) {
       setPending(false);
       setError(result.error.message ?? "Could not create the account.");
@@ -53,7 +71,15 @@ function SignupForm() {
     >
       <form className="grid gap-5" onSubmit={onSubmit}>
         <AuthField id="name" name="name" label="Name" autoComplete="name" required />
-        <AuthField id="email" name="email" label="Email" type="email" autoComplete="email" required />
+        <AuthField
+          id="email"
+          name="email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          required
+          defaultValue={emailDefault}
+        />
         <AuthField
           id="password"
           name="password"
