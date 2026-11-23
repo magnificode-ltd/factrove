@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { APIError } from "better-auth/api";
 
 export const API_KEY_NOT_FOUND_MESSAGE = "API Key not found";
+const API_KEY_MEMBERSHIP_MESSAGE = "API key management requires one membership in this organization.";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -25,7 +26,8 @@ export async function scopeOrganizationApiKeyRequest(
 ): Promise<ScopedApiKeyRequest | undefined> {
   const action = apiKeyAction(ctx.path);
   if (action === "create") {
-    return { body: scopedCreateBody(ctx.body, input.userId, input.organizationId) };
+    const memberId = await membershipIdForApiKey(input.prisma, input.userId, input.organizationId);
+    return { body: scopedCreateBody(ctx.body, input.userId, memberId, input.organizationId) };
   }
   if (action === "list") {
     return { query: scopedListQuery(ctx.query, input.organizationId) };
@@ -40,20 +42,49 @@ export async function scopeOrganizationApiKeyRequest(
 }
 
 export function createdByUserIdFrom(metadata: unknown): string | null {
+  return metadataString(metadata, "createdByUserId");
+}
+
+export function createdByMemberIdFrom(metadata: unknown): string | null {
+  return metadataString(metadata, "createdByMemberId");
+}
+
+function metadataString(metadata: unknown, key: "createdByUserId" | "createdByMemberId"): string | null {
   const parsed = parseMetadata(metadata);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }
-  const value = parsed.createdByUserId;
+  const value = parsed[key];
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function scopedCreateBody(body: unknown, userId: string, organizationId: string): JsonRecord {
+// Metadata is server-owned. A client createdByUserId or createdByMemberId is
+// replaced with the session user and that user's current membership row.
+function scopedCreateBody(body: unknown, userId: string, memberId: string, organizationId: string): JsonRecord {
   const next = isRecord(body) ? body : {};
   delete next.userId;
   next.organizationId = organizationId;
-  next.metadata = { createdByUserId: userId };
+  next.metadata = { createdByUserId: userId, createdByMemberId: memberId };
   return next;
+}
+
+async function membershipIdForApiKey(
+  prisma: PrismaClient,
+  userId: string,
+  organizationId: string,
+): Promise<string> {
+  const rows = await prisma.member.findMany({
+    where: { userId, organizationId },
+    select: { id: true },
+    take: 2,
+  });
+  const memberId = rows.length === 1 ? rows[0]?.id : null;
+  if (!memberId) {
+    throw new APIError("FORBIDDEN", {
+      message: API_KEY_MEMBERSHIP_MESSAGE,
+    });
+  }
+  return memberId;
 }
 
 function scopedListQuery(query: unknown, organizationId: string): JsonRecord {
@@ -62,9 +93,9 @@ function scopedListQuery(query: unknown, organizationId: string): JsonRecord {
   return next;
 }
 
-// Metadata is written only at create. An update cannot replace createdByUserId
-// or any other metadata. The same body object is returned so a later merge
-// cannot copy the client value back in.
+// Metadata is written only at create. An update cannot replace createdByUserId,
+// createdByMemberId, or any other metadata. The same body object is returned so
+// a later merge cannot copy the client value back in.
 function immutableApiKeyMetadata(body: unknown): unknown {
   if (!isRecord(body)) {
     return body;

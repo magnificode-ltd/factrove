@@ -100,6 +100,9 @@ model Member {
   role           String       @default("member")
   createdAt      DateTime
 
+  // userId stays non-unique: one person may belong to several organizations.
+  // This pair is unique: one membership per person in an organization.
+  @@unique([organizationId, userId])
   @@index([organizationId])
   @@index([userId])
   @@map("member")
@@ -116,6 +119,10 @@ model Invitation {
   createdAt      DateTime     @default(now())
   inviterId      String
   user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+  // SHA-256 hex of the invite secret. The invitation id is not that secret.
+  // Null unless the row is pending. Cleared when the invitation is accepted, canceled, or expired.
+  tokenHash      String?      @unique
+  lastSentAt     DateTime?
 
   @@index([organizationId])
   @@index([email])

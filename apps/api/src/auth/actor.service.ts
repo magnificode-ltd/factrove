@@ -4,7 +4,7 @@ import type { ContextEnvelope } from "@factrove/contracts";
 import { fromNodeHeaders } from "better-auth/node";
 import { PrismaService } from "../database/index.js";
 import { ApiErrorException } from "../services/api-error.js";
-import { createdByUserIdFrom } from "./api-key-scope.js";
+import { createdByMemberIdFrom, createdByUserIdFrom } from "./api-key-scope.js";
 import { AuthService } from "./auth.service.js";
 import {
   ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
@@ -104,11 +104,19 @@ export class ActorService {
     }
     const organizationId = result.key.referenceId;
     const createdByUserId = createdByUserIdFrom(result.key.metadata);
-    if (!organizationId || !createdByUserId) {
+    if (!organizationId || !createdByUserId || !result.key.id) {
+      return null;
+    }
+    // A recorded membership id is the one captured at creation or at the first
+    // use of a rollout key. A new row after the creator leaves and joins again
+    // does not match, and this path does not replace a stored id.
+    const createdByMemberId = createdByMemberIdFrom(result.key.metadata)
+      ?? await this.bindMissingMembership(result.key.id, createdByUserId, organizationId);
+    if (!createdByMemberId) {
       return null;
     }
     const membership = await this.prisma.member.findFirst({
-      where: { userId: createdByUserId, organizationId },
+      where: { id: createdByMemberId, userId: createdByUserId, organizationId },
       select: {
         user: { select: { id: true, name: true } },
         organization: { select: { id: true, name: true } },
@@ -124,6 +132,57 @@ export class ActorService {
       via: "api-key",
       sessionId: null,
     };
+  }
+
+  // Keys created by the previous process after the migration lock have
+  // createdByUserId and no membership id. Bind the creator's single current
+  // membership in the key's organization, and only while the stored id is
+  // absent. The apikey row lock makes the check and the write one step.
+  private async bindMissingMembership(
+    keyId: string,
+    createdByUserId: string,
+    organizationId: string,
+  ): Promise<string | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ metadata: string | null; key_digest: string; enabled: boolean | null }>>`
+        SELECT metadata, "key" AS key_digest, enabled
+        FROM apikey
+        WHERE id = ${keyId}
+        FOR UPDATE
+      `;
+      const row = locked[0];
+      if (!row || row.enabled === false || row.key_digest.startsWith("invalidated:")) {
+        return null;
+      }
+      const existing = createdByMemberIdFrom(row.metadata);
+      if (existing) {
+        return existing;
+      }
+      if (createdByUserIdFrom(row.metadata) !== createdByUserId) {
+        return null;
+      }
+      const members = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM member
+        WHERE "userId" = ${createdByUserId}
+          AND "organizationId" = ${organizationId}
+        FOR SHARE
+      `;
+      if (members.length !== 1) {
+        return null;
+      }
+      const memberId = members[0]?.id;
+      if (!memberId) {
+        return null;
+      }
+      await tx.$executeRaw`
+        UPDATE apikey
+        SET metadata = ${JSON.stringify({ createdByUserId, createdByMemberId: memberId })},
+            "updatedAt" = CURRENT_TIMESTAMP
+        WHERE id = ${keyId}
+      `;
+      return memberId;
+    });
   }
 }
 

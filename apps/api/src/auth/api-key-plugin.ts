@@ -9,7 +9,8 @@ import type { BetterAuthPlugin } from "better-auth";
  */
 export function factroveApiKey(): BetterAuthPlugin {
   return apiKey({
-    // referenceId is the organization. Metadata stores the creating user.
+    // referenceId is the organization. Metadata stores the creating user and
+    // the membership id captured when the key was created.
     references: "organization",
     enableMetadata: true,
     defaultPrefix: "ftrv_",

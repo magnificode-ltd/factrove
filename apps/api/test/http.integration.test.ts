@@ -391,6 +391,7 @@ describe("HTTP API", () => {
   let baseUrl = "";
   let prisma: PrismaService;
   let owner: SignedInUser;
+  let ownerMemberId = "";
 
   beforeAll(async () => {
     process.env.BETTER_AUTH_SECRET = TEST_AUTH_SECRET;
@@ -419,6 +420,10 @@ describe("HTTP API", () => {
       name: "Owner",
       keyName: "tests",
     }, localOrganizationFixture.id);
+    ownerMemberId = (await prisma.member.findFirstOrThrow({
+      where: { userId: owner.userId, organizationId: localOrganizationFixture.id },
+      select: { id: true },
+    })).id;
     ownerApiKey = owner.apiKey;
   });
 
@@ -2961,8 +2966,7 @@ describe("HTTP API", () => {
         where: { userId: owner.userId },
         data: { activeOrganizationId: null },
       });
-      await prisma.member.deleteMany({ where: { userId: owner.userId } });
-      await addMembership(prisma, owner.userId, localOrganizationFixture.id);
+      await restoreOwnerMembership();
       await prisma.artifact.updateMany({
         where: { organizationId: { in: [orgA, orgB] } },
         data: { organizationId: localOrganizationFixture.id },
@@ -3880,13 +3884,27 @@ describe("HTTP API", () => {
     return { orgA, orgB, artifactId };
   }
 
+  // The owner's API key is bound to the membership id from sign-up. Restoring
+  // that same row keeps the key usable after a test adds or removes memberships.
+  async function restoreOwnerMembership(): Promise<void> {
+    await prisma.member.deleteMany({ where: { userId: owner.userId } });
+    await prisma.member.create({
+      data: {
+        id: ownerMemberId,
+        organizationId: localOrganizationFixture.id,
+        userId: owner.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+  }
+
   async function restoreLockedShare(): Promise<void> {
     await prisma.session.updateMany({
       where: { userId: owner.userId },
       data: { activeOrganizationId: null },
     });
-    await prisma.member.deleteMany({ where: { userId: owner.userId } });
-    await addMembership(prisma, owner.userId, localOrganizationFixture.id);
+    await restoreOwnerMembership();
     await prisma.artifact.updateMany({
       where: { organizationId: { in: ["org-lock-a", "org-lock-b"] } },
       data: { organizationId: localOrganizationFixture.id, accessType: "private" },

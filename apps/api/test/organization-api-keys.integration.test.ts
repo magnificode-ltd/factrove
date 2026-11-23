@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -206,16 +206,29 @@ describe("organization-owned API keys", () => {
         name: "cli",
         organizationId: beaOrg.id,
         userId: bea.userId,
-        metadata: { createdByUserId: bea.userId, note: "no" },
+        metadata: { createdByUserId: bea.userId, createdByMemberId: "forged-member", note: "no" },
       }),
     });
     expect(created.status).toBe(200);
-    const createdBody = await created.json() as { id?: string; key?: string; metadata?: { createdByUserId?: string; note?: string } };
+    const adaMember = await prisma.member.findFirstOrThrow({
+      where: { userId: ada.userId, organizationId: adaOrg.id },
+    });
+    const createdBody = await created.json() as {
+      id?: string;
+      key?: string;
+      metadata?: { createdByUserId?: string; createdByMemberId?: string; note?: string };
+    };
     expect(createdBody.key).toBeTruthy();
-    expect(createdBody.metadata).toEqual({ createdByUserId: ada.userId });
+    expect(createdBody.metadata).toEqual({
+      createdByUserId: ada.userId,
+      createdByMemberId: adaMember.id,
+    });
     const stored = await prisma.apikey.findUniqueOrThrow({ where: { id: createdBody.id } });
     expect(stored.referenceId).toBe(adaOrg.id);
-    expect(readCreatedBy(stored.metadata)).toBe(ada.userId);
+    expect(readKeyMetadata(stored.metadata)).toEqual({
+      createdByUserId: ada.userId,
+      createdByMemberId: adaMember.id,
+    });
 
     const adaList = await listKeys(baseUrl, ada.cookie, beaOrg.id);
     expect(adaList.apiKeys.map((item) => item.id)).toEqual([createdBody.id]);
@@ -436,24 +449,36 @@ describe("organization-owned API keys", () => {
       data: { activeOrganizationId: org.id },
     });
     const memberKey = await createKey(baseUrl, member.cookie, "member");
-    expect(readCreatedBy((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toBe(member.userId);
+    const memberRow = await prisma.member.findFirstOrThrow({
+      where: { userId: member.userId, organizationId: org.id },
+    });
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toEqual({
+      createdByUserId: member.userId,
+      createdByMemberId: memberRow.id,
+    });
 
     const forged = await updateKey(baseUrl, member.cookie, {
       keyId: memberKey.id,
-      metadata: { createdByUserId: owner.userId },
+      metadata: { createdByUserId: owner.userId, createdByMemberId: "forged-member" },
     });
     expect(forged.status).not.toBe(200);
-    expect(readCreatedBy((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toBe(member.userId);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } })).metadata)).toEqual({
+      createdByUserId: member.userId,
+      createdByMemberId: memberRow.id,
+    });
 
     const renamed = await updateKey(baseUrl, member.cookie, {
       keyId: memberKey.id,
       name: "renamed",
-      metadata: { createdByUserId: owner.userId, note: "no" },
+      metadata: { createdByUserId: owner.userId, createdByMemberId: "forged-member", note: "no" },
     });
     expect(renamed.status).toBe(200);
     const stored = await prisma.apikey.findUniqueOrThrow({ where: { id: memberKey.id } });
     expect(stored.name).toBe("renamed");
-    expect(readCreatedBy(stored.metadata)).toBe(member.userId);
+    expect(readKeyMetadata(stored.metadata)).toEqual({
+      createdByUserId: member.userId,
+      createdByMemberId: memberRow.id,
+    });
 
     const context = await fetch(`${baseUrl}/api/v1/context`, {
       headers: { authorization: `Bearer ${memberKey.key}` },
@@ -467,6 +492,152 @@ describe("organization-owned API keys", () => {
       headers: { authorization: `Bearer ${memberKey.key}` },
     });
     expect(hidden.status).toBe(404);
+  });
+
+  it("does not revive a key when the creator rejoins with a new membership", async () => {
+    const owner = await signUp(baseUrl, {
+      email: "rejoin-keys@example.com",
+      password: "rejoin-keys-password",
+      name: "Rejoin",
+    });
+    const org = await createFirstOrganization(baseUrl, owner.cookie, "Rejoin Lab");
+    const created = await createKey(baseUrl, owner.cookie, "rejoin");
+    const original = await prisma.member.findFirstOrThrow({
+      where: { userId: owner.userId, organizationId: org.id },
+    });
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: created.id } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: original.id,
+    });
+    const before = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${created.key}` },
+    });
+    expect(before.status).toBe(200);
+
+    await prisma.member.delete({ where: { id: original.id } });
+    const departed = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${created.key}` },
+    });
+    expect(departed.status).toBe(401);
+
+    const rejoinedId = randomUUID();
+    await prisma.member.create({
+      data: {
+        id: rejoinedId,
+        organizationId: org.id,
+        userId: owner.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    await prisma.session.updateMany({
+      where: { userId: owner.userId },
+      data: { activeOrganizationId: org.id },
+    });
+    const revived = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${created.key}` },
+    });
+    expect(revived.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: created.id } })).metadata).createdByMemberId).toBe(original.id);
+
+    const fresh = await createKey(baseUrl, owner.cookie, "rejoin-new");
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: fresh.id } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: rejoinedId,
+    });
+    const after = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${fresh.key}` },
+    });
+    expect(after.status).toBe(200);
+  });
+
+  it("binds a rollout key that has no membership id and does not rebind it after the creator rejoins", async () => {
+    const owner = await signUp(baseUrl, {
+      email: "rollout-keys@example.com",
+      password: "rollout-keys-password",
+      name: "Rollout",
+    });
+    const org = await createFirstOrganization(baseUrl, owner.cookie, "Rollout Lab");
+    const member = await prisma.member.findFirstOrThrow({
+      where: { userId: owner.userId, organizationId: org.id },
+    });
+    const secret = await insertRolloutKey(prisma, {
+      id: "rollout-key",
+      organizationId: org.id,
+      userId: owner.userId,
+    });
+    const [first, second] = await Promise.all([
+      fetch(`${baseUrl}/api/v1/context`, { headers: { authorization: `Bearer ${secret}` } }),
+      fetch(`${baseUrl}/api/v1/context`, { headers: { authorization: `Bearer ${secret}` } }),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: member.id,
+    });
+    const again = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(again.status).toBe(200);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: member.id,
+    });
+
+    await prisma.member.delete({ where: { id: member.id } });
+    const rejoinedId = randomUUID();
+    await prisma.member.create({
+      data: {
+        id: rejoinedId,
+        organizationId: org.id,
+        userId: owner.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const revived = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(revived.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-key" } })).metadata).createdByMemberId).toBe(member.id);
+
+    const unbound = await insertRolloutKey(prisma, {
+      id: "rollout-unbound",
+      organizationId: org.id,
+      userId: owner.userId,
+    });
+    await prisma.member.delete({ where: { id: rejoinedId } });
+    const rejected = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${unbound}` },
+    });
+    expect(rejected.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-unbound" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: null,
+    });
+
+    const otherOrg = randomUUID();
+    await prisma.organization.create({
+      data: { id: otherOrg, name: "Other Lab", slug: otherOrg, createdAt: new Date() },
+    });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: otherOrg,
+        userId: owner.userId,
+        role: "owner",
+        createdAt: new Date(),
+      },
+    });
+    const elsewhere = await fetch(`${baseUrl}/api/v1/context`, {
+      headers: { authorization: `Bearer ${unbound}` },
+    });
+    expect(elsewhere.status).toBe(401);
+    expect(readKeyMetadata((await prisma.apikey.findUniqueOrThrow({ where: { id: "rollout-unbound" } })).metadata)).toEqual({
+      createdByUserId: owner.userId,
+      createdByMemberId: null,
+    });
   });
 
   it("keeps a key inside its own organization when the creator also belongs to another", async () => {
@@ -630,12 +801,39 @@ async function expectForeignKey(): Promise<void> {
   }
 }
 
-function readCreatedBy(metadata: string | null): string | null {
+async function insertRolloutKey(
+  prisma: PrismaService,
+  input: { id: string; organizationId: string; userId: string },
+): Promise<string> {
+  const secret = `ftrv_${randomBytes(32).toString("base64url")}`;
+  const now = new Date();
+  await prisma.apikey.create({
+    data: {
+      id: input.id,
+      name: input.id,
+      start: secret.slice(0, 12),
+      prefix: "ftrv_",
+      referenceId: input.organizationId,
+      metadata: JSON.stringify({ createdByUserId: input.userId }),
+      key: createHash("sha256").update(secret).digest("base64url"),
+      enabled: true,
+      rateLimitEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  return secret;
+}
+
+function readKeyMetadata(metadata: string | null): { createdByUserId: string | null; createdByMemberId: string | null } {
   if (!metadata) {
-    return null;
+    return { createdByUserId: null, createdByMemberId: null };
   }
-  const parsed = JSON.parse(metadata) as { createdByUserId?: unknown };
-  return typeof parsed.createdByUserId === "string" ? parsed.createdByUserId : null;
+  const parsed = JSON.parse(metadata) as { createdByUserId?: unknown; createdByMemberId?: unknown };
+  return {
+    createdByUserId: typeof parsed.createdByUserId === "string" ? parsed.createdByUserId : null,
+    createdByMemberId: typeof parsed.createdByMemberId === "string" ? parsed.createdByMemberId : null,
+  };
 }
 
 async function listKeys(baseUrl: string, cookie: string, organizationId: string): Promise<{ apiKeys: Array<{ id: string }> }> {

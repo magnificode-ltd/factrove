@@ -67,7 +67,7 @@ export type FactroveAuth = {
     } | null>;
     verifyApiKey: (input: { body: { key: string } }) => Promise<{
       valid: boolean;
-      key: { referenceId: string; metadata?: unknown } | null;
+      key: { id: string; referenceId: string; metadata?: unknown } | null;
     }>;
   };
 };

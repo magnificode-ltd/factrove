@@ -5,6 +5,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { organization } from "better-auth/plugins";
 import { PrismaClient } from "@prisma/client";
 import { factroveApiKey } from "./src/auth/api-key-plugin.js";
+import { organizationSchema } from "./src/auth/organization-schema.js";
 
 function requiredBaseUrl(): string {
   const current = process.env.BASE_URL;
@@ -39,5 +40,5 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
-  plugins: [organization(), factroveApiKey()],
+  plugins: [organization({ schema: organizationSchema }), factroveApiKey()],
 });

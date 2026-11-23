@@ -160,10 +160,12 @@ export async function createUserWithApiKey(
       data: { id: organizationId, name: input.name, slug: organizationId, createdAt: now },
     });
   }
+  let memberId: string | null = null;
   if (input.member !== false) {
+    memberId = randomUUID();
     await prisma.member.create({
       data: {
-        id: randomUUID(),
+        id: memberId,
         organizationId,
         userId,
         role: input.role ?? (input.organizationId ? "member" : "owner"),
@@ -173,6 +175,10 @@ export async function createUserWithApiKey(
   }
   const apiKey = `ftrv_${randomBytes(32).toString("base64url")}`;
   const keyId = randomUUID();
+  const metadata: { createdByUserId: string; createdByMemberId?: string } = { createdByUserId: userId };
+  if (memberId) {
+    metadata.createdByMemberId = memberId;
+  }
   await prisma.apikey.create({
     data: {
       id: keyId,
@@ -180,7 +186,7 @@ export async function createUserWithApiKey(
       start: apiKey.slice(0, 12),
       prefix: "ftrv_",
       referenceId: organizationId,
-      metadata: JSON.stringify({ createdByUserId: userId }),
+      metadata: JSON.stringify(metadata),
       key: createHash("sha256").update(apiKey).digest("base64url"),
       enabled: true,
       rateLimitEnabled: false,
