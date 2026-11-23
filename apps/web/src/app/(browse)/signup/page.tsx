@@ -7,7 +7,7 @@ import { AuthScreen } from "@/components/auth-screen";
 import { Button } from "@/components/ui/button";
 import { invitationEmailSchema } from "@factrove/contracts";
 import { authClient } from "@/auth/client";
-import { invitationReturnPath, rememberInvitationReturn, authPageHref, safeNextPath } from "@/auth/return-path";
+import { invitationReturnPath, forgetInvitationReturn, rememberInvitationReturn, authPageHref, safeNextPath } from "@/auth/return-path";
 
 export default function SignupPage() {
   return (
@@ -27,7 +27,11 @@ function SignupForm() {
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    rememberInvitationReturn(inviteNext);
+    if (inviteNext) {
+      rememberInvitationReturn(inviteNext);
+      return;
+    }
+    forgetInvitationReturn();
   }, [inviteNext]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {

@@ -6,7 +6,7 @@ import { FactroveApiError } from "@factrove/api-client";
 import type { InvitationPreview } from "@factrove/contracts";
 import { createWebClient } from "@/api/client";
 import { authClient } from "@/auth/client";
-import { authPageHref, rememberInvitationReturn } from "@/auth/return-path";
+import { authPageHref, forgetInvitationReturn, invitationCookieMaxAge, rememberInvitationReturn } from "@/auth/return-path";
 import { AuthScreen } from "@/components/auth-screen";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +23,12 @@ type InviteState =
 
 function acceptPath(token: string): string {
   return `/invites/accept?token=${encodeURIComponent(token)}`;
+}
+
+function leaveInvitation(event: { preventDefault: () => void }): void {
+  event.preventDefault();
+  forgetInvitationReturn();
+  window.location.assign("/");
 }
 
 function expiryLabel(iso: string): string {
@@ -58,24 +64,29 @@ export function AcceptInvite({ token }: { token: string | null }) {
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    rememberInvitationReturn(token ? acceptPath(token) : null);
-  }, [token]);
-
-  useEffect(() => {
     let cancelled = false;
     const trimmed = token?.trim() ?? "";
     if (trimmed.length === 0) {
+      forgetInvitationReturn();
       setState({ kind: "invalid" });
       return;
     }
     void createWebClient().previewInvitation(trimmed).then(
       (preview) => {
-        if (!cancelled) {
-          setState({ kind: "ready", preview });
+        if (cancelled) {
+          return;
         }
+        const maxAge = invitationCookieMaxAge(preview.expiresAt);
+        if (maxAge > 0) {
+          rememberInvitationReturn(acceptPath(trimmed), maxAge);
+        } else {
+          forgetInvitationReturn();
+        }
+        setState({ kind: "ready", preview });
       },
       () => {
         if (!cancelled) {
+          forgetInvitationReturn();
           setState({ kind: "invalid" });
         }
       },
@@ -114,10 +125,10 @@ export function AcceptInvite({ token }: { token: string | null }) {
       <AuthScreen
         title="This invitation link is not valid"
         lede="Ask the person who invited you for a new link."
-        footer={<a className="font-semibold text-foreground underline-offset-4 hover:underline" href="/">Go to Factrove</a>}
+        footer={<a className="font-semibold text-foreground underline-offset-4 hover:underline" href="/" onClick={leaveInvitation}>Go to Factrove</a>}
       >
         <Button asChild className="h-11">
-          <a href="/">Go to Factrove</a>
+          <a href="/" onClick={leaveInvitation}>Go to Factrove</a>
         </Button>
       </AuthScreen>
     );
@@ -141,6 +152,7 @@ export function AcceptInvite({ token }: { token: string | null }) {
     setNote(null);
     try {
       await createWebClient().acceptInvitation(token);
+      forgetInvitationReturn();
       window.location.assign("/");
     } catch (caught) {
       setPending(false);
@@ -151,6 +163,9 @@ export function AcceptInvite({ token }: { token: string | null }) {
       if (caught.status === 401) {
         window.location.assign(loginHref);
         return;
+      }
+      if (caught.status === 404 || caught.status === 409) {
+        forgetInvitationReturn();
       }
       setNote(caught.message);
     }

@@ -85,6 +85,7 @@ describe("Accept invitation", () => {
     });
     expect(acceptInvitation).toHaveBeenCalledWith("invite-token");
     expect(assigned).toHaveBeenCalledWith("/");
+    expect(decodeURIComponent(document.cookie)).not.toContain("invite-token");
     assigned.mockRestore();
   });
 
@@ -122,6 +123,91 @@ describe("Accept invitation", () => {
     expect(container.textContent).toContain("This invitation link is not valid");
     expect(container.textContent).not.toContain("expired");
     expect(container.textContent).not.toContain("dead-token");
+  });
+
+  it("clears a stored invitation when the link is not valid and leaves for the library", async () => {
+    document.cookie = `factrove-invite-next=${encodeURIComponent("/invites/accept?token=dead-token")}; Path=/`;
+    let resolvePreview: (value: never) => void = () => undefined;
+    previewInvitation.mockReturnValue(new Promise((_resolve, reject) => {
+      resolvePreview = reject;
+    }));
+    getSession.mockResolvedValue({ data: null, error: null });
+    const container = await render(<AcceptInvite token="dead-token" />);
+    expect(decodeURIComponent(document.cookie)).toContain("/invites/accept?token=dead-token");
+    await act(async () => {
+      resolvePreview(new FactroveApiError("This invitation link is not valid.", {
+        status: 404,
+        code: "INVITATION_INVALID",
+      }) as never);
+    });
+    await flush();
+    expect(container.textContent).toContain("This invitation link is not valid");
+    expect(decodeURIComponent(document.cookie)).not.toContain("dead-token");
+    const assigned = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+    const exit = [...container.querySelectorAll("a")].find((link) => link.textContent === "Go to Factrove");
+    await act(async () => {
+      exit?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(assigned).toHaveBeenCalledWith("/");
+    expect(decodeURIComponent(document.cookie)).not.toContain("dead-token");
+    assigned.mockRestore();
+  });
+
+  it("forgets the return path when joining is no longer possible", async () => {
+    document.cookie = `factrove-invite-next=${encodeURIComponent("/invites/accept?token=invite-token")}; Path=/`;
+    previewInvitation.mockResolvedValue(preview);
+    getSession.mockResolvedValue({
+      data: { user: { id: "user-bea", email: "bea@example.com", name: "Bea", emailVerified: true } },
+      error: null,
+    });
+    acceptInvitation.mockRejectedValue(new FactroveApiError("You already belong to an organization.", {
+      status: 409,
+      code: "ORGANIZATION_EXISTS",
+    }));
+    const container = await render(<AcceptInvite token="invite-token" />);
+    await flush();
+    const join = [...container.querySelectorAll("button")].find((button) => button.textContent === "Join organization");
+    await act(async () => {
+      join?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain("You already belong to an organization.");
+    expect(decodeURIComponent(document.cookie)).not.toContain("invite-token");
+  });
+
+  it("remembers the invitation only after the preview, and only until it expires", async () => {
+    const writes: string[] = [];
+    const proto = Object.getPrototypeOf(document);
+    const desc = Object.getOwnPropertyDescriptor(proto, "cookie");
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => desc?.get?.call(document) ?? "",
+      set: (value: string) => {
+        writes.push(value);
+        desc?.set?.call(document, value);
+      },
+    });
+    try {
+      let resolvePreview: (value: typeof preview) => void = () => undefined;
+      previewInvitation.mockReturnValue(new Promise((resolve) => {
+        resolvePreview = resolve;
+      }));
+      getSession.mockResolvedValue({ data: null, error: null });
+      await render(<AcceptInvite token="invite-token" />);
+      expect(writes.some((line) => line.includes("invite-token"))).toBe(false);
+      const expiresAt = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+      await act(async () => {
+        resolvePreview({ ...preview, expiresAt });
+      });
+      await flush();
+      const stored = writes.find((line) => line.includes("invite-token"));
+      expect(decodeURIComponent(stored ?? "")).toContain("/invites/accept?token=invite-token");
+      expect(stored).toContain("Max-Age=604800");
+    } finally {
+      if (desc) {
+        Object.defineProperty(document, "cookie", desc);
+      }
+    }
   });
 });
 

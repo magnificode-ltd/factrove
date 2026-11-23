@@ -7,7 +7,7 @@ import { docsUrl } from "../src/docs";
 import { libraryViewFromParam, loadLibrary } from "../src/library/load-library";
 import { LibraryScreen } from "../src/library/library-screen";
 import { cliApiOrigin } from "../src/public-config";
-import { artifactReturnPath, authPageHref, invitationReturnPath, safeNextPath } from "../src/auth/return-path";
+import { artifactReturnPath, authPageHref, invitationCookieMaxAge, invitationReturnPath, safeNextPath } from "../src/auth/return-path";
 import { loadArtifact } from "../src/viewer/load-artifact";
 import { ViewerScreen } from "../src/viewer/viewer-screen";
 
@@ -364,6 +364,11 @@ describe("return path", () => {
     expect(invitationReturnPath("/\\evil.example")).toBeNull();
     expect(invitationReturnPath("/invites/accept/extra")).toBeNull();
     expect(invitationReturnPath("/artifacts/123")).toBeNull();
+    const now = Date.parse("2026-11-23T12:00:00.000Z");
+    expect(invitationCookieMaxAge("2026-11-23T12:02:00.000Z", now)).toBe(120);
+    expect(invitationCookieMaxAge("2026-12-23T12:00:00.000Z", now)).toBe(7 * 24 * 60 * 60);
+    expect(invitationCookieMaxAge("2026-11-23T11:59:00.000Z", now)).toBe(0);
+    expect(invitationCookieMaxAge("not-a-date", now)).toBe(0);
   });
 });
 

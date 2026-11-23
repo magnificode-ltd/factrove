@@ -73,6 +73,23 @@ describe("invitation signup", () => {
     expect(document.cookie).not.toContain("evil.example");
     assigned.mockRestore();
   });
+
+  it("drops a leftover invitation before an ordinary signup", async () => {
+    document.cookie = `factrove-invite-next=${encodeURIComponent(invitePath)}; Path=/`;
+    query.value = "";
+    signUpEmail.mockResolvedValue({ error: null });
+    const assigned = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+    const container = await render(<SignupPage />);
+    expect(decodeURIComponent(document.cookie)).not.toContain("invite-token");
+    await submit(container);
+    expect(signUpEmail).toHaveBeenCalledWith({
+      name: "Bea",
+      email: "bea@example.com",
+      password: "password-123",
+    });
+    expect(assigned).toHaveBeenCalledWith("/");
+    assigned.mockRestore();
+  });
 });
 
 async function render(node: ReactNode): Promise<HTMLElement> {

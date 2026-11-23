@@ -16,7 +16,8 @@ const redirect = vi.hoisted(() => vi.fn((path: string) => {
 const api = vi.hoisted(() => ({
   getContext: vi.fn(),
   listArtifacts: vi.fn(),
-  getArtifact: vi.fn()
+  getArtifact: vi.fn(),
+  previewInvitation: vi.fn()
 }));
 const inviteCookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 
@@ -37,6 +38,11 @@ vi.mock("next/headers", () => ({
         return undefined;
       }
       return { name, value: inviteCookie.value };
+    },
+    delete: (name: string) => {
+      if (name === "factrove-invite-next") {
+        inviteCookie.value = undefined;
+      }
     }
   })
 }));
@@ -59,6 +65,7 @@ afterEach(() => {
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
   api.getArtifact.mockReset();
+  api.previewInvitation.mockReset();
   inviteCookie.value = undefined;
 });
 
@@ -142,6 +149,7 @@ describe("create organization page", () => {
       code: "ORGANIZATION_SETUP_REQUIRED"
     });
     inviteCookie.value = encodeURIComponent("/invites/accept?token=invite-token");
+    api.previewInvitation.mockResolvedValue({ email: "bea@example.com" });
     api.getContext.mockRejectedValue(setupRequired);
     api.listArtifacts.mockRejectedValue(setupRequired);
     api.getArtifact.mockRejectedValue(setupRequired);
@@ -167,6 +175,29 @@ describe("create organization page", () => {
     const member = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
     expect(member).toContain("My artifacts");
     await expect(OnboardingPage()).rejects.toThrow("REDIRECT /");
+  });
+
+  it("shows the name form when the stored invitation is no longer valid", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=dead-token");
+    api.previewInvitation.mockRejectedValue(new FactroveApiError("This invitation link is not valid.", {
+      status: 404,
+      code: "INVITATION_INVALID"
+    }));
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    const html = renderToStaticMarkup(await OnboardingPage());
+    expect(html).toContain("Name your organization");
+    expect(html).not.toContain("dead-token");
+    expect(redirect).not.toHaveBeenCalled();
+    expect(inviteCookie.value).toBeUndefined();
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=dead-token");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
+    expect(inviteCookie.value).toBeUndefined();
   });
 });
 
