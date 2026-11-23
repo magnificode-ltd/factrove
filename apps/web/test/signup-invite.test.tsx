@@ -37,6 +37,7 @@ afterEach(() => {
   document.cookie = "factrove-invite-next=; Path=/; Max-Age=0";
   query.value = "";
   signUpEmail.mockReset();
+  delete process.env.TURNSTILE_SITE_KEY;
 });
 
 describe("invitation signup", () => {

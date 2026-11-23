@@ -68,6 +68,7 @@ describe.skipIf(!enabled)("S3 content round trip", () => {
       authCookieDomain: null,
       trustedProxies: [],
       shareTokenKey: null,
+      turnstileSecret: null,
       emailTransport: "log",
       emailFromAddress: "library@example.com",
       emailFromName: "Factrove",

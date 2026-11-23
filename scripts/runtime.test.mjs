@@ -417,12 +417,16 @@ describe("local runtime", () => {
     assert.match(compose, /DOCS_BASE_URL: \$\{DOCS_BASE_URL:-https:\/\/factrove\.mintlify\.app\}/);
     assert.match(compose, /POSTHOG_KEY: \$\{POSTHOG_KEY:-\}/);
     assert.match(compose, /POSTHOG_HOST: \$\{POSTHOG_HOST:-https:\/\/us\.i\.posthog\.com\}/);
+    assert.match(compose, /TURNSTILE_SITE_KEY: \$\{TURNSTILE_SITE_KEY:-\}/);
+    assert.match(compose, /TURNSTILE_SECRET_KEY: \$\{TURNSTILE_SECRET_KEY:-\}/);
     assert.equal(compose.includes("phc_"), false);
     const apiExample = readFileSync(join(repoRoot, "apps/api/.env.example"), "utf8");
     assert.match(apiExample, /^# SOURCE_CODE_URL=https:\/\/github\.com\/magnificode-ltd\/factrove$/m);
     assert.match(apiExample, /^# DOCS_BASE_URL=https:\/\/factrove\.mintlify\.app$/m);
     assert.match(apiExample, /^# POSTHOG_KEY=$/m);
     assert.match(apiExample, /^# POSTHOG_HOST=https:\/\/us\.i\.posthog\.com$/m);
+    assert.match(apiExample, /^# TURNSTILE_SITE_KEY=$/m);
+    assert.match(apiExample, /^# TURNSTILE_SECRET_KEY=$/m);
     for (const line of apiExample.split("\n")) {
       if (line.includes("phc_") && !line.trimStart().startsWith("#")) {
         assert.fail(`apps/api/.env.example sets a PostHog key: ${line}`);

@@ -14,8 +14,10 @@ import {
   readPosthogKey,
   readPublicApiOrigin,
   readSourceCodeUrl,
+  readTurnstileSiteKey,
   serverApiUrl,
   sourceCodeUrl,
+  turnstileSiteKey,
 } from "../src/public-config";
 
 const keys = [
@@ -26,6 +28,7 @@ const keys = [
   "DOCS_BASE_URL",
   "POSTHOG_KEY",
   "POSTHOG_HOST",
+  "TURNSTILE_SITE_KEY",
 ] as const;
 
 afterEach(() => {
@@ -182,6 +185,18 @@ describe("public API origin", () => {
     ).toBe(
       'window.__FACTROVE_PUBLIC__={"apiUrl":"https://api.example.com","posthogKey":"phc_testkey123","posthogHost":"https://posthog.example.com"}',
     );
+  });
+
+  it("reads a Turnstile site key and ignores an empty or invalid one", () => {
+    expect(readTurnstileSiteKey(undefined)).toBeUndefined();
+    expect(readTurnstileSiteKey("  ")).toBeUndefined();
+    expect(readTurnstileSiteKey("short")).toBeUndefined();
+    expect(readTurnstileSiteKey(" 1x00000000000000000000AA ")).toBe("1x00000000000000000000AA");
+    expect(turnstileSiteKey({})).toBeUndefined();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(turnstileSiteKey({ TURNSTILE_SITE_KEY: "not a key" })).toBeUndefined();
+    expect(turnstileSiteKey({ TURNSTILE_SITE_KEY: "1x00000000000000000000AA" })).toBe("1x00000000000000000000AA");
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it("prefers the injected browser origin over the baked value", () => {

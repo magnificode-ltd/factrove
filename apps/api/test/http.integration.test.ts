@@ -66,6 +66,7 @@ const config: ApiConfig = {
   authCookieDomain: null,
   trustedProxies: [],
   shareTokenKey: null,
+  turnstileSecret: null,
   emailTransport: "log",
   emailFromAddress: "library@example.com",
   emailFromName: "Factrove",
@@ -248,6 +249,15 @@ describe("API configuration", () => {
     expect(defaults.authCookieDomain).toBeNull();
     expect(defaults.trustedProxies).toEqual([]);
     expect(defaults.shareTokenKey).toBeNull();
+    expect(defaults.turnstileSecret).toBeNull();
+    expect(readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      TURNSTILE_SECRET_KEY: "  ",
+    }).turnstileSecret).toBeNull();
+    expect(readApiConfig({
+      BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+      TURNSTILE_SECRET_KEY: "  siteverify-secret  ",
+    }).turnstileSecret).toBe("siteverify-secret");
     expect(defaults.emailTransport).toBe("log");
     expect(defaults.emailFromAddress).toBe("no-reply@localhost");
     expect(defaults.emailFromName).toBe("Factrove");

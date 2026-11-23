@@ -30,6 +30,7 @@ export class AuthService implements OnModuleInit {
       onUserCreated: async () => {},
       sendPasswordResetEmail: (message) => this.invites.sendPasswordReset(message),
       sendVerificationEmail: (message) => this.invites.sendVerification(message),
+      turnstileSecret: this.config.turnstileSecret,
     });
   }
 

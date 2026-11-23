@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import { parse as parsePublicSuffix } from "psl";
 import { readTrustedProxies } from "../auth/client-ip.js";
+import { readTurnstileSecret } from "../auth/turnstile.js";
 
 export const API_CONFIG = Symbol("API_CONFIG");
 
@@ -28,6 +29,8 @@ export type ApiConfig = {
   brevoApiKey: string | null;
   // Set only when emailTransport is smtp. Other transports leave this null.
   smtp: SmtpConfig | null;
+  // Cloudflare Turnstile secret. Null skips signup verification.
+  turnstileSecret: string | null;
 };
 
 export type EmailTransport = "log" | "smtp" | "brevo";
@@ -66,6 +69,7 @@ export function readApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authCookieDomain: readCookieDomain(env.AUTH_COOKIE_DOMAIN, webOrigin, apiPublicOrigin, publicBaseUrl),
     trustedProxies: readTrustedProxies(env.TRUSTED_PROXIES),
     shareTokenKey: readShareTokenKey(env.SHARE_TOKEN_KEY),
+    turnstileSecret: readTurnstileSecret(env.TURNSTILE_SECRET_KEY),
     ...readEmailConfig(env),
   };
 }
