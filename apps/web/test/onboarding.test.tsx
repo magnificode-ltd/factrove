@@ -26,7 +26,8 @@ vi.mock("@/api/client", () => ({
 }));
 
 vi.mock("@/api/server-client", () => ({
-  createRequestClient: async () => api
+  createRequestClient: async () => api,
+  createAnonymousServerClient: () => api
 }));
 
 vi.mock("next/navigation", () => ({ redirect }));
@@ -198,6 +199,37 @@ describe("create organization page", () => {
     inviteCookie.value = encodeURIComponent("/invites/accept?token=dead-token");
     await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
     expect(inviteCookie.value).toBeUndefined();
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=closed-token");
+    api.previewInvitation.mockRejectedValue(new FactroveApiError("You already belong to an organization.", {
+      status: 409,
+      code: "ORGANIZATION_EXISTS"
+    }));
+    const closed = renderToStaticMarkup(await OnboardingPage());
+    expect(closed).toContain("Name your organization");
+    expect(inviteCookie.value).toBeUndefined();
+  });
+
+  it("keeps the accept path when the invitation check is forbidden or unavailable", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    const acceptPath = "/invites/accept?token=invite-token";
+    inviteCookie.value = encodeURIComponent(acceptPath);
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    for (const error of [
+      new FactroveApiError("This request origin is not allowed.", { status: 403, code: "FORBIDDEN" }),
+      new FactroveApiError("The API is unavailable.", { status: 503, code: "UNAVAILABLE" }),
+      new FactroveApiError("Network request failed", { status: null, code: "NETWORK_ERROR" })
+    ]) {
+      inviteCookie.value = encodeURIComponent(acceptPath);
+      api.previewInvitation.mockRejectedValue(error);
+      await expect(OnboardingPage()).rejects.toThrow(`REDIRECT ${acceptPath}`);
+      await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow(`REDIRECT ${acceptPath}`);
+      expect(inviteCookie.value).toBe(encodeURIComponent(acceptPath));
+    }
   });
 });
 

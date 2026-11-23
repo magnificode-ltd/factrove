@@ -1,5 +1,6 @@
+import { FactroveApiError } from "@factrove/api-client";
 import { invitationReturnPath } from "@factrove/contracts";
-import { createRequestClient } from "@/api/server-client";
+import { createAnonymousServerClient } from "@/api/server-client";
 import { INVITE_RETURN_COOKIE } from "@/auth/return-path";
 
 type CookieJar = {
@@ -23,8 +24,11 @@ export async function pendingInvitationPath(): Promise<string | null> {
       return null;
     }
     try {
-      await (await createRequestClient()).previewInvitation(token);
-    } catch {
+      await createAnonymousServerClient().previewInvitation(token);
+    } catch (error) {
+      if (!invitationPreviewIsDead(error)) {
+        return path;
+      }
       clearInviteCookie(jar);
       return null;
     }
@@ -32,6 +36,16 @@ export async function pendingInvitationPath(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export function invitationPreviewIsDead(error: unknown): boolean {
+  if (!(error instanceof FactroveApiError) || error.status === null) {
+    return false;
+  }
+  if (error.status === 409) {
+    return true;
+  }
+  return error.status === 404 && error.code === "INVITATION_INVALID";
 }
 
 function invitationToken(path: string): string | null {
