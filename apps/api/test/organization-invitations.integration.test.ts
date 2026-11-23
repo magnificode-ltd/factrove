@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Logger, type INestApplication } from "@nestjs/common";
@@ -484,6 +485,104 @@ describe("organization invitations", () => {
     expect(acceptStatus).toBe(429);
   });
 
+  it("does not let two owners both send inside the cooldown", async () => {
+    const ada = await owner("cooldown-a");
+    const bea = await register({ email: nextEmail("cooldown-b"), password: "password-123", name: "Bea Owner" });
+    const clerk = await register({ email: nextEmail("cooldown-clerk"), password: "password-123", name: "Clerk" });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: ada.organizationId,
+        userId: bea.userId,
+        role: "owner",
+        createdAt: new Date(),
+      },
+    });
+    const address = nextEmail("cooldown-mail");
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL is not set.");
+    }
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    let committed = false;
+    let pending: Array<ReturnType<typeof postJson>> = [];
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT id FROM organization WHERE id = $1 FOR UPDATE`, [ada.organizationId]);
+      pending = [
+        postJson("/organization/invitations", ada.cookie, { email: address }),
+        postJson("/organization/invitations", bea.cookie, { email: address }),
+      ];
+      await waitForOrganizationLockWaiters(2);
+      expect(await prisma.invitation.count({ where: { organizationId: ada.organizationId, email: address } })).toBe(0);
+      // The inviter is a user neither request has locked. The insert's user
+      // foreign key would otherwise wait on an owner who is waiting for this row.
+      await client.query(
+        `INSERT INTO invitation (
+          id, "organizationId", email, role, status, "expiresAt", "createdAt", "inviterId", "tokenHash", "lastSentAt"
+        ) VALUES (
+          $1, $2, $3, 'member', 'canceled',
+          CURRENT_TIMESTAMP + interval '7 days', CURRENT_TIMESTAMP, $4, NULL, CURRENT_TIMESTAMP
+        )`,
+        [randomUUID(), ada.organizationId, address, clerk.userId],
+      );
+      await client.query("COMMIT");
+      committed = true;
+      const [left, right] = await Promise.all(pending);
+      expect(left.response.status).toBe(429);
+      expect(right.response.status).toBe(429);
+      expect(left.body.error?.code).toBe("RATE_LIMITED");
+      expect(right.body.error?.code).toBe("RATE_LIMITED");
+      expect(Number(left.response.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      expect(Number(left.response.headers.get("retry-after"))).toBeLessThanOrEqual(60);
+      expect(Number(right.response.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      const rows = await prisma.invitation.findMany({ where: { organizationId: ada.organizationId, email: address } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("canceled");
+    } finally {
+      if (!committed) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        await Promise.allSettled(pending);
+      }
+      await client.end();
+    }
+  });
+
+  it("expires a stale pending invitation before resend checks that email", async () => {
+    const ada = await owner("stale");
+    const address = nextEmail("stale-mail");
+    const older = await postJson("/organization/invitations", ada.cookie, { email: address });
+    expect(older.response.status).toBe(201);
+    const olderId = older.body.invitation.id;
+    await prisma.$executeRaw`
+      UPDATE invitation
+      SET status = 'expired',
+          "tokenHash" = NULL,
+          "expiresAt" = CURRENT_TIMESTAMP - interval '2 days',
+          "lastSentAt" = CURRENT_TIMESTAMP - interval '2 minutes'
+      WHERE id = ${olderId}
+    `;
+    const newer = await postJson("/organization/invitations", ada.cookie, { email: address });
+    expect(newer.response.status).toBe(201);
+    const newerId = newer.body.invitation.id;
+    await prisma.$executeRaw`
+      UPDATE invitation
+      SET "expiresAt" = CURRENT_TIMESTAMP - interval '1 minute',
+          "lastSentAt" = CURRENT_TIMESTAMP - interval '2 minutes'
+      WHERE id = ${newerId}
+    `;
+    const resent = await postJson(`/organization/invitations/${olderId}/resend`, ada.cookie, undefined);
+    expect(resent.response.status).toBe(200);
+    expect(resent.body.invitation.id).toBe(olderId);
+    const olderRow = await prisma.invitation.findUniqueOrThrow({ where: { id: olderId } });
+    const newerRow = await prisma.invitation.findUniqueOrThrow({ where: { id: newerId } });
+    expect(olderRow.status).toBe("pending");
+    expect(olderRow.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(newerRow.status).toBe("expired");
+    expect(newerRow.tokenHash).toBeNull();
+  });
+
   it("keeps the invitation when the email queue is full and omits the token from the error", async () => {
     const ada = await owner("queue");
     const address = nextEmail("queued");
@@ -622,6 +721,31 @@ describe("organization invitations", () => {
       method,
       headers: { cookie, origin: "http://localhost:3000" },
     });
+  }
+
+  async function waitForOrganizationLockWaiters(minimum: number): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 3_000) {
+      const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+        SELECT COUNT(*)::int AS count
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%FOR UPDATE%'
+          AND query ILIKE '%organization%'
+      `;
+      if (Number(rows[0]?.count ?? 0) >= minimum) {
+        return;
+      }
+      await delay(20);
+    }
+    const activity = await prisma.$queryRaw<Array<{ state: string | null; wait_event: string | null; query: string | null }>>`
+      SELECT state, wait_event_type AS wait_event, LEFT(query, 240) AS query
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND pid <> pg_backend_pid()
+    `;
+    throw new Error(`Timed out waiting for organization lock waiters: ${JSON.stringify(activity)}`);
   }
 });
 

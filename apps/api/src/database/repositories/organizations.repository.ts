@@ -189,6 +189,35 @@ export class OrganizationsRepository {
     return rows[0] ?? null;
   }
 
+  // Shared by every owner of this organization. Callers take it after the acting
+  // user and membership share, and before any invitation row, matching the
+  // migration lock order: user, member, organization, invitation.
+  async lockOrganization(db: InvitationDb, organizationId: string): Promise<boolean> {
+    const rows = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM organization
+      WHERE id = ${organizationId}
+      FOR UPDATE
+    `;
+    return rows.length === 1;
+  }
+
+  // The invitation row is read, not locked. The organization lock comes first so
+  // a later invitation lock cannot wait while another transaction holds this row.
+  async lockInvitationOrganization(db: InvitationDb, invitationId: string): Promise<boolean> {
+    const rows = await db.$queryRaw<Array<{ id: string }>>`
+      SELECT organization.id
+      FROM organization
+      WHERE organization.id = (
+        SELECT "organizationId"
+        FROM invitation
+        WHERE id = ${invitationId}
+      )
+      FOR UPDATE OF organization
+    `;
+    return rows.length === 1;
+  }
+
   async lockInvitation(db: InvitationDb, id: string, organizationId: string): Promise<LockedInvitation | null> {
     const rows = await this.invitationRows(db, id, organizationId, true);
     return rows[0] ?? null;

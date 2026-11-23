@@ -100,6 +100,7 @@ export class OrganizationMembershipService {
     const token = createInvitationToken();
     const queued = await this.writeInvitation(() => this.prisma.$transaction(async (tx) => {
       await this.lockOwner(tx, actor);
+      await this.lockSend(tx, actor.organization.id);
       await expireStalePendingInvitations(tx, { organizationId: actor.organization.id });
       if (await this.organizations.emailHasMembership(tx, actor.organization.id, email)) {
         throw new ApiErrorException(409, "ALREADY_MEMBER", ALREADY_MEMBER_MESSAGE);
@@ -135,6 +136,8 @@ export class OrganizationMembershipService {
     this.rates.chargeSend(actor.user.id, actor.organization.id, normalizeInvitationEmail(existing.email));
     const queued = await this.writeInvitation(() => this.prisma.$transaction(async (tx) => {
       await this.lockOwner(tx, actor);
+      await this.lockSend(tx, actor.organization.id);
+      await expireStalePendingInvitations(tx, { organizationId: actor.organization.id });
       const row = await this.organizations.lockInvitation(tx, id, actor.organization.id);
       if (!row) {
         throw new ApiErrorException(404, "INVITATION_NOT_FOUND", NOT_FOUND_MESSAGE);
@@ -225,6 +228,11 @@ export class OrganizationMembershipService {
       if (!user || !(await this.organizations.sessionIsCurrent(tx, sessionId, actor.user.id))) {
         throw new ApiErrorException(401, "UNAUTHENTICATED", "Sign in to continue.");
       }
+      // Organization before invitation. A send already holds this row, and the
+      // member insert needs it too. Taking the invitation first deadlocks.
+      if (!(await this.organizations.lockInvitationOrganization(tx, invitationId))) {
+        throw new ApiErrorException(404, "INVITATION_INVALID", INVALID_MESSAGE);
+      }
       const row = await this.organizations.lockInvitationById(tx, invitationId);
       if (!row || !liveInvitation(row, token)) {
         throw new ApiErrorException(404, "INVITATION_INVALID", INVALID_MESSAGE);
@@ -279,6 +287,16 @@ export class OrganizationMembershipService {
       throw new ApiErrorException(403, "FORBIDDEN", OWNER_MESSAGE);
     }
     return { ...actor, sessionId: actor.sessionId };
+  }
+
+  // The organization row is the shared resource for every owner. Holding it
+  // from the cooldown check through the invitation write stops a second owner
+  // from sending again after the first owner inserts and revokes.
+  private async lockSend(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
+    const locked = await this.organizations.lockOrganization(tx, organizationId);
+    if (!locked) {
+      throw new ApiErrorException(403, "FORBIDDEN", OWNER_MESSAGE);
+    }
   }
 
   private async lockOwner(tx: Prisma.TransactionClient, actor: OwnerActor): Promise<void> {
