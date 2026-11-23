@@ -233,7 +233,9 @@ describe("viewer", () => {
       owner: true,
       organization: { id: "local-org", name: "Local Organization" }
     });
-    expect(html).toContain("Share with Local Organization");
+    expect(html).toContain('aria-label="More actions"');
+    expect(html).toContain("Copy link");
+    expect(html).not.toContain("Share with Local Organization");
     expect(html).toContain("Checking artifact content…");
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("allow-same-origin");
@@ -264,12 +266,14 @@ describe("viewer", () => {
     const noOrg = renderToStaticMarkup(
       <ViewerScreen state={{ status: "ready", artifact: item, organization: null, owner: true, share: null }} />
     );
-    expect(owner).toContain("Share with Local Organization");
-    expect(owner).toContain('aria-haspopup="dialog"');
-    expect(owner).toContain("Rename");
-    expect(owner).toContain("Delete");
-    expect(shared).toContain("Rename");
-    expect(shared).toContain("Delete");
+    expect(owner).toContain("Private");
+    expect(owner).toContain("Copy link");
+    expect(owner).toContain('aria-label="More actions"');
+    expect(owner).not.toContain("Share with Local Organization");
+    expect(owner).not.toContain("Rename");
+    expect(owner).not.toContain("Delete");
+    expect(shared).not.toContain("Rename");
+    expect(shared).not.toContain("Delete");
     expect(reader).not.toContain("Rename");
     expect(reader).not.toContain("Delete");
     expect(shared).not.toContain("Share with Local Organization");

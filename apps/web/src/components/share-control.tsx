@@ -21,7 +21,8 @@ export function ShareControl({
   viewerUrl,
   showCopyLink = false,
   compact = false,
-  dense = false
+  dense = false,
+  primary = false
 }: {
   artifactId: string;
   initial: ShareState;
@@ -29,6 +30,7 @@ export function ShareControl({
   showCopyLink?: boolean;
   compact?: boolean;
   dense?: boolean;
+  primary?: boolean;
 }) {
   const [share, setShare] = useState(initial);
   const [expanded, setExpanded] = useState(compact && Boolean(initial.shareUrl));
@@ -123,12 +125,12 @@ export function ShareControl({
         }
       }}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={cn("flex items-center", dense ? "flex-nowrap gap-1.5" : "flex-wrap gap-2")}>
         <Button
           ref={toggleRef}
           type="button"
-          variant={share.shared ? "default" : "outline"}
-          className={cn(buttonClass, share.shared ? "" : "bg-white")}
+          variant={primary || share.shared ? "default" : "outline"}
+          className={cn(buttonClass, primary || share.shared ? "" : "bg-white")}
           aria-expanded={expanded}
           aria-controls={panelId}
           disabled={pending !== null}
@@ -139,7 +141,14 @@ export function ShareControl({
           {share.passwordProtected ? <span className="sr-only">, password protected</span> : null}
         </Button>
         {showCopyLink && link ? (
-          <CopyButton label="Copy link" copiedLabel="Copied" message="Link copied" value={link} />
+          <CopyButton
+            label="Copy link"
+            copiedLabel="Copied"
+            message="Link copied"
+            value={link}
+            className={dense ? "h-8 border-border bg-white px-2.5 max-sm:size-8 max-sm:px-0" : undefined}
+            labelClassName={dense ? "max-sm:sr-only" : undefined}
+          />
         ) : null}
       </div>
       {expanded && share.shareUrl ? (
