@@ -50,6 +50,7 @@ function lazyClient(config: CliConfigService): FactroveClient {
   return {
     getContext: () => resolve().getContext(),
     createOrganization: (name) => resolve().createOrganization(name),
+    listOrganizationMembers: (input) => resolve().listOrganizationMembers(input),
     listOrganizationInvitations: (input) => resolve().listOrganizationInvitations(input),
     createOrganizationInvitation: (email) => resolve().createOrganizationInvitation(email),
     resendOrganizationInvitation: (id) => resolve().resendOrganizationInvitation(id),

@@ -81,6 +81,67 @@ describe("organization invitations", () => {
     }
   });
 
+  it("lists members for any member and pending invitations for an owner", async () => {
+    const ada = await owner("roster");
+    const bea = await register({ email: nextEmail("roster-member"), password: "password-123", name: "Bea Member" });
+    await prisma.member.create({
+      data: {
+        id: randomUUID(),
+        organizationId: ada.organizationId,
+        userId: bea.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const invited = nextEmail("roster-invite");
+    const created = await postJson("/organization/invitations", ada.cookie, { email: invited });
+    expect(created.response.status).toBe(201);
+    const stale = await postJson("/organization/invitations", ada.cookie, { email: nextEmail("roster-stale") });
+    expect(stale.response.status).toBe(201);
+    await prisma.$executeRaw`
+      UPDATE invitation
+      SET "expiresAt" = CURRENT_TIMESTAMP - interval '1 minute'
+      WHERE id = ${stale.body.invitation.id}
+    `;
+
+    const ownerPage = await getJson("/organization/members", ada.cookie);
+    expect(ownerPage.response.status).toBe(200);
+    expect(ownerPage.body.caller?.role).toBe("owner");
+    expect(ownerPage.body.members?.map((member) => member.email).sort()).toEqual([ada.email, bea.email].sort());
+    expect(ownerPage.body.members?.find((member) => member.email === ada.email)).toMatchObject({ name: "Ada Owner", role: "owner" });
+    expect(ownerPage.body.members?.find((member) => member.email === bea.email)).toMatchObject({ name: "Bea Member", role: "member" });
+    expect(ownerPage.body.invitations?.map((invitation) => invitation.email)).toEqual([invited]);
+    expect(ownerPage.body.invitations?.[0]?.status).toBe("pending");
+    expect(JSON.stringify(ownerPage.body)).not.toContain("tokenHash");
+
+    const memberPage = await getJson("/organization/members", bea.cookie);
+    expect(memberPage.response.status).toBe(200);
+    expect(memberPage.body.caller?.role).toBe("member");
+    expect(memberPage.body.members).toHaveLength(2);
+    expect(memberPage.body.invitations).toEqual([]);
+
+    const key = await createSessionApiKey(baseUrl, ada.cookie, "roster");
+    const byKey = await fetch(`${baseUrl}/api/v1/organization/members`, {
+      headers: { authorization: `Bearer ${key.apiKey}` },
+    });
+    expect(byKey.status).toBe(401);
+    expect((await byKey.json()).error.code).toBe("UNAUTHENTICATED");
+
+    const first = await getJson("/organization/members?limit=1", ada.cookie);
+    expect(first.response.status).toBe(200);
+    expect(first.body.members).toHaveLength(1);
+    expect(first.body.nextCursor).toBe(first.body.members?.[0]?.id);
+    const second = await getJson(`/organization/members?limit=1&cursor=${first.body.nextCursor}`, ada.cookie);
+    expect(second.response.status).toBe(200);
+    expect(second.body.members).toHaveLength(1);
+    expect(second.body.members?.[0]?.id).not.toBe(first.body.members?.[0]?.id);
+    expect(second.body.nextCursor).toBeNull();
+
+    const badCursor = await getJson("/organization/members?cursor=missing-member", ada.cookie);
+    expect(badCursor.response.status).toBe(400);
+    expect(badCursor.body.error?.code).toBe("INVALID_REQUEST");
+  });
+
   it("creates, lists, resends, and revokes without returning a secret", async () => {
     const ada = await owner("ada");
     const logs: string[] = [];
@@ -752,7 +813,10 @@ describe("organization invitations", () => {
 type Payload = {
   delivery?: string;
   invitation?: { id: string; email: string };
-  invitations?: Array<{ id: string }>;
+  invitations?: Array<{ id: string; email?: string; status?: string }>;
+  caller?: { id: string; role: string };
+  members?: Array<{ id: string; name: string; email: string; role: string }>;
+  nextCursor?: string | null;
   organization?: { id: string; name: string };
   error?: { code: string; message: string };
 };

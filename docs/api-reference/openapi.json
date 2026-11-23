@@ -2709,6 +2709,107 @@
         }
       }
     },
+    "/api/v1/organization/members": {
+      "get": {
+        "operationId": "listOrganizationMembers",
+        "tags": [
+          "Organization"
+        ],
+        "summary": "List members and pending invitations",
+        "description": "Session cookie only. An API key is rejected. The organization is the caller's current membership, never a client-supplied id. Any member can call it. `caller` is that membership. Each member has id, name, email, and role. Results are ordered by joined date ascending, then id ascending. `limit` defaults to 20 and is at most 50. `cursor` is the id of the last member from the previous page. An unknown cursor in this organization is `400 INVALID_REQUEST`. `invitations` lists pending invitations that have not reached `expiresAt`, newest first, at most 50. An owner receives that list. A member who is not an owner receives an empty list. The secret and its hash are omitted. A session with no organization is `403 ORGANIZATION_SETUP_REQUIRED`.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size from 1 to 50. Default 20.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Member id of the last item on the previous page.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of members, plus pending invitations for an owner. `nextCursor` is null on the last page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The limit or cursor is not valid. Code `INVALID_REQUEST`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "Send exactly one file."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                },
+                "example": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Sign in to continue."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller has no organization. Code `ORGANIZATION_SETUP_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Several memberships and no active organization. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organization/invitations": {
       "get": {
         "operationId": "listOrganizationInvitations",
@@ -4365,6 +4466,144 @@
           }
         },
         "required": [
+          "invitations",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "OrganizationMemberList": {
+        "type": "object",
+        "properties": {
+          "caller": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "role"
+            ],
+            "additionalProperties": false
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "owner",
+                    "admin",
+                    "member"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "email",
+                "role"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "invitations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "owner",
+                    "admin",
+                    "member"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "accepted",
+                    "canceled",
+                    "expired"
+                  ]
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "lastSentAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "id",
+                "email",
+                "role",
+                "status",
+                "expiresAt",
+                "lastSentAt",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "caller",
+          "members",
           "invitations",
           "nextCursor"
         ],

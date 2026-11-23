@@ -34,7 +34,8 @@ import {
   invitationEnvelopeSchema,
   invitationListSchema,
   invitationPreviewSchema,
-  invitationTokenRequestSchema
+  invitationTokenRequestSchema,
+  organizationMemberListSchema
 } from "./index.js";
 
 export const createApiKeyRequestSchema = z.object({
@@ -244,6 +245,7 @@ export const namedSchemas: Record<string, z.ZodType> = {
   CreateInvitationRequest: createInvitationRequestSchema,
   InvitationEnvelope: invitationEnvelopeSchema,
   InvitationList: invitationListSchema,
+  OrganizationMemberList: organizationMemberListSchema,
   InvitationTokenRequest: invitationTokenRequestSchema,
   InvitationPreview: invitationPreviewSchema
 };
@@ -981,6 +983,53 @@ export const httpOperations: HttpOperation[] = [
       },
       "503": {
         description: "Object storage failed while reading HTML. Code `STORAGE_UNAVAILABLE`. No Retry-After.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "listOrganizationMembers",
+    method: "get",
+    path: "/api/v1/organization/members",
+    tags: ["Organization"],
+    summary: "List members and pending invitations",
+    description:
+      "Session cookie only. An API key is rejected. The organization is the caller's current membership, never a client-supplied id. Any member can call it. `caller` is that membership. Each member has id, name, email, and role. Results are ordered by joined date ascending, then id ascending. `limit` defaults to " +
+      String(INVITATION_LIST_DEFAULT_LIMIT) +
+      " and is at most " +
+      String(INVITATION_LIST_MAX_LIMIT) +
+      ". `cursor` is the id of the last member from the previous page. An unknown cursor in this organization is `400 INVALID_REQUEST`. `invitations` lists pending invitations that have not reached `expiresAt`, newest first, at most " +
+      String(INVITATION_LIST_MAX_LIMIT) +
+      ". An owner receives that list. A member who is not an owner receives an empty list. The secret and its hash are omitted. A session with no organization is `403 ORGANIZATION_SETUP_REQUIRED`.",
+    security: "session",
+    queryParameters: [
+      {
+        name: "limit",
+        required: false,
+        description: `Page size from 1 to ${INVITATION_LIST_MAX_LIMIT}. Default ${INVITATION_LIST_DEFAULT_LIMIT}.`,
+        schema: z.string()
+      },
+      {
+        name: "cursor",
+        required: false,
+        description: "Member id of the last item on the previous page.",
+        schema: z.string().min(1).max(200)
+      }
+    ],
+    responses: {
+      "200": {
+        description: "One page of members, plus pending invitations for an owner. `nextCursor` is null on the last page.",
+        schema: organizationMemberListSchema,
+        schemaName: "OrganizationMemberList"
+      },
+      "400": { description: "The limit or cursor is not valid. Code `INVALID_REQUEST`.", schemaName: "ApiError" },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The caller has no organization. Code `ORGANIZATION_SETUP_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Several memberships and no active organization. Code `ORGANIZATION_SELECTION_REQUIRED`.",
         schemaName: "ApiError"
       }
     }
