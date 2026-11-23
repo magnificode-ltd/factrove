@@ -14,6 +14,7 @@ import {
   EMAIL_VERIFICATION_REQUEST_MAX,
   EMAIL_VERIFICATION_REQUEST_WINDOW_SECONDS,
   emailVerificationUrl,
+  invitationCallbackPath,
   passwordResetUrl,
 } from "../mail/password-reset-link.js";
 import { logWithoutThrowing } from "../mail/safe-log.js";
@@ -121,8 +122,8 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       expiresIn: EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
-      sendVerificationEmail: async ({ user, token }) => {
-        const verifyUrl = emailVerificationUrl(input.webOrigin, token);
+      sendVerificationEmail: async ({ user, token, url }) => {
+        const verifyUrl = emailVerificationUrl(input.webOrigin, token, invitationCallbackPath(url));
         const email = user.email.trim();
         if (verifyUrl === null || email.length === 0) {
           return;

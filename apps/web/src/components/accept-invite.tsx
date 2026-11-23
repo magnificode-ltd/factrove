@@ -6,7 +6,7 @@ import { FactroveApiError } from "@factrove/api-client";
 import type { InvitationPreview } from "@factrove/contracts";
 import { createWebClient } from "@/api/client";
 import { authClient } from "@/auth/client";
-import { authPageHref } from "@/auth/return-path";
+import { authPageHref, rememberInvitationReturn } from "@/auth/return-path";
 import { AuthScreen } from "@/components/auth-screen";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,6 +56,10 @@ export function AcceptInvite({ token }: { token: string | null }) {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    rememberInvitationReturn(token ? acceptPath(token) : null);
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;

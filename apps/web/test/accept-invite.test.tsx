@@ -48,6 +48,7 @@ afterEach(() => {
   acceptInvitation.mockReset();
   getSession.mockReset();
   signOut.mockClear();
+  document.cookie = "factrove-invite-next=; Path=/; Max-Age=0";
 });
 
 describe("Accept invitation", () => {
@@ -65,6 +66,7 @@ describe("Accept invitation", () => {
     expect(login?.getAttribute("href")).toContain(encodeURIComponent("/invites/accept?token=invite-token"));
     expect(signup?.getAttribute("href")).toContain("email=bea%40example.com");
     expect(container.textContent).not.toContain("already has an account");
+    expect(decodeURIComponent(document.cookie)).toContain("/invites/accept?token=invite-token");
   });
 
   it("joins when the signed-in email matches and is verified", async () => {

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createRequestClient } from "@/api/server-client";
+import { pendingInvitationPath } from "@/auth/pending-invitation";
 import { loadArtifact } from "@/viewer/load-artifact";
 import { ViewerScreen } from "@/viewer/viewer-screen";
 
@@ -9,7 +10,7 @@ export default async function ArtifactPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const state = await loadArtifact(await createRequestClient(), id);
   if (state.status === "setup-required") {
-    redirect("/onboarding");
+    redirect((await pendingInvitationPath()) ?? "/onboarding");
   }
   return <ViewerScreen state={state} />;
 }

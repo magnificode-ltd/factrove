@@ -1,3 +1,5 @@
+import { invitationReturnPath } from "@factrove/contracts";
+
 // Better Auth's default reset token lifetime. The email copy uses the label.
 export const PASSWORD_RESET_EXPIRES_IN_SECONDS = 60 * 60;
 export const PASSWORD_RESET_EXPIRES_LABEL = "one hour";
@@ -21,8 +23,31 @@ export function passwordResetUrl(webOrigin: string, token: string): string | nul
   return actionUrl(webOrigin, "/reset-password", token);
 }
 
-export function emailVerificationUrl(webOrigin: string, token: string): string | null {
-  return actionUrl(webOrigin, "/verify-email", token);
+export function emailVerificationUrl(webOrigin: string, token: string, returnPath?: string | null): string | null {
+  const url = actionUrl(webOrigin, "/verify-email", token);
+  if (url === null) {
+    return null;
+  }
+  const next = invitationReturnPath(returnPath);
+  if (next === null) {
+    return url;
+  }
+  const parsed = new URL(url);
+  parsed.searchParams.set("next", next);
+  return parsed.toString();
+}
+
+// Better Auth puts the signup callbackURL on its own verify URL. This reads
+// that value and keeps only a same-origin invitation path.
+export function invitationCallbackPath(authUrl: string | null | undefined): string | null {
+  if (!authUrl) {
+    return null;
+  }
+  try {
+    return invitationReturnPath(new URL(authUrl).searchParams.get("callbackURL"));
+  } catch {
+    return null;
+  }
 }
 
 function actionUrl(webOrigin: string, pathname: string, token: string): string | null {

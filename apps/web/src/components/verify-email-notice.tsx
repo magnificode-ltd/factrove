@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/auth/client";
+import { invitationReturnPath, readInvitationReturn } from "@/auth/return-path";
 
 const DISMISS_PREFIX = "factrove.verify-dismissed.";
 
@@ -60,7 +61,11 @@ export function VerifyEmailNotice() {
     setPending(true);
     setNote(null);
     try {
-      const result = await authClient.sendVerificationEmail({ email: user.email });
+      const inviteNext = invitationReturnPath(`${window.location.pathname}${window.location.search}`) ?? readInvitationReturn();
+      const result = await authClient.sendVerificationEmail({
+        email: user.email,
+        ...(inviteNext ? { callbackURL: inviteNext } : {}),
+      });
       setPending(false);
       if (result.error) {
         setNote(result.error.status === 429

@@ -7,7 +7,7 @@ import { docsUrl } from "../src/docs";
 import { libraryViewFromParam, loadLibrary } from "../src/library/load-library";
 import { LibraryScreen } from "../src/library/library-screen";
 import { cliApiOrigin } from "../src/public-config";
-import { artifactReturnPath, authPageHref, safeNextPath } from "../src/auth/return-path";
+import { artifactReturnPath, authPageHref, invitationReturnPath, safeNextPath } from "../src/auth/return-path";
 import { loadArtifact } from "../src/viewer/load-artifact";
 import { ViewerScreen } from "../src/viewer/viewer-screen";
 
@@ -354,6 +354,16 @@ describe("return path", () => {
     expect(safeNextPath("//evil.example")).toBe("/");
     expect(safeNextPath("/\\evil.example")).toBe("/");
     expect(authPageHref("login", "/")).toBe("/login");
+    const invitePath = "/invites/accept?token=invite-token";
+    expect(invitationReturnPath(invitePath)).toBe(invitePath);
+    expect(invitationReturnPath(`${invitePath}#inbox`)).toBe(invitePath);
+    expect(invitationReturnPath(null)).toBeNull();
+    expect(invitationReturnPath("")).toBeNull();
+    expect(invitationReturnPath("https://evil.example/invites/accept")).toBeNull();
+    expect(invitationReturnPath("//evil.example/invites/accept")).toBeNull();
+    expect(invitationReturnPath("/\\evil.example")).toBeNull();
+    expect(invitationReturnPath("/invites/accept/extra")).toBeNull();
+    expect(invitationReturnPath("/artifacts/123")).toBeNull();
   });
 });
 

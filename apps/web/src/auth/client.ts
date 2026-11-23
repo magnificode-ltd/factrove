@@ -15,7 +15,7 @@ export type FactroveAuthClient = {
     email: (input: { email: string; password: string }) => Promise<AuthCall>;
   };
   signUp: {
-    email: (input: { name: string; email: string; password: string }) => Promise<AuthCall>;
+    email: (input: { name: string; email: string; password: string; callbackURL?: string }) => Promise<AuthCall>;
   };
   signOut: () => Promise<unknown>;
   requestPasswordReset: (input: { email: string }) => Promise<AuthCall>;

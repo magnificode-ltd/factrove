@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   listArtifacts: vi.fn(),
   getArtifact: vi.fn()
 }));
+const inviteCookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 
 vi.mock("@/api/client", () => ({
   createWebClient: () => ({ createOrganization })
@@ -28,6 +29,17 @@ vi.mock("@/api/server-client", () => ({
 }));
 
 vi.mock("next/navigation", () => ({ redirect }));
+
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) => {
+      if (name !== "factrove-invite-next" || inviteCookie.value === undefined) {
+        return undefined;
+      }
+      return { name, value: inviteCookie.value };
+    }
+  })
+}));
 
 import { CreateOrganizationForm } from "../src/components/create-organization-form";
 import OnboardingPage from "../src/app/(browse)/onboarding/page";
@@ -47,6 +59,7 @@ afterEach(() => {
   api.getContext.mockReset();
   api.listArtifacts.mockReset();
   api.getArtifact.mockReset();
+  inviteCookie.value = undefined;
 });
 
 describe("create organization page", () => {
@@ -121,6 +134,39 @@ describe("create organization page", () => {
       code: "ORGANIZATION_SETUP_REQUIRED"
     }));
     await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /onboarding");
+  });
+
+  it("returns a pending invitation to the accept page and ignores an off-site cookie", async () => {
+    const setupRequired = new FactroveApiError("Create an organization to continue.", {
+      status: 403,
+      code: "ORGANIZATION_SETUP_REQUIRED"
+    });
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=invite-token");
+    api.getContext.mockRejectedValue(setupRequired);
+    api.listArtifacts.mockRejectedValue(setupRequired);
+    api.getArtifact.mockRejectedValue(setupRequired);
+    await expect(OnboardingPage()).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+    await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /invites/accept?token=invite-token");
+
+    inviteCookie.value = encodeURIComponent("https://evil.example/steal");
+    const html = renderToStaticMarkup(await OnboardingPage());
+    expect(html).toContain("Name your organization");
+    expect(html).not.toContain("evil.example");
+    await expect(HomePage({ searchParams: Promise.resolve({}) })).rejects.toThrow("REDIRECT /onboarding");
+
+    inviteCookie.value = encodeURIComponent("//evil.example");
+    await expect(ArtifactPage({ params: Promise.resolve({ id: "artifact-1" }) })).rejects.toThrow("REDIRECT /onboarding");
+
+    inviteCookie.value = encodeURIComponent("/invites/accept?token=invite-token");
+    api.getContext.mockResolvedValue({
+      user: { id: "user-1", name: "Ada" },
+      organization: { id: "org-1", name: "Ada Lab" }
+    });
+    api.listArtifacts.mockResolvedValue({ items: [] });
+    const member = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+    expect(member).toContain("My artifacts");
+    await expect(OnboardingPage()).rejects.toThrow("REDIRECT /");
   });
 });
 
