@@ -29,9 +29,12 @@ function closedOrganizationAction(): never {
 }
 
 /**
- * Organization routes are mounted. The actions this project does not ship are
- * rejected here. Signup still creates no membership. The first organization is
- * POST /api/v1/onboarding/organization, because the plugin create route takes a client slug.
+ * Organization plugin routes are mounted. The actions this project does not
+ * ship on those paths are rejected here, including plugin invite, accept, and
+ * set-active. Product invitations are /api/v1/organization/invitations and
+ * /api/v1/invitations. Signup still creates no membership. The first
+ * organization is POST /api/v1/onboarding/organization, because the plugin
+ * create route takes a client slug.
  */
 // Same statements as Better Auth's default owner, admin, and member roles.
 // apiKey is added for every role: any member of the active organization can

@@ -25,7 +25,16 @@ import {
   CREATE_ORGANIZATION_REQUEST_MESSAGE,
   ORGANIZATION_NAME_MESSAGE,
   createOrganizationRequestSchema,
-  createOrganizationResponseSchema
+  createOrganizationResponseSchema,
+  INVITATION_EMAIL_MESSAGE,
+  INVITATION_LIST_DEFAULT_LIMIT,
+  INVITATION_LIST_MAX_LIMIT,
+  INVITATION_TOKEN_REQUEST_MESSAGE,
+  createInvitationRequestSchema,
+  invitationEnvelopeSchema,
+  invitationListSchema,
+  invitationPreviewSchema,
+  invitationTokenRequestSchema
 } from "./index.js";
 
 export const createApiKeyRequestSchema = z.object({
@@ -154,6 +163,12 @@ const shareTokenParam: PathParameter = {
   schema: z.string().min(1)
 };
 
+const invitationIdParam: PathParameter = {
+  name: "id",
+  description: "Invitation id. This is not the secret in the email link.",
+  schema: z.string().min(1).max(200)
+};
+
 const retryAfterHeader: ResponseHeaderSpec = {
   name: "Retry-After",
   description: "Seconds to wait before retrying. Set when retryAfterSeconds is present on the thrown API error."
@@ -225,7 +240,12 @@ export const namedSchemas: Record<string, z.ZodType> = {
   SignUpEmailRequest: signUpEmailRequestSchema,
   SignInEmailRequest: signInEmailRequestSchema,
   CreateOrganizationRequest: createOrganizationRequestSchema,
-  CreateOrganizationResponse: createOrganizationResponseSchema
+  CreateOrganizationResponse: createOrganizationResponseSchema,
+  CreateInvitationRequest: createInvitationRequestSchema,
+  InvitationEnvelope: invitationEnvelopeSchema,
+  InvitationList: invitationListSchema,
+  InvitationTokenRequest: invitationTokenRequestSchema,
+  InvitationPreview: invitationPreviewSchema
 };
 
 export const httpOperations: HttpOperation[] = [
@@ -963,6 +983,201 @@ export const httpOperations: HttpOperation[] = [
         description: "Object storage failed while reading HTML. Code `STORAGE_UNAVAILABLE`. No Retry-After.",
         schemaName: "ApiError"
       }
+    }
+  },
+  {
+    operationId: "listOrganizationInvitations",
+    method: "get",
+    path: "/api/v1/organization/invitations",
+    tags: ["Organization"],
+    summary: "List invitations for the current organization",
+    description:
+      "Session cookie only. An API key is rejected. The organization is the caller's current membership, never a client-supplied id. Only an owner can call it. A member is `403 FORBIDDEN`. A session with no organization is `403 ORGANIZATION_SETUP_REQUIRED`. Each item has id, email, role, status, expiresAt, lastSentAt, and createdAt. The secret and its hash are omitted. Results are ordered by createdAt descending, then id descending. `limit` defaults to " +
+      String(INVITATION_LIST_DEFAULT_LIMIT) +
+      " and is at most " +
+      String(INVITATION_LIST_MAX_LIMIT) +
+      ". `cursor` is the id of the last item from the previous page. An unknown cursor in this organization, including an id from another organization, is `400 INVALID_REQUEST`.",
+    security: "session",
+    queryParameters: [
+      {
+        name: "limit",
+        required: false,
+        description: `Page size from 1 to ${INVITATION_LIST_MAX_LIMIT}. Default ${INVITATION_LIST_DEFAULT_LIMIT}.`,
+        schema: z.string()
+      },
+      {
+        name: "cursor",
+        required: false,
+        description: "Invitation id of the last item on the previous page.",
+        schema: z.string().min(1).max(200)
+      }
+    ],
+    responses: {
+      "200": {
+        description: "One page of invitations. `nextCursor` is null on the last page.",
+        schema: invitationListSchema,
+        schemaName: "InvitationList"
+      },
+      "400": { description: "The limit or cursor is not valid. Code `INVALID_REQUEST`.", schemaName: "ApiError" },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The caller is not an owner, or has no organization. Codes `FORBIDDEN` and `ORGANIZATION_SETUP_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Several memberships and no active organization. Code `ORGANIZATION_SELECTION_REQUIRED`.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "createOrganizationInvitation",
+    method: "post",
+    path: "/api/v1/organization/invitations",
+    tags: ["Organization"],
+    summary: "Invite an email address to the current organization",
+    description:
+      "Session cookie only. An API key is rejected. The body is `{ \"email\" }` and nothing else. The address is trimmed, stored in lower case, and keeps a plus tag. The organization is the caller's current membership. Only an owner can call it. The role is `member`. The secret expires 7 days after the database clock and is not returned. `delivery` is `queued` after the row commits and the message is accepted by the send queue. It does not mean the provider delivered it. The same 201 is returned whether or not the address has an account or belongs to another organization. An address that is already a member of this organization is `409 ALREADY_MEMBER`. A pending invitation for the same address is `409 INVITATION_PENDING`; resend that row. A queue rejection is `503 EMAIL_UNAVAILABLE` and the invitation stays pending. Cookie writes require an allowed Origin. Send and resend are limited, in each API process, to 10 per minute per owner, 10 per minute per organization, and 3 per hour per organization and email. A persisted `lastSentAt` also requires 60 seconds between sends to the same organization and email. Those 429 responses include Retry-After.",
+    security: "session",
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: INVITATION_EMAIL_MESSAGE,
+      schema: createInvitationRequestSchema,
+      schemaName: "CreateInvitationRequest"
+    },
+    responses: {
+      "201": {
+        description: "The invitation was stored and the email was queued.",
+        schema: invitationEnvelopeSchema,
+        schemaName: "InvitationEnvelope"
+      },
+      "400": { description: `Wrong JSON shape or email. Code \`INVALID_REQUEST\`. ${INVITATION_EMAIL_MESSAGE}`, schemaName: "ApiError" },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The caller is not an owner, has no organization, or the cookie origin is not allowed. Codes `FORBIDDEN` and `ORGANIZATION_SETUP_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "409": {
+        description: "Already a member of this organization, a pending invitation exists, or several memberships have no active organization. Codes `ALREADY_MEMBER`, `INVITATION_PENDING`, and `ORGANIZATION_SELECTION_REQUIRED`.",
+        schemaName: "ApiError"
+      },
+      "429": { description: "An invitation send limit or the 60 second cooldown. Code `RATE_LIMITED`. Includes Retry-After.", schemaName: "ApiError" },
+      "503": {
+        description: "The invitation was stored and the email could not be queued. Code `EMAIL_UNAVAILABLE`. Includes Retry-After. Resend to try again.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "resendOrganizationInvitation",
+    method: "post",
+    path: "/api/v1/organization/invitations/{id}/resend",
+    tags: ["Organization"],
+    summary: "Resend an invitation and rotate its secret",
+    description:
+      "Session cookie only. An API key is rejected. Only an owner of the current organization can call it. An unknown id and an id from another organization are both `404 INVITATION_NOT_FOUND`. A pending or expired invitation gets a new secret, a new 7 day expiry from the database clock, and `lastSentAt` is set. An accepted or canceled invitation is `409 INVITATION_CLOSED`. The response reports `delivery: queued` and does not include the secret. The send limits and the 60 second cooldown match create. The email is queued after that commit. A queue rejection is `503 EMAIL_UNAVAILABLE` with Retry-After. The invitation stays, including a secret rotated by this request, and resend tries again. A later provider failure does not roll the secret back and is not reported as delivered. Cookie writes require an allowed Origin.",
+    security: "session",
+    pathParameters: [invitationIdParam],
+    responses: {
+      "200": {
+        description: "The secret was rotated and the email was queued.",
+        schema: invitationEnvelopeSchema,
+        schemaName: "InvitationEnvelope"
+      },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The caller is not an owner, has no organization, or the cookie origin is not allowed.",
+        schemaName: "ApiError"
+      },
+      "404": { description: "No invitation with that id in this organization. Code `INVITATION_NOT_FOUND`.", schemaName: "ApiError" },
+      "409": { description: "The invitation was accepted or canceled. Code `INVITATION_CLOSED`.", schemaName: "ApiError" },
+      "429": { description: "An invitation send limit or the 60 second cooldown. Code `RATE_LIMITED`. Includes Retry-After.", schemaName: "ApiError" },
+      "503": {
+        description: "The secret was rotated and the email could not be queued. Code `EMAIL_UNAVAILABLE`. Includes Retry-After.",
+        schemaName: "ApiError"
+      }
+    }
+  },
+  {
+    operationId: "revokeOrganizationInvitation",
+    method: "delete",
+    path: "/api/v1/organization/invitations/{id}",
+    tags: ["Organization"],
+    summary: "Revoke a pending invitation",
+    description:
+      "Session cookie only. An API key is rejected. Only an owner of the current organization can call it. A pending invitation becomes canceled and its secret hash is cleared. Revoking a canceled invitation again is 204. An unknown id, an id from another organization, an accepted invitation, and an expired invitation are `404 INVITATION_NOT_FOUND`. Cookie writes require an allowed Origin.",
+    security: "session",
+    pathParameters: [invitationIdParam],
+    responses: {
+      "204": { description: "The invitation is canceled." },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The caller is not an owner, has no organization, or the cookie origin is not allowed.",
+        schemaName: "ApiError"
+      },
+      "404": { description: "No pending or canceled invitation with that id in this organization. Code `INVITATION_NOT_FOUND`.", schemaName: "ApiError" }
+    }
+  },
+  {
+    operationId: "previewInvitation",
+    method: "post",
+    path: "/api/v1/invitations/preview",
+    tags: ["Organization"],
+    summary: "Preview an invitation link",
+    description:
+      "No session. The body is `{ \"token\" }`. A pending token that is still before its expiry returns the organization name, the inviter name, the invited email, and the expiry. An unknown, expired, revoked, or consumed token is `404 INVITATION_INVALID`. The response does not say whether that email has an account or a membership. This route does not write. It is limited to 30 requests per minute per client address in each API process. A 429 includes Retry-After. A cookie from an origin that is not allowed is `403 FORBIDDEN` before the token is read. A request with no cookie is not an origin check.",
+    security: "none",
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: INVITATION_TOKEN_REQUEST_MESSAGE,
+      schema: invitationTokenRequestSchema,
+      schemaName: "InvitationTokenRequest"
+    },
+    responses: {
+      "200": {
+        description: "The invitation is still pending.",
+        schema: invitationPreviewSchema,
+        schemaName: "InvitationPreview"
+      },
+      "400": { description: `Wrong JSON shape. Code \`INVALID_REQUEST\`. ${INVITATION_TOKEN_REQUEST_MESSAGE}`, schemaName: "ApiError" },
+      "403": { description: "A session cookie was sent from an origin that is not allowed. Code `FORBIDDEN`.", schemaName: "ApiError" },
+      "404": { description: "The token is not a live invitation. Code `INVITATION_INVALID`.", schemaName: "ApiError" },
+      "429": { description: "Too many previews from this client address. Code `RATE_LIMITED`. Includes Retry-After.", schemaName: "ApiError" }
+    }
+  },
+  {
+    operationId: "acceptInvitation",
+    method: "post",
+    path: "/api/v1/invitations/accept",
+    tags: ["Organization"],
+    summary: "Accept an invitation",
+    description:
+      "Session cookie only, including a user who has no organization. An API key is rejected. The body is `{ \"token\" }`. The account email must match the invitation and must already be verified. Otherwise the invitation stays pending and the response is `403 EMAIL_VERIFICATION_REQUIRED` or `403 INVITATION_EMAIL_MISMATCH`. A user who already has a membership gets `409 ORGANIZATION_EXISTS` and the invitation stays pending. The server does not leave the existing organization. An unknown, expired, revoked, or consumed token is `404 INVITATION_INVALID`. The role granted is `member`. The membership insert, the invitation consume, and the session's active organization are one transaction. The lock order starts with the accepting user, matching organization creation. Cookie writes require an allowed Origin. Limited to 10 requests per minute per client address and session in each API process. A 429 includes Retry-After.",
+    security: "session",
+    requestBody: {
+      contentType: "application/json",
+      required: true,
+      description: INVITATION_TOKEN_REQUEST_MESSAGE,
+      schema: invitationTokenRequestSchema,
+      schemaName: "InvitationTokenRequest"
+    },
+    responses: {
+      "200": {
+        description: "The user joined the organization and that organization is active on the session.",
+        schema: createOrganizationResponseSchema,
+        schemaName: "CreateOrganizationResponse"
+      },
+      "400": { description: `Wrong JSON shape. Code \`INVALID_REQUEST\`. ${INVITATION_TOKEN_REQUEST_MESSAGE}`, schemaName: "ApiError" },
+      "401": { description: "No session, or the caller sent an API key. Code `UNAUTHENTICATED`.", schemaName: "ApiError" },
+      "403": {
+        description: "The email does not match, the email is not verified, or the cookie origin is not allowed. Codes `INVITATION_EMAIL_MISMATCH`, `EMAIL_VERIFICATION_REQUIRED`, and `FORBIDDEN`.",
+        schemaName: "ApiError"
+      },
+      "404": { description: "The token is not a live invitation. Code `INVITATION_INVALID`.", schemaName: "ApiError" },
+      "409": { description: "The user already belongs to an organization. Code `ORGANIZATION_EXISTS`. The invitation stays pending.", schemaName: "ApiError" },
+      "429": { description: "Too many accept attempts for this client address and session. Code `RATE_LIMITED`. Includes Retry-After.", schemaName: "ApiError" }
     }
   }
 ];

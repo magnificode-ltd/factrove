@@ -68,12 +68,14 @@ apps/api/
 │   ├── controllers/
 │   │   ├── api.module.ts
 │   │   ├── artifacts.controller.ts
+│   │   ├── organization.controller.ts
 │   │   ├── public-artifacts.controller.ts
 │   │   ├── json-body.ts              # Optional JSON bodies with a strict content type
 │   │   └── context.controller.ts
 │   ├── services/
 │   │   ├── services.module.ts
 │   │   ├── artifacts.service.ts
+│   │   ├── organization-membership.service.ts
 │   │   └── api-config.ts
 │   ├── auth/
 │   │   ├── create-auth.ts            # Email/password sessions and the API key plugin
@@ -85,6 +87,7 @@ apps/api/
 │   │   ├── brevo-email-sender.ts     # Brevo HTTP transport
 │   │   ├── invite-email-template.ts  # Branded HTML and text invite template
 │   │   ├── invite-email.ts           # Invite message for a new account
+│   │   ├── organization-invite-email.ts
 │   │   ├── invite-mailer.ts          # Sends that message and logs failures
 │   │   ├── redact-secret.ts          # Removes provider secrets from error text
 │   │   └── mail.module.ts
@@ -93,7 +96,8 @@ apps/api/
 │   │   ├── database.module.ts        # Global Nest module
 │   │   ├── prisma.service.ts         # Prisma client and connection lifecycle
 │   │   ├── repositories/
-│   │   │   └── artifacts.repository.ts
+│   │   │   ├── artifacts.repository.ts
+│   │   │   └── organizations.repository.ts
 │   │   ├── seed/
 │   │   │   ├── seed.ts               # Explicit seed entry point
 │   │   │   └── seed-local-identities.ts

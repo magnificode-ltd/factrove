@@ -15,7 +15,7 @@ export const apiErrorCatalog = [
     status: 403,
     code: "ORGANIZATION_SETUP_REQUIRED",
     description:
-      "The caller is authenticated and has no organization membership. Product routes and API key create, list, and delete return this until POST /api/v1/onboarding/organization creates the first organization. Health, public shares, get-session, and sign-out do not."
+      "The caller is authenticated and has no organization membership. Product routes and API key create, list, and delete return this until POST /api/v1/onboarding/organization creates the first organization. POST /api/v1/invitations/accept is the authenticated exception: a session with no membership can accept an invitation. Health, public shares, get-session, and sign-out do not return this code."
   },
   {
     status: 409,
@@ -27,7 +27,7 @@ export const apiErrorCatalog = [
     status: 409,
     code: "ORGANIZATION_EXISTS",
     description:
-      "POST /api/v1/onboarding/organization found that the signed-in user already has a membership. No second organization is created."
+      "The signed-in user already has a membership. POST /api/v1/onboarding/organization creates no second organization. POST /api/v1/invitations/accept leaves the invitation pending and does not remove the existing membership."
   },
   {
     status: 409,
@@ -54,7 +54,8 @@ export const apiErrorCatalog = [
   {
     status: 403,
     code: "FORBIDDEN",
-    description: "A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL."
+    description:
+      "A cookie-authenticated write used an Origin or Referer that is not WEB_ORIGIN or PUBLIC_BASE_URL, or the caller is not an owner of the current organization for an invitation management route."
   },
   {
     status: 404,
@@ -92,7 +93,8 @@ export const apiErrorCatalog = [
   {
     status: 429,
     code: "RATE_LIMITED",
-    description: "Too many public views from one client address, or too many password attempts. Password-attempt 429 responses include Retry-After. Public-view 429 responses do not."
+    description:
+      "Too many public views from one client address, too many password attempts, or too many invitation sends, previews, or accepts. Password-attempt and invitation 429 responses include Retry-After. Public-view 429 responses do not. Invitation send and resend limits are 10 per minute for the owner, 10 per minute for the organization, and 3 per hour for one organization and email, plus a 60 second cooldown stored on the invitation. Preview is 30 per minute per client address. Accept is 10 per minute per client address and session. Those counters live in each API process."
   },
   {
     status: 500,
@@ -114,6 +116,53 @@ export const apiErrorCatalog = [
     status: 503,
     code: "UNLOCK_UNAVAILABLE",
     description: "Password verification is busy because the process-wide Argon2 gate is saturated or every remaining share check slot is in flight. Includes Retry-After."
+  },
+  {
+    status: 404,
+    code: "INVITATION_NOT_FOUND",
+    description:
+      "No invitation with that id belongs to the caller's organization. An id from another organization uses the same response."
+  },
+  {
+    status: 404,
+    code: "INVITATION_INVALID",
+    description:
+      "The invitation token is unknown, expired, revoked, or already used. Those cases share one response. The token is not included."
+  },
+  {
+    status: 403,
+    code: "INVITATION_EMAIL_MISMATCH",
+    description:
+      "The signed-in account's email does not match the invitation. The invitation stays pending."
+  },
+  {
+    status: 403,
+    code: "EMAIL_VERIFICATION_REQUIRED",
+    description:
+      "The signed-in account has not confirmed its email. The invitation stays pending."
+  },
+  {
+    status: 409,
+    code: "ALREADY_MEMBER",
+    description:
+      "That email already belongs to a member of this organization. The response does not say whether the address has an account or a membership in any other organization."
+  },
+  {
+    status: 409,
+    code: "INVITATION_PENDING",
+    description:
+      "A pending invitation for this email already exists in the organization. Resend that invitation instead of creating another."
+  },
+  {
+    status: 409,
+    code: "INVITATION_CLOSED",
+    description: "The invitation was accepted or canceled. Send a new invitation."
+  },
+  {
+    status: 503,
+    code: "EMAIL_UNAVAILABLE",
+    description:
+      "The invitation was stored, and the email could not be queued. Resend to try again. Retry-After is set. The provider error is not included."
   }
 ] as const;
 
