@@ -30,11 +30,15 @@ The get routes are rejected because a non-member id clears the active organizati
 
 Roles stored by this product are `owner` only. Better Auth's `admin` and `member` roles exist in the access-control map. Any member of the active organization can create, list, and delete its API keys.
 
+`invitation` keeps the email, role, status, expiry, inviter, and timestamps from Better Auth. `tokenHash` is the SHA-256 hex digest of a 32-byte base64url secret and is unique. The invitation id is a management id, not that secret. `lastSentAt` is when a secret was last issued. A pending row has a hash. Accepted, canceled, and expired rows do not. Those are the only statuses. A pending row whose `expiresAt` is at or before the database clock is expired, and that update clears the hash. Accepting or revoking a pending row clears the hash too. The address is trimmed and stored in lower case, and a plus tag is kept. One pending invitation is allowed for an organization and that lowercased email.
+
+`member` has at most one row for a user in one organization. `member.userId` stays non-unique, so the schema can still hold memberships in more than one organization. Migration `20261123140000_invitation_tokens_and_api_key_creator` stops when a user already has two rows in one organization and names those member ids and roles. It does not pick a role. It cancels pending invitations that have no token hash. Organizations and artifacts stay where they are. The plugin invite, accept, reject, and cancel routes stay rejected. There is no product route that creates an invitation yet.
+
 ## Decisions
 
 Signup does not collect an organization name and does not insert a `member` row. The guard is the API. The page redirect only gets the person to the form.
 
-`member.userId` is not unique. A user may have several membership rows. This product does not offer a way to create the second one.
+`member.userId` is not unique. A user may have several membership rows, in different organizations. One user has at most one row in a single organization. This product does not offer a way to create the second organization.
 
 Display name is not unique. Slug is unique and immutable. The user does not type a slug.
 

@@ -46,7 +46,7 @@ describe("Better Auth schema generation", () => {
     const config = await readFile(configPath, "utf8");
     expect(config).toContain("prismaAdapter(prisma, {");
     expect(config).toContain('provider: "postgresql"');
-    expect(config).toContain("plugins: [organization(), factroveApiKey()]");
+    expect(config).toContain("plugins: [organization({ schema: organizationSchema }), factroveApiKey()]");
 
     const before = await readFile(schemaPath, "utf8");
     const result = await execFileAsync("pnpm", ["db:generate-schema"], { cwd: apiRoot });
@@ -135,6 +135,7 @@ describe("PostgreSQL artifact persistence", () => {
       "20261115190000_backfill_organizations",
       "20261115200000_org_owned_api_keys",
       "20261122120000_delete_plaintext_password_reset_tokens",
+      "20261123140000_invitation_tokens_and_api_key_creator",
     ]);
   });
 

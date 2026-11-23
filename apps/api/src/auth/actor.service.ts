@@ -4,7 +4,7 @@ import type { ContextEnvelope } from "@factrove/contracts";
 import { fromNodeHeaders } from "better-auth/node";
 import { PrismaService } from "../database/index.js";
 import { ApiErrorException } from "../services/api-error.js";
-import { createdByUserIdFrom } from "./api-key-scope.js";
+import { createdByMemberIdFrom, createdByUserIdFrom } from "./api-key-scope.js";
 import { AuthService } from "./auth.service.js";
 import {
   ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
@@ -104,11 +104,14 @@ export class ActorService {
     }
     const organizationId = result.key.referenceId;
     const createdByUserId = createdByUserIdFrom(result.key.metadata);
-    if (!organizationId || !createdByUserId) {
+    const createdByMemberId = createdByMemberIdFrom(result.key.metadata);
+    // The membership id is the one captured at creation. A new row after the
+    // creator leaves and joins again does not match, so the old secret stays dead.
+    if (!organizationId || !createdByUserId || !createdByMemberId) {
       return null;
     }
     const membership = await this.prisma.member.findFirst({
-      where: { userId: createdByUserId, organizationId },
+      where: { id: createdByMemberId, userId: createdByUserId, organizationId },
       select: {
         user: { select: { id: true, name: true } },
         organization: { select: { id: true, name: true } },

@@ -2,6 +2,7 @@ import { APIError } from "better-auth/api";
 import { organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { defaultStatements } from "better-auth/plugins/organization/access";
+import { organizationSchema } from "./organization-schema.js";
 
 export const ORGANIZATION_ACTION_UNAVAILABLE = "This organization action is not available.";
 
@@ -74,6 +75,7 @@ export function factroveOrganization() {
     disableOrganizationDeletion: true,
     ac: organizationAccess,
     roles: organizationRoles,
+    schema: organizationSchema,
     organizationHooks: {
       beforeCreateOrganization: async () => {
         closedOrganizationAction();
