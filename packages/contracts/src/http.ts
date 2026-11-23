@@ -75,7 +75,10 @@ export const deleteApiKeyResponseSchema = z.object({ success: z.literal(true) })
 export const signUpEmailRequestSchema = z.object({
   name: z.string(),
   email: z.string(),
-  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH)
+  password: z.string().min(AUTH_PASSWORD_MIN_LENGTH).max(AUTH_PASSWORD_MAX_LENGTH),
+  turnstileToken: z.string().max(2048).optional().describe(
+    "Cloudflare Turnstile token from the signup widget. Required when TURNSTILE_SECRET_KEY is set. Ignored when that secret is unset."
+  )
 });
 
 export const signInEmailRequestSchema = z.object({
@@ -347,12 +350,12 @@ export const httpOperations: HttpOperation[] = [
     tags: ["Auth"],
     summary: "Create an account with email and password",
     description:
-      "Better Auth email/password sign-up. requireEmailVerification stays false and autoSignIn stays true, so sign-in is not blocked. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user. It sends one verification email to that address. That message also welcomes the person, so signup does not send a second invite. A plus-address such as name+tag@example.com is valid and is stored in lower case with the plus tag kept. EMAIL_TRANSPORT selects the sender. log writes the message and does not send it. smtp uses the configured SMTP server. brevo sends POST https://api.brevo.com/v3/smtp/email. An unset transport is log. Sending failure does not roll back the account. A duplicate email does not send another message. Existing accounts are not emailed.",
+      "Better Auth email/password sign-up. requireEmailVerification stays false and autoSignIn stays true, so sign-in is not blocked. Passwords are 8 to 128 characters, the same limits createAuth passes to Better Auth. This route is rate limited to 10 requests per 60 seconds per client address. The response body is Better Auth JSON, not the product `{ error: { code, message } }` envelope. A successful sign-up sets the session cookie and can return the user. It sends one verification email to that address. That message also welcomes the person, so signup does not send a second invite. A plus-address such as name+tag@example.com is valid and is stored in lower case with the plus tag kept. EMAIL_TRANSPORT selects the sender. log writes the message and does not send it. smtp uses the configured SMTP server. brevo sends POST https://api.brevo.com/v3/smtp/email. An unset transport is log. Sending failure does not roll back the account. A duplicate email does not send another message. Existing accounts are not emailed. When TURNSTILE_SECRET_KEY is set, turnstileToken is checked with Cloudflare Siteverify before the account is created. A missing or invalid token is 400 CAPTCHA_FAILED. A Siteverify failure is 503 CAPTCHA_UNAVAILABLE with Retry-After 1. When that secret is unset, the field is ignored. Sign-in does not use this check.",
     security: "none",
     requestBody: {
       contentType: "application/json",
       required: true,
-      description: "Display name, email, and password (8 to 128 characters).",
+      description: "Display name, email, and password (8 to 128 characters). turnstileToken is required only when TURNSTILE_SECRET_KEY is set.",
       schema: signUpEmailRequestSchema,
       schemaName: "SignUpEmailRequest"
     },
@@ -360,10 +363,13 @@ export const httpOperations: HttpOperation[] = [
       "200": { description: "Account created. Better Auth JSON that includes the user." },
       "400": {
         description:
-          "Better Auth validation failure, such as `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, or `INVALID_EMAIL`."
+          "Better Auth validation failure, such as `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, or `INVALID_EMAIL`. `CAPTCHA_FAILED` when Turnstile is configured and the token is missing or rejected."
       },
       "422": { description: "The email is already registered. Better Auth `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`." },
-      "429": { description: "Too many sign-up attempts from this client address." }
+      "429": { description: "Too many sign-up attempts from this client address." },
+      "503": {
+        description: "Turnstile is configured and Siteverify failed. Code `CAPTCHA_UNAVAILABLE`. Retry-After is 1."
+      }
     }
   },
   {

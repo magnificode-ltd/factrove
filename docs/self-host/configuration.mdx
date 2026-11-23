@@ -93,6 +93,21 @@ Captured URLs drop the query string and the hash. An artifact id, a share token,
 
 PostHog ignores these events unless that project has cookieless mode turned on. Turn that on in the PostHog project before expecting data.
 
+## Signup check
+
+Signup does not call Cloudflare unless you set it up. Leave `TURNSTILE_SECRET_KEY` unset and the API skips the check, including when a request sends a token. Sign-in, password reset, and accepting an invitation are unchanged. Signup and sign-in stay limited to 10 requests per 60 seconds per client address.
+
+Set both variables together. `TURNSTILE_SITE_KEY` is the public site key. The web process reads it when it renders `/signup`, including a signup that started from an invitation. `pnpm dev` does not copy it from `apps/api/.env`. Set it on the web process, or in `.env.docker` for Compose. An empty or invalid key leaves the widget off. `TURNSTILE_SECRET_KEY` is the widget secret. The API reads it from its environment. The API does not log that secret.
+
+| Variable | Required | Role |
+| --- | --- | --- |
+| `TURNSTILE_SITE_KEY` | no | Public Turnstile site key. Unset, empty, or invalid shows no widget and sends no token |
+| `TURNSTILE_SECRET_KEY` | no | Turnstile secret. Unset or empty skips the check. When set, signup requires a valid token |
+
+With the secret set, a missing or rejected token is `400` and code `CAPTCHA_FAILED`. If the check cannot reach Cloudflare, times out, or Siteverify fails, the response is `503` and code `CAPTCHA_UNAVAILABLE`, with `Retry-After: 1`. The form shows those as a check to complete, or a check to try again.
+
+Cloudflare publishes test keys that work on any host. Site key `1x00000000000000000000AA` with secret `1x0000000000000000000000000000000AA` always passes. Site key `2x00000000000000000000AB` with secret `2x0000000000000000000000000000000AA` always fails. Do not use test keys on a server other people can reach.
+
 ## Secrets required by Compose
 
 Compose will not start until these are set. Generate each with `openssl rand -hex 32`. The output is 64 hex characters. Use it as-is.

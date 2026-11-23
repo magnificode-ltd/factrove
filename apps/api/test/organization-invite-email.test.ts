@@ -138,6 +138,7 @@ function config(emailLogFullLinks: boolean): ApiConfig {
     authCookieDomain: null,
     trustedProxies: [],
     shareTokenKey: null,
+    turnstileSecret: null,
     emailTransport: "log",
     emailFromAddress: "library@example.com",
     emailFromName: "Factrove",

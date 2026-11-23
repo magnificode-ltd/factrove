@@ -58,6 +58,8 @@ curl -sS -b "$jar" -X POST "$api/api/auth/api-key/create" \
 
 The key belongs to Local Lab. A body field other than `name` does not choose a different organization or a different creating user.
 
+When `TURNSTILE_SECRET_KEY` is set, add `turnstileToken` from the signup widget to that first body. A missing or rejected token is `400` with code `CAPTCHA_FAILED`. A Siteverify failure is `503` with code `CAPTCHA_UNAVAILABLE` and `Retry-After: 1`. Leave the secret unset and the field is ignored. The curl above is the unset case. Sign-in does not send a token.
+
 Sign in an existing account:
 
 ```bash

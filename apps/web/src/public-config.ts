@@ -16,7 +16,11 @@ type RuntimeEnv = {
   DOCS_BASE_URL?: string;
   POSTHOG_KEY?: string;
   POSTHOG_HOST?: string;
+  TURNSTILE_SITE_KEY?: string;
 };
+
+// Cloudflare site keys, including the documented dummy keys, fit this shape.
+const TURNSTILE_SITE_KEY_RE = /^[A-Za-z0-9_-]{20,200}$/;
 
 export function readPublicApiOrigin(value: string | undefined): string | undefined {
   const raw = value?.trim() ?? "";
@@ -165,6 +169,25 @@ export function readPosthogKey(value: string | undefined): string | undefined {
 
 export function readPosthogHost(value: string | undefined): string | undefined {
   return readPublicApiOrigin(value);
+}
+
+// Public Turnstile site key for the signup form. Empty and invalid values
+// leave the widget off. The secret never belongs in this process.
+export function readTurnstileSiteKey(value: string | undefined): string | undefined {
+  const raw = value?.trim() ?? "";
+  if (raw.length === 0 || !TURNSTILE_SITE_KEY_RE.test(raw)) {
+    return undefined;
+  }
+  return raw;
+}
+
+export function turnstileSiteKey(env?: RuntimeEnv): string | undefined {
+  const source = runtimeEnv(env);
+  const key = readTurnstileSiteKey(source.TURNSTILE_SITE_KEY);
+  if (source.TURNSTILE_SITE_KEY?.trim() && !key) {
+    console.warn("TURNSTILE_SITE_KEY must be a Turnstile site key. The signup check stays off.");
+  }
+  return key;
 }
 
 // Key and host for the browser. Unset or invalid POSTHOG_KEY disables analytics.

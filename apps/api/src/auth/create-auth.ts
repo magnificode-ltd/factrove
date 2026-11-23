@@ -20,7 +20,8 @@ import {
 import { logWithoutThrowing } from "../mail/safe-log.js";
 import { factroveApiKey } from "./api-key-plugin.js";
 import { scopeOrganizationApiKeyRequest } from "./api-key-scope.js";
-import { CLIENT_IP_HEADER } from "./client-ip.js";
+import { CLIENT_IP_HEADER, normalizeClientIp } from "./client-ip.js";
+import { enforceSignupTurnstile } from "./turnstile.js";
 import {
   ORGANIZATION_SELECTION_REQUIRED_MESSAGE,
   ORGANIZATION_SETUP_REQUIRED_MESSAGE,
@@ -57,6 +58,9 @@ export type CreateAuthInput = {
   sendVerificationEmail: (message: VerificationEmail) => Promise<void>;
   // Runtime auth uses Prisma. Tests pass the memory adapter.
   database?: BetterAuthOptions["database"];
+  // Unset skips the signup check. Sign-in and password reset never use it.
+  turnstileSecret?: string | null;
+  turnstileFetch?: typeof fetch;
 };
 
 export type FactroveAuth = {
@@ -221,6 +225,14 @@ export function createAuth(input: CreateAuthInput): FactroveAuth {
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         rejectClosedOrganizationAction(ctx.path);
+        if (isEmailSignUp(ctx.path)) {
+          await enforceSignupTurnstile({
+            secret: input.turnstileSecret ?? null,
+            body: ctx.body,
+            remoteIp: normalizeClientIp(ctx.headers?.get(CLIENT_IP_HEADER) ?? ""),
+            fetchImpl: input.turnstileFetch,
+          });
+        }
         if (isPasswordReset(ctx.path)) {
           const password = readNewPassword(ctx.body);
           if (password !== null && isCommonSharePassword(password)) {
@@ -288,6 +300,10 @@ function activeOrganizationIdFrom(value: unknown): string | null {
 function canReadMemberships(prisma: PrismaClient): boolean {
   const member = prisma.member as { findMany?: unknown; findFirst?: unknown } | undefined;
   return typeof member?.findMany === "function" && typeof member.findFirst === "function";
+}
+
+function isEmailSignUp(path: string | undefined): boolean {
+  return path?.split("?")[0] === "/sign-up/email";
 }
 
 function isPasswordReset(path: string | undefined): boolean {

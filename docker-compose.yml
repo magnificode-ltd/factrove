@@ -94,6 +94,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       S3_BUCKET: ${S3_BUCKET:-factrove}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_ENDPOINT: http://garage:3900
@@ -137,6 +138,7 @@ services:
       DOCS_BASE_URL: ${DOCS_BASE_URL:-https://factrove.mintlify.app}
       POSTHOG_KEY: ${POSTHOG_KEY:-}
       POSTHOG_HOST: ${POSTHOG_HOST:-https://us.i.posthog.com}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:

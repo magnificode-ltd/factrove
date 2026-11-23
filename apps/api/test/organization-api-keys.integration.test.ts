@@ -34,6 +34,7 @@ const config: ApiConfig = {
   authCookieDomain: null,
   trustedProxies: [],
   shareTokenKey: null,
+  turnstileSecret: null,
   emailTransport: "log",
   emailFromAddress: "support@example.com",
   emailFromName: "Factrove",
