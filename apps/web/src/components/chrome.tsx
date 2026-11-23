@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
+import { ArrowLeft } from "lucide-react";
 import { DocsLink } from "@/components/docs-link";
 import { SourceCodeLink } from "@/components/source-code-link";
 import { Wordmark } from "@/components/wordmark";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LibraryView } from "@/library/load-library";
 
@@ -32,46 +32,77 @@ export function AppBar({
   );
 }
 
+const libraryBackClass =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-ink no-underline hover:bg-lilac focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-peri-d";
+
 export function ViewerBar({
   title,
   meta,
   tools,
   showLibraryLink = true,
-  reserveLibraryLink = false
+  reserveLibraryLink = false,
+  showAppLinks = true
 }: {
   title: string;
   meta?: ReactNode;
   tools?: ReactNode;
   showLibraryLink?: boolean;
   reserveLibraryLink?: boolean;
+  showAppLinks?: boolean;
 }) {
+  const iconLeading = showLibraryLink || reserveLibraryLink;
   return (
     <header className={cn("sticky top-0 z-30", separatedBarClass)}>
-      <div className="mx-auto flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-5 py-2 sm:px-8">
-        <Wordmark />
-        {showLibraryLink ? (
-          <Button asChild variant="outline" className="h-8 bg-white">
-            <a href="/">Back to library</a>
-          </Button>
-        ) : reserveLibraryLink ? (
-          <Button asChild variant="outline" className="invisible h-8 bg-white" aria-hidden="true" tabIndex={-1}>
-            <span>Back to library</span>
-          </Button>
-        ) : null}
-        <h1 className="min-w-0 max-w-full flex-1 truncate text-lg font-extrabold tracking-tight" title={title}>
+      <div
+        className={cn(
+          "mx-auto grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-4 py-2 sm:gap-x-3 sm:px-8",
+          meta ? "gap-y-1" : ""
+        )}
+      >
+        <div className="col-start-1 row-start-1 self-center">
+          {showLibraryLink ? (
+            <LibraryBack />
+          ) : reserveLibraryLink ? (
+            <LibraryBack reserved />
+          ) : (
+            <Wordmark />
+          )}
+        </div>
+        <h1 className="col-start-2 row-start-1 min-w-0 truncate text-base leading-5 font-semibold tracking-tight text-ink" title={title}>
           {title}
         </h1>
-        {meta || tools ? (
-          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2">
+        <div className="col-start-3 row-start-1 flex items-center justify-end gap-1.5 self-center">
+          {tools}
+          {showAppLinks ? <HeaderLinks /> : null}
+        </div>
+        {meta ? (
+          <div
+            className={cn(
+              "col-span-3 col-start-1 row-start-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:pl-0",
+              iconLeading ? "pl-10" : "pl-0"
+            )}
+          >
             {meta}
-            {tools}
-            <HeaderLinks />
           </div>
-        ) : (
-          <HeaderLinks />
-        )}
+        ) : null}
       </div>
     </header>
+  );
+}
+
+function LibraryBack({ reserved = false }: { reserved?: boolean }) {
+  if (reserved) {
+    return (
+      <span className={cn(libraryBackClass, "invisible")} aria-hidden="true" tabIndex={-1} aria-label="Back to library">
+        <ArrowLeft aria-hidden="true" className="size-4" />
+      </span>
+    );
+  }
+  return (
+    <a href="/" className={libraryBackClass} title="Back to library">
+      <ArrowLeft aria-hidden="true" className="size-4" />
+      <span className="sr-only">Back to library</span>
+    </a>
   );
 }
 

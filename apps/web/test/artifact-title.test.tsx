@@ -152,11 +152,13 @@ describe("artifact title", () => {
     });
 
     expect(container.querySelector("h1")?.textContent).toBe("Launch notes");
-    await act(async () => {
-      buttonNamed("Rename").click();
-    });
+    expect(container.querySelector("h1")?.getAttribute("title")).toBe("Launch notes");
+    await openRowMenu(container);
+    await chooseMenuItem("Rename");
     await fillName("Calendar");
     expect(container.querySelector("h1")?.textContent).toBe("Calendar");
-    expect(container.querySelector("code")?.textContent).toBe(id);
+    expect(container.querySelector("h1")?.getAttribute("title")).toBe("Calendar");
+    expect(container.querySelector("code")?.textContent).toBe(id.slice(0, 8));
+    expect(container.querySelector("code")?.getAttribute("title")).toBe(id);
   });
 });

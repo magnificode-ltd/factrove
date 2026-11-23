@@ -23,7 +23,8 @@ export function CopyButton({
   copiedLabel = "Copied",
   message = "Copied to clipboard",
   iconOnly = false,
-  className
+  className,
+  labelClassName
 }: {
   value: string;
   label?: string;
@@ -31,6 +32,7 @@ export function CopyButton({
   message?: string;
   iconOnly?: boolean;
   className?: string;
+  labelClassName?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
@@ -72,7 +74,7 @@ export function CopyButton({
         <Copy className="ft-check-off" />
         <Check className="ft-check-on" />
       </span>
-      {iconOnly ? null : visibleLabel}
+      {iconOnly ? null : <span className={labelClassName}>{visibleLabel}</span>}
     </Button>
   );
 }

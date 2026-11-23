@@ -49,9 +49,10 @@ describe("organization share control", () => {
     try {
       await page.goto(`${pageOrigin}/org-share.html`);
       const header = page.locator("header");
-      const trigger = header.getByRole("button", { name: "Share with Local Organization" });
-      await trigger.waitFor({ timeout: 10_000 });
+      const more = header.getByRole("button", { name: "More actions" });
+      await more.waitFor({ timeout: 10_000 });
       expect(await header.getByTestId("artifact-access").innerText()).toBe("Private");
+      await expectHeaderFits(header, 1440);
       await page.frameLocator("iframe").locator("p").waitFor({ timeout: 8_000 });
 
       const library = page.getByTestId("library-row");
@@ -60,9 +61,12 @@ describe("organization share control", () => {
       await library.getByRole("button", { name: "More actions" }).first().click();
       expect(await page.getByRole("menuitem", { name: "Share with Local Organization" }).count()).toBe(1);
       await page.keyboard.press("Escape");
-      expect(await page.getByRole("button", { name: "Share with Local Organization" }).count()).toBe(1);
+      expect(await header.getByRole("button", { name: "Share" }).count()).toBe(1);
+      expect(await header.getByRole("button", { name: "Rename" }).count()).toBe(0);
 
       await saveShot(page, "org-share-owner-private.png");
+      await more.click();
+      const trigger = page.getByRole("menuitem", { name: "Share with Local Organization" });
       await trigger.click();
       const dialog = page.getByRole("dialog", { name: "Share with Local Organization" });
       await dialog.waitFor();
@@ -74,9 +78,10 @@ describe("organization share control", () => {
 
       await page.keyboard.press("Escape");
       expect(await dialog.count()).toBe(0);
-      expect(await focusedText(page)).toContain("Share with Local Organization");
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))).toBe("More actions");
 
       await page.keyboard.press("Enter");
+      await page.getByRole("menuitem", { name: "Share with Local Organization" }).click();
       await dialog.waitFor();
       await page.keyboard.press("Tab");
       expect(await focusedText(page)).toContain("Share with Local Organization");
@@ -114,8 +119,9 @@ describe("organization share control", () => {
       await page.evaluate(() => {
         (window as Window & { __holdOrgShare?: boolean }).__holdOrgShare = true;
       });
-      const trigger = page.locator("header").getByRole("button", { name: "Share with Local Organization" });
-      await trigger.click();
+      const more = page.locator("header").getByRole("button", { name: "More actions" });
+      await more.click();
+      await page.getByRole("menuitem", { name: "Share with Local Organization" }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       await page.keyboard.press("Tab");
@@ -130,7 +136,7 @@ describe("organization share control", () => {
       }
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });
-      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("org-share-trigger");
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("viewer-more-actions");
       await page.evaluate(() => {
         (window as Window & { __releaseOrgShare?: () => void }).__releaseOrgShare?.();
       });
@@ -149,6 +155,7 @@ describe("organization share control", () => {
       await link.waitFor();
       await expectVisibleLabel(link, 80);
       await expectVisibleLabel(page.getByRole("heading", { name: "Launch notes" }), 100);
+      await expectHeaderFits(page.locator("header"), 1100);
 
       await library.getByRole("button", { name: "More actions" }).first().click();
       await page.getByRole("menuitem", { name: "Rename" }).click();
@@ -163,7 +170,8 @@ describe("organization share control", () => {
       expect(await library.locator("code").first().getAttribute("title")).toBe(libraryId);
       expect(await library.getByRole("button", { name: "Copy ID" }).first().getAttribute("aria-label")).toBe("Copy ID");
 
-      await page.getByRole("button", { name: "Rename" }).first().click();
+      await page.locator("header").getByRole("button", { name: "More actions" }).click();
+      await page.getByRole("menuitem", { name: "Rename" }).click();
       const headerDialog = page.getByRole("dialog", { name: "Rename artifact" });
       await headerDialog.getByLabel("Name").fill("Renamed header");
       await headerDialog.getByRole("button", { name: "Save name" }).click();
@@ -181,8 +189,13 @@ describe("organization share control", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     try {
       await page.goto(`${pageOrigin}/org-share.html?long=1`);
+      const header = page.locator("header");
+      await header.getByRole("heading", { name: "Launch notes" }).waitFor({ timeout: 10_000 });
+      await expectHeaderFits(header, 390);
       const name = "Share with Magnificode Software Development Organization";
-      const trigger = page.locator("header").getByRole("button", { name });
+      expect(await header.getByRole("button", { name }).count()).toBe(0);
+      await header.getByRole("button", { name: "More actions" }).click();
+      const trigger = page.getByRole("menuitem", { name });
       await trigger.waitFor({ timeout: 10_000 });
       const triggerBox = await trigger.boundingBox();
       expect(triggerBox).toBeTruthy();
@@ -208,6 +221,16 @@ describe("organization share control", () => {
     }
   }, 45_000);
 });
+
+async function expectHeaderFits(header: Locator, width: number): Promise<void> {
+  const box = await header.boundingBox();
+  expect(box).toBeTruthy();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.width).toBeLessThanOrEqual(width);
+  expect(box!.height).toBeGreaterThan(40);
+  expect(box!.height).toBeLessThan(96);
+  expect(await header.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+}
 
 async function expectVisibleLabel(locator: Locator, minWidth: number): Promise<void> {
   const box = await locator.boundingBox();
